@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Corum workspace configuration",
+  "type": "object",
+  "required": ["schema", "workspace", "canvas", "calendar"],
+  "properties": {
+    "schema": {"const": 1},
+    "workspace": {
+      "type": "object",
+      "required": ["timezone", "term"],
+      "properties": {"timezone": {"type": "string"}, "term": {"type": "string"}}
+    },
+    "canvas": {
+      "type": "object",
+      "required": ["host"],
+      "properties": {"host": {"type": "string", "format": "uri"}}
+    },
+    "features": {"type": "object"},
+    "jira": {"type": "object"},
+    "calendar": {
+      "type": "object",
+      "required": ["timetable", "term"],
+      "properties": {"timetable": {"type": "string"}, "term": {"type": "string"}}
+    }
+  }
+}

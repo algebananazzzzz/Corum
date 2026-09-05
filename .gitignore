@@ -1,2 +1,5 @@
 .worktrees/
 .superpowers/
+*.egg-info/
+__pycache__/
+*.py[cod]

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "corum"
+version = "0.1.0"
+description = "Configuration and tooling for private Corum academic vaults"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2,<3",
+    "PyYAML>=6",
+]
+
+[project.scripts]
+corum = "corum.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    'ignore:Field name "schema".*shadows an attribute in parent "BaseModel":UserWarning',
+]

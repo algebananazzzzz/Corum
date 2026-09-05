@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Corum course configuration",
+  "type": "object",
+  "required": ["schema", "code", "canvas"],
+  "properties": {
+    "schema": {"const": 1},
+    "code": {"type": "string"},
+    "canvas": {
+      "type": "object",
+      "required": ["id", "sources"],
+      "properties": {
+        "id": {"type": "integer", "exclusiveMinimum": 0},
+        "sources": {
+          "type": "array",
+          "items": {"enum": ["announcements", "assignments", "files", "pages", "modules", "syllabus"]}
+        },
+        "folders": {"type": "object", "additionalProperties": {"type": "string"}}
+      }
+    },
+    "features": {"type": "object"},
+    "jira": {"type": "object", "properties": {"epic": {"type": "string"}}},
+    "wiki": {"type": "object", "properties": {"split_rules": {"type": "string"}}}
+  }
+}
