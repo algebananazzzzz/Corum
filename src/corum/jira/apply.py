@@ -9,11 +9,12 @@ from typing import Annotated, Any, Literal
 from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from corum.config import CourseConfig, load_workspace, resolve_features
-from corum.run import AppliedItem, StageFailure, StageResult
+from corum.run import AppliedItem, RunManifest, StageFailure, StageResult
 from corum.state import (
     latest_stage_requires_reconciliation,
     read_latest_run,
     update_latest_run_stage,
+    write_latest_run,
 )
 from corum.validation import (
     require_https_origin,
@@ -341,11 +342,22 @@ def _stage_result(result: ApplyResult) -> StageResult:
 
 
 def _record_result(vault: Path, course: CourseConfig, result: ApplyResult) -> ApplyResult:
-    update_latest_run_stage(
-        vault / "courses" / course.code,
+    course_dir = vault / "courses" / course.code
+    stage = _stage_result(result)
+    updated = update_latest_run_stage(
+        course_dir,
         "jira",
-        _stage_result(result).model_dump(mode="json"),
+        stage.model_dump(mode="json"),
     )
+    if not updated and result.reconciliation_required:
+        workspace = load_workspace(vault)
+        manifest = RunManifest.create(
+            course.code,
+            resolve_features(workspace, course).model_dump(),
+            timezone=workspace.workspace.timezone,
+        )
+        manifest.jira = stage
+        write_latest_run(course_dir, manifest.model_dump(mode="json"))
     return result
 
 

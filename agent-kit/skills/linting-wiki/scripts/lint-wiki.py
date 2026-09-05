@@ -300,7 +300,13 @@ def finalize(
         if result["path"] is not None:
             _wiki_path(course, result["path"], must_exist=False)
 
-    findings = lint(vault, code, pending, pending_null)
+    failure_only_first_use = (
+        bool(payload["failures"])
+        and not payload["sources"]
+        and not payload["applied"]
+        and not (course / "wiki").exists()
+    )
+    findings = [] if failure_only_first_use else lint(vault, code, pending, pending_null)
     if findings:
         return findings, None
 

@@ -407,6 +407,45 @@ async def test_missing_create_key_returns_structured_reconciliation_required_res
 
 
 @pytest.mark.asyncio
+async def test_uncertain_jira_write_without_manifest_persists_retry_barrier(tmp_path):
+    write_workspace(tmp_path)
+    write_course(tmp_path, "CS3103")
+    course = load_course(tmp_path, "CS3103")
+    plan = JiraPlan.model_validate(
+        {
+            "schema": 1,
+            "course": "CS3103",
+            "epic": "STUDY-1",
+            "actions": [
+                {
+                    "action": "create",
+                    "issue": {
+                        "type": "Task",
+                        "parent": "STUDY-1",
+                        "summary": "Created but key missing",
+                    },
+                }
+            ],
+        }
+    )
+
+    class MissingKeyClient(RecordingClient):
+        async def create_issue(self, fields):
+            self.events.append(("create", fields))
+            return None
+
+    result = await apply_plan(tmp_path, course, plan, client=MissingKeyClient())
+
+    assert result.reconciliation_required is True
+    latest = json.loads((tmp_path / "courses/CS3103/state/latest-run.json").read_text())
+    assert latest["jira"]["status"] == "failed"
+    assert latest["jira"]["reconciliation_required"] is True
+    assert latest["jira"]["retry_safe"] is False
+    with pytest.raises(jira_apply.ReconciliationRequired, match="empty plan"):
+        await apply_plan(tmp_path, course, plan, client=FailIfCalledClient())
+
+
+@pytest.mark.asyncio
 async def test_fetch_failure_preserves_every_known_remote_write_in_partial_result(tmp_path):
     write_workspace(tmp_path)
     write_course(tmp_path, "CS3103")

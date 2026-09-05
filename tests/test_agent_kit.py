@@ -490,6 +490,58 @@ def test_failed_wiki_finalization_records_failure_without_creating_wiki_state(tm
     assert latest["wiki"]["retry_safe"] is False
 
 
+def test_first_use_wiki_failure_is_recorded_without_a_wiki_directory(tmp_path):
+    course = tmp_path / "courses/DEMO"
+    (course / "state").mkdir(parents=True)
+    manifest = _write_finalizable_run(course)
+    payload = tmp_path / "finalize.json"
+    payload.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "run_id": manifest.run_id,
+                "course": manifest.course,
+                "sources": [],
+                "applied": [],
+                "failures": [
+                    {
+                        "id": "wiki:create:topic",
+                        "action": "create",
+                        "path": "wiki/concepts/Topic.md",
+                        "source_ids": ["canvas:pages:topic"],
+                        "error": "authoring outcome could not be confirmed",
+                        "write_state": "not_applied",
+                        "retry_safe": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(AGENT_KIT / "skills/linting-wiki/scripts/lint-wiki.py"),
+            "DEMO",
+            "--finalize",
+            str(payload),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout.strip() == "DEMO wiki failed recorded"
+    assert not (course / "wiki").exists()
+    assert not (course / "state/wiki.json").exists()
+    latest = json.loads((course / "state/latest-run.json").read_text())
+    assert latest["wiki"]["status"] == "failed"
+    assert latest["wiki"]["failures"][0]["id"] == "wiki:create:topic"
+
+
 def test_linter_finalization_rejects_payload_not_matching_exact_manifest_source(tmp_path):
     course = tmp_path / "courses/DEMO"
     (course / "state").mkdir(parents=True)
