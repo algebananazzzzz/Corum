@@ -106,3 +106,126 @@ async def test_download_rejects_non_http_asset_schemes_before_request(tmp_path: 
     )
     with pytest.raises(ValueError, match="http"):
         await client.download("file:///etc/passwd", tmp_path / "passwd")
+
+
+@pytest.mark.asyncio
+async def test_rejected_download_url_does_not_echo_its_verifier(tmp_path: Path):
+    client = CanvasClient("https://canvas.example.edu", "secret")
+
+    with pytest.raises(ValueError) as caught:
+        await client.download(
+            "file:///private/path?verifier=super-secret",
+            tmp_path / "file.pdf",
+        )
+
+    assert "super-secret" not in str(caught.value)
+    assert "verifier" not in str(caught.value).lower()
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "http://canvas.example.edu",
+        "https://canvas.example.edu/canvas",
+        "https://student@canvas.example.edu",
+        "https://canvas.example.edu?tenant=other",
+    ],
+)
+def test_client_rejects_non_https_or_non_origin_canvas_hosts(host):
+    with pytest.raises(ValueError, match="Canvas host must be an HTTPS origin"):
+        CanvasClient(host, "secret")
+
+
+@pytest.mark.asyncio
+async def test_get_all_rejects_cross_origin_pagination_before_sending_credentials():
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.host == "canvas.example.edu":
+            return httpx.Response(
+                200,
+                json=[{"id": 1}],
+                headers={"Link": '<https://attacker.example/api/items?page=2>; rel="next"'},
+            )
+        return httpx.Response(200, json=[{"id": 2}])
+
+    client = CanvasClient(
+        "https://canvas.example.edu",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ValueError, match="Canvas API URL must stay on configured origin"):
+        await client.get_all("/courses/1/files")
+
+    assert [request.url.host for request in requests] == ["canvas.example.edu"]
+
+
+@pytest.mark.asyncio
+async def test_get_all_rejects_credential_bearing_pagination_urls():
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json=[{"id": 1}],
+            headers={
+                "Link": '<https://user:password@canvas.example.edu/api/v1/items?page=2>; rel="next"'
+            },
+        )
+
+    client = CanvasClient(
+        "https://canvas.example.edu",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ValueError, match="credential-free"):
+        await client.get_all("/courses/1/files")
+
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_authenticated_api_rejects_a_cross_origin_redirect():
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.host == "canvas.example.edu":
+            return httpx.Response(302, headers={"Location": "https://attacker.example/steal"})
+        return httpx.Response(200, json={"stolen": True})
+
+    client = CanvasClient(
+        "https://canvas.example.edu",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ValueError, match="Canvas API URL must stay on configured origin"):
+        await client.get("/courses/1")
+
+    assert [request.url.host for request in requests] == ["canvas.example.edu"]
+
+
+@pytest.mark.asyncio
+async def test_download_http_error_redacts_canvas_verifier_from_exception(tmp_path: Path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="forbidden")
+
+    client = CanvasClient(
+        "https://canvas.example.edu",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(Exception) as caught:
+        await client.download(
+            "https://canvas.example.edu/files/1?download=1&verifier=super-secret",
+            tmp_path / "file.pdf",
+        )
+
+    assert "super-secret" not in str(caught.value)
+    assert "verifier" not in str(caught.value).lower()

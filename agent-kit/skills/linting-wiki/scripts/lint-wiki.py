@@ -6,8 +6,16 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
+import sysconfig
 from pathlib import Path
+
+from jsonschema import ValidationError as SchemaValidationError
+from jsonschema import validate as validate_json
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
+
+from corum.run import AppliedItem, StageFailure, StageResult
+from corum.state import finalize_wiki_state, read_latest_run
 
 
 MARKER = re.compile(r"%%\s*(\S+)\s+p([\d,\s-]+?)\s*%%")
@@ -56,20 +64,12 @@ def page_count(path: Path) -> int | None:
     if path.suffix.lower() != ".pdf":
         return None
     try:
-        completed = subprocess.run(
-            ["pdfinfo", str(path)], capture_output=True, text=True, check=False
-        )
-    except OSError as error:
+        pages = len(PdfReader(path, strict=True).pages)
+    except (OSError, PdfReadError, ValueError) as error:
         raise ValueError(f"could not inspect PDF {path}: {error}") from error
-    if completed.returncode != 0:
-        detail = completed.stderr.strip() or "pdfinfo failed"
-        raise ValueError(f"could not inspect PDF {path}: {detail}")
-    for line in completed.stdout.splitlines():
-        if line.startswith("Pages:"):
-            pages = int(line.split()[1])
-            if pages > 0:
-                return pages
-    raise ValueError(f"could not inspect PDF {path}: pdfinfo reported no page count")
+    if pages <= 0:
+        raise ValueError(f"could not inspect PDF {path}: PDF has no pages")
+    return pages
 
 
 def raw_source(course: Path, relative: str) -> Path:
@@ -194,6 +194,177 @@ def lint(
     return sorted(findings)
 
 
+def _schema(name: str) -> dict:
+    candidates = (
+        Path(sysconfig.get_path("data")) / "share/corum/schemas" / name,
+        Path(__file__).resolve().parents[4] / "schemas" / name,
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return json.loads(candidate.read_text(encoding="utf-8"))
+    raise ValueError(f"installed Corum schema is missing: {name}")
+
+
+def _course_path(vault: Path, code: str) -> Path:
+    vault = vault.resolve()
+    courses = (vault / "courses").resolve()
+    course = (courses / code).resolve()
+    if not course.is_relative_to(courses):
+        raise ValueError("course resolves outside courses directory")
+    return course
+
+
+def _wiki_path(course: Path, relative: str, *, must_exist: bool) -> Path:
+    wiki = (course / "wiki").resolve()
+    target = (course / relative).resolve()
+    if not target.is_relative_to(wiki):
+        raise ValueError(f"wiki result path resolves outside course wiki: {relative}")
+    if must_exist and not target.is_file():
+        raise ValueError(f"wiki result path does not exist: {relative}")
+    return target
+
+
+def finalize(
+    vault: Path,
+    code: str,
+    payload_path: Path,
+) -> tuple[list[str], StageResult | None]:
+    try:
+        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    except OSError as error:
+        raise ValueError(f"could not read finalization payload {payload_path}: {error}") from error
+    validate_json(payload, _schema("wiki-finalization.schema.json"))
+    if payload["course"] != code:
+        raise ValueError(
+            f"finalization course {payload['course']!r} does not match selected course {code!r}"
+        )
+
+    course = _course_path(vault, code)
+    latest = read_latest_run(course)
+    if latest is None:
+        raise ValueError("latest-run.json is required for wiki finalization")
+    if latest["course"] != code or latest["run_id"] != payload["run_id"]:
+        raise ValueError("finalization payload does not match current run manifest")
+    if not latest["effective_features"]["wiki"]:
+        raise ValueError("wiki is disabled in the current run manifest")
+
+    changes = {item["id"]: item for item in latest["canvas"]["changes"]}
+    finalized_ids: set[str] = set()
+    finalized_paths: set[str] = set()
+    ingested: dict[str, str | None] = {}
+    pending: list[str] = []
+    pending_null: list[str] = []
+    for source in payload["sources"]:
+        identifier = source["id"]
+        if identifier in finalized_ids or source["path"] in finalized_paths:
+            raise ValueError("finalization payload has duplicate source identity or path")
+        change = changes.get(identifier)
+        if change is None or change.get("raw_path") != source["path"]:
+            raise ValueError(
+                f"source {identifier!r} path does not match current run manifest"
+            )
+        raw_source(course, source["path"])
+        finalized_ids.add(identifier)
+        finalized_paths.add(source["path"])
+        ingested[source["path"]] = source["provenance"]
+        if source["provenance"] is None:
+            pending_null.append(source["path"])
+        else:
+            pending.append(f"{source['provenance']}={source['path']}")
+
+    known_ids = set(changes)
+    result_ids: set[str] = set()
+    for result in [*payload["applied"], *payload["failures"]]:
+        if result["id"] in result_ids:
+            raise ValueError(f"duplicate wiki result id: {result['id']}")
+        result_ids.add(result["id"])
+        unknown = sorted(set(result["source_ids"]) - known_ids)
+        if unknown:
+            raise ValueError(
+                f"wiki result {result['id']!r} references unknown source(s): {', '.join(unknown)}"
+            )
+    failed_source_ids = {
+        source_id
+        for failure in payload["failures"]
+        for source_id in failure["source_ids"]
+    }
+    unsafe_finalization = sorted(finalized_ids & failed_source_ids)
+    if unsafe_finalization:
+        raise ValueError(
+            "failed wiki dependencies cannot be finalized: "
+            + ", ".join(unsafe_finalization)
+        )
+    for result in payload["applied"]:
+        _wiki_path(course, result["path"], must_exist=True)
+    for result in payload["failures"]:
+        if result["path"] is not None:
+            _wiki_path(course, result["path"], must_exist=False)
+
+    findings = lint(vault, code, pending, pending_null)
+    if findings:
+        return findings, None
+
+    applied = [
+        AppliedItem(
+            id=f"wiki:finalize:{source['id']}",
+            action="finalize",
+            target=source["path"],
+            details={
+                "source_id": source["id"],
+                "provenance": source["provenance"],
+            },
+        )
+        for source in payload["sources"]
+    ]
+    applied.extend(
+        AppliedItem(
+            id=result["id"],
+            action=result["action"],
+            target=result["path"],
+            details={"source_ids": result["source_ids"]},
+        )
+        for result in payload["applied"]
+    )
+    failures = [
+        StageFailure(
+            id=result["id"],
+            action=result["action"],
+            target=result["path"],
+            error=result["error"],
+            write_state=result["write_state"],
+            retry_safe=result["retry_safe"],
+            details={"source_ids": result["source_ids"]},
+        )
+        for result in payload["failures"]
+    ]
+    if failures and applied:
+        status = "partial"
+    elif failures:
+        status = "failed"
+    elif applied:
+        status = "applied"
+    else:
+        status = "up_to_date"
+    reconciliation_required = any(
+        failure.write_state != "not_applied" for failure in failures
+    )
+    stage = StageResult(
+        status=status,
+        applied=applied,
+        failures=failures,
+        reconciliation_required=reconciliation_required,
+        retry_safe=all(failure.retry_safe for failure in failures)
+        and not reconciliation_required,
+    )
+    finalize_wiki_state(
+        course,
+        expected_run_id=payload["run_id"],
+        ingested=ingested,
+        stage=stage.model_dump(mode="json"),
+    )
+    return [], stage
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("course")
@@ -212,17 +383,41 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="RELATIVE_PATH",
         help="validate a planned null-provenance source without changing wiki state",
     )
+    parser.add_argument(
+        "--finalize",
+        type=Path,
+        metavar="PAYLOAD.json",
+        help="validate and atomically commit an exact wiki finalization payload",
+    )
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
+    finalization: StageResult | None = None
     try:
-        findings = lint(args.vault, args.course, args.pending, args.pending_null)
-    except (OSError, ValueError, json.JSONDecodeError) as error:
+        if args.finalize is not None and (args.pending or args.pending_null):
+            raise ValueError("--finalize cannot be combined with --pending options")
+        if args.finalize is not None:
+            findings, finalization = finalize(
+                args.vault, args.course, args.finalize
+            )
+        else:
+            findings = lint(
+                args.vault, args.course, args.pending, args.pending_null
+            )
+    except (OSError, ValueError, RuntimeError, SchemaValidationError, json.JSONDecodeError) as error:
         print(f"lint-wiki: {error}")
         return 1
-    print("\n".join(findings) if findings else f"{args.course} clean")
+    if findings:
+        print("\n".join(findings))
+        return 2
+    if finalization is None:
+        print(f"{args.course} clean")
+    elif finalization.status in {"partial", "failed"}:
+        print(f"{args.course} wiki {finalization.status} recorded")
+    else:
+        print(f"{args.course} finalized")
     return 0
 
 

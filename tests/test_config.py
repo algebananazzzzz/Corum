@@ -117,3 +117,63 @@ def test_jira_course_rejects_invalid_epic_key(tmp_path):
 
     with pytest.raises(ValidationError):
         load_course(tmp_path, "CS3103")
+
+
+def test_workspace_rejects_non_iana_timezone(tmp_path):
+    write_workspace(tmp_path)
+    value = yaml.safe_load((tmp_path / "corum.yaml").read_text())
+    value["workspace"]["timezone"] = "Mars/Olympus_Mons"
+    (tmp_path / "corum.yaml").write_text(yaml.safe_dump(value))
+
+    with pytest.raises(ValidationError, match="timezone"):
+        load_workspace(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("target", "field", "value"),
+    [
+        ("workspace", "unexpected", True),
+        ("canvas", "unexpected", True),
+        ("calendar", "unexpected", True),
+        ("features", "unexpected", {"enabled": True}),
+    ],
+)
+def test_workspace_rejects_unknown_fields_recursively(tmp_path, target, field, value):
+    write_workspace(tmp_path)
+    document = yaml.safe_load((tmp_path / "corum.yaml").read_text())
+    document.setdefault(target, {})[field] = value
+    (tmp_path / "corum.yaml").write_text(yaml.safe_dump(document))
+
+    with pytest.raises(ValidationError, match="extra"):
+        load_workspace(tmp_path)
+
+
+def test_disabled_jira_still_rejects_yaml_credentials_without_validating_its_endpoint(
+    tmp_path,
+):
+    write_workspace(
+        tmp_path,
+        features={"jira": {"enabled": False}, "wiki": {"enabled": True}},
+    )
+    document = yaml.safe_load((tmp_path / "corum.yaml").read_text())
+    document["jira"] = {
+        "site": "http://dormant.example.invalid/path",
+        "project": "../DORMANT",
+        "api_token": "must-not-live-in-yaml",
+    }
+    (tmp_path / "corum.yaml").write_text(yaml.safe_dump(document))
+
+    with pytest.raises(ValueError, match="credential-like"):
+        load_workspace(tmp_path, validate_jira=False)
+
+
+def test_course_rejects_credential_like_keys_hidden_in_free_form_mappings(tmp_path):
+    write_workspace(tmp_path)
+    write_course(tmp_path, "CS3103")
+    path = tmp_path / "courses/CS3103/course.yaml"
+    document = yaml.safe_load(path.read_text())
+    document["canvas"]["folders"] = {"api_token": "lectures"}
+    path.write_text(yaml.safe_dump(document))
+
+    with pytest.raises(ValueError, match="credential-like"):
+        load_course(tmp_path, "CS3103")

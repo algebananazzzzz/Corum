@@ -80,7 +80,9 @@ calendar:
 ```
 
 Jira is enabled by default. If disabled for the whole vault, the workspace `jira`
-mapping may be omitted.
+mapping may be omitted. `workspace.timezone` must be an IANA zone name and controls
+Canvas date conversion and run IDs. Canvas and Jira hosts must be credential-free
+HTTPS origins (no path, query, fragment, or embedded user information).
 
 ## Course configuration
 
@@ -135,9 +137,12 @@ corum sync --all
 ```
 
 Capture writes successful sources below `courses/COURSE/raw/`, advances only their
-entries in `state/canvas.json`, and writes `state/latest-run.json`. A failed source
-remains retryable and is reported as unknown. This command does not invoke an LLM,
-write Jira, or author wiki prose.
+entries in `state/canvas.json`, and writes `state/latest-run.json`; a missing Canvas
+state file is bootstrapped from the selected course's watched sources. Manifests
+include stable item IDs, exact raw paths, structured details, per-source status, and
+independent downstream stage results. A failed source remains retryable and is
+reported as unknown. This command does not invoke an LLM, write Jira, or author wiki
+prose.
 
 ## Agent-facing sync
 
@@ -152,8 +157,11 @@ routes the request to `skills/sync-course/SKILL.md`. That workflow:
 6. reports completed, failed, disabled, and retryable work separately.
 
 The LLM is the only wiki author. Deterministic validators report objective defects
-but do not generate replacement prose. `state/wiki.json` stores only finalized
-source-to-provenance mappings, never page IDs or content hashes.
+but do not generate replacement prose. The packaged linter's `--finalize` mode
+validates an exact schema-1 payload and lint results before atomically updating wiki
+state and the current run stage. Agents never edit those machine-owned files
+directly. `state/wiki.json` stores only finalized source-to-provenance mappings,
+never page IDs or content hashes.
 
 ## Exact Jira application
 
@@ -165,8 +173,12 @@ corum jira apply COURSE < approved-plan.json
 ```
 
 Create, update, and transition actions are a closed union. The command validates the
-whole plan before the first write, applies sequentially, and atomically updates the
-normalized Jira cache after each successful action.
+whole plan and proves every update/transition target belongs to the configured epic
+before the first write. It applies sequentially, atomically updates the normalized
+Jira cache after each successful action, and returns structured applied/failure and
+retry evidence. An uncertain or partial write blocks nonempty plans until an exact
+empty-plan reconciliation succeeds; fresh scoping and approval against the refreshed
+cache are then required so the old plan cannot be duplicated automatically.
 
 ## No protocol-server dependency
 

@@ -55,14 +55,14 @@ def require_schema_one(value: object) -> int:
     return 1
 
 
-def require_https_origin(value: object) -> str:
+def require_https_origin(value: object, name: str = "Jira site") -> str:
     if not isinstance(value, str):
-        raise ValueError("Jira site must be an HTTPS origin")
+        raise ValueError(f"{name} must be an HTTPS origin")
     try:
         parsed = urlsplit(value)
         parsed_port = parsed.port
     except ValueError as error:
-        raise ValueError("Jira site must be an HTTPS origin") from error
+        raise ValueError(f"{name} must be an HTTPS origin") from error
     if (
         parsed.scheme.lower() != "https"
         or not parsed.hostname
@@ -72,7 +72,7 @@ def require_https_origin(value: object) -> str:
         or parsed.query
         or parsed.fragment
     ):
-        raise ValueError("Jira site must be an HTTPS origin")
+        raise ValueError(f"{name} must be an HTTPS origin")
     host = parsed.hostname
     if ":" in host:
         host = f"[{host}]"

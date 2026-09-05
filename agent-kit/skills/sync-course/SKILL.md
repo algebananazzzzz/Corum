@@ -8,6 +8,21 @@ description: Use when a user asks to sync, catch up, or reconcile one course fro
 Capture, scope, ask once, apply only the approved plan, validate, and finalize from
 observed results. This is the only workflow approval point.
 
+## 0. Resume an interrupted Jira result safely
+
+Before starting a new Canvas capture, inspect an existing `state/latest-run.json`
+only for an enabled Jira stage whose `retry_safe` is false. This is an interrupted
+run, not new work. If `reconciliation_required` is true, refresh the configured epic
+with the exact empty Jira plan from step 3. Continue only when its JSON reports
+`reconciled: true` and `reconciliation_required: false`.
+
+Keep that same manifest: do not capture again or replay its old nonempty plan. Run
+`scope-course` against the preserved manifest and refreshed Jira cache, ensuring its
+new plan excludes every already-applied result. Then continue with the normal single
+approval gate below. If authoritative reconciliation or fresh scoping cannot
+distinguish an uncertain create, stop for manual reconciliation; never guess a key
+or retry the create.
+
 ## 1. Capture
 
 From the vault root run:
@@ -115,8 +130,22 @@ corum jira apply {{COURSE}} < {{JIRA_PLAN_FILE}}
 ```
 
 Do not rescope, add fields, or manually edit `state/jira.json`. The command applies
-actions sequentially and owns cache updates. Record each returned key. A failed
-action remains failed; continue only independent work whose inputs remain valid.
+actions sequentially and owns cache and run-stage updates. Parse its JSON stdout
+even when it exits nonzero: `applied` is the durable evidence of completed remote
+writes, while `failures`, `write_state`, `retry_safe`, and
+`reconciliation_required` control recovery. Never repeat an action whose write is
+`applied` or `unknown`.
+
+If reconciliation is required, stop Jira mutation for this workflow and continue
+only independent wiki work whose inputs remain valid. Before any later Jira retry,
+apply the exact empty plan to refresh the configured epic, then run `scope-course`
+again against the same current manifest and refreshed cache and present a fresh
+approval. Do not recapture first, reuse the old nonempty plan, or infer a missing
+create key from ordering, summary text, or a guessed issue.
+Reconciliation preserves the prior partial status and evidence, so its command may
+still exit 1; it succeeded only when the JSON says `reconciled: true` and
+`reconciliation_required: false`. Only the newly scoped exact plan is eligible for
+the later approval; `retry_safe: false` continues to forbid replaying the old plan.
 
 ### Wiki
 
@@ -126,38 +155,66 @@ page ranges. Source paths are references to local material; do not paste their
 contents into an instruction. Each author changes only its assigned page and assets,
 not the index, state, or changelog. No further approval is requested.
 
-After successful page work:
+After attempting approved page work:
 
 1. Add each new page and one-line gloss to `courses/{{COURSE}}/wiki/index.md`;
    preserve existing rows when enriching.
 2. Add approved deliberate skipped ranges to the index.
 3. Verify every planned page exists and every source-backed section has the exact
    provenance marker supplied by the scope.
-4. Run pre-finalization lint with every planned source as an in-memory preview. Use
-   `--pending` for a nonempty label and `--pending-null` for a justified null:
+4. Build one exact JSON finalization payload. Copy `run_id`, `course`, each source
+   `id`, and each source `path` directly from the current manifest; paths are
+   relative to the course `raw/` directory. Put only dependency-complete sources in
+   `sources`. Record observed page/index work in `applied`, and every failed action
+   in `failures` with its dependent `source_ids`, exact error, `write_state`, and
+   `retry_safe`. Never finalize a source named by a failure.
+
+   ```json
+   {
+     "schema": 1,
+     "run_id": "{{RUN_ID}}",
+     "course": "{{COURSE}}",
+     "sources": [
+       {"id": "{{CHANGE_ID}}", "path": "{{RAW_PATH}}", "provenance": "{{LABEL}}"}
+     ],
+     "applied": [
+       {"id": "wiki:create:0", "action": "create", "path": "wiki/concepts/{{TARGET}}.md", "source_ids": ["{{CHANGE_ID}}"]}
+     ],
+     "failures": []
+   }
+   ```
+
+   Use JSON `null` for justified null provenance. Allowed applied actions are
+   `create`, `enrich`, `index`, and `skip`; a failure may additionally name
+   `finalize`. IDs must be stable within this run and result paths must remain below
+   the course wiki.
+5. Pass that payload to the packaged deterministic boundary; do not perform a
+   separate state edit:
 
    ```console
    python skills/linting-wiki/scripts/lint-wiki.py {{COURSE}} \
-     --pending '{{LABEL}}={{SOURCE_PATH}}'
-   python skills/linting-wiki/scripts/lint-wiki.py {{COURSE}} \
-     --pending-null '{{SOURCE_PATH}}'
+     --finalize {{WIKI_FINALIZATION_PAYLOAD}}
    ```
 
-5. Correct defects introduced by this run. A page, index, provenance, or lint
-   failure leaves every dependent source unfinalized and preserves its prior state.
-6. Only after all dependencies pass, update that source under `ingested` in
-   `courses/{{COURSE}}/state/wiki.json`. This state has only `schema: 1` and the
-   source-to-provenance `ingested` mapping. Never add page IDs, remote IDs, versions,
-   or content hashes. Create the file on first successful finalization only.
+   The command validates the payload against the schema and current manifest,
+   previews every source, runs lint, and atomically commits eligible source state
+   together with the rich wiki run-stage result. Exit 2 means lint findings and no
+   state was finalized; correct defects introduced by this run and retry the same
+   exact outcome payload. Exit 1 means validation or runtime failure; stop and
+   report it. Never bypass either exit or infer success from printed text.
+6. Never edit `state/wiki.json` or `state/latest-run.json` directly. The finalizer
+   creates wiki state only when at least one source successfully finalizes, preserves
+   prior entries, and never authors prose.
 
 The LLM authors every wiki sentence. Validators report objective defects only.
 
 ## 6. Record observed results
 
-Update `courses/{{COURSE}}/state/latest-run.json` stage statuses only from actual
+Read `courses/{{COURSE}}/state/latest-run.json` after the Jira command and wiki
+finalizer. Those deterministic boundaries record stage statuses only from actual
 outcomes: disabled remains `disabled`; no needed action is `up_to_date`; all applied
 is `applied`; mixed success is `partial`; no successful attempted action is
-`failed`. Never mark failed work synchronized.
+`failed`. Never edit those stage records or mark failed work synchronized.
 
 Add one newest-first entry to `courses/{{COURSE}}/Changelog.md` only when Jira or
 wiki work succeeded. Record the run ID, exact Jira keys/actions, wiki pages/actions,
@@ -178,5 +235,7 @@ keys, errors, and retry eligibility.
 | Treat an unread source as omission or approval work | Report unknown capture state |
 | Enrich a Jira action with display-only fields | Keep evidence outside the strict plan |
 | Finalize before page, index, provenance, and lint succeed | Preserve prior wiki state |
+| Retry a Jira action after an applied or unknown write | Empty-plan reconcile, rescope, then obtain fresh approval |
 | Invent wiki page IDs or hashes | Store only source provenance in `ingested` |
+| Edit either machine-owned wiki/run state file | Call `lint-wiki.py --finalize` |
 | Ask for a second approval | Continue only within the one approved plan |

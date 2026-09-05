@@ -16,7 +16,7 @@ from .canvas.sync import sync_course
 from .config import resolve_features
 from .jira import JiraClient
 from .jira.apply import JiraDisabled, JiraPlan, apply_plan
-from .workspace import initialize, validate_vault
+from .workspace import initialize, validate_selected_courses, validate_vault
 
 
 def _path(value: str) -> Path:
@@ -70,7 +70,11 @@ def main(argv: list[str] | None = None) -> int:
             if not args.all and not args.course:
                 raise ValueError("provide at least one course code or --all")
             vault = Path(".").resolve()
-            _, available = validate_vault(vault)
+            _, available = (
+                validate_vault(vault)
+                if args.all
+                else validate_selected_courses(vault, args.course)
+            )
             by_code = {course.code.upper(): course for course in available}
             wanted = sorted(by_code) if args.all else [code.upper() for code in args.course]
             missing = [code for code in wanted if code not in by_code]
@@ -118,6 +122,8 @@ def main(argv: list[str] | None = None) -> int:
                 client = JiraClient(str(workspace.jira.site), email, token)
                 result = asyncio.run(apply_plan(vault, course, plan, client))
                 print(json.dumps(result.model_dump(mode="json"), indent=2))
+                if result.status in {"partial", "failed"}:
+                    return 1
     except (HTTPError, OSError, RuntimeError, ValueError, ValidationError) as error:
         print(f"corum: {error}")
         return 1

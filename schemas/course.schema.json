@@ -2,12 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Corum course configuration",
   "type": "object",
+  "additionalProperties": false,
   "required": ["schema", "code", "canvas"],
   "properties": {
     "schema": {"const": 1},
     "code": {"type": "string"},
     "canvas": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["id", "sources"],
       "properties": {
         "id": {"type": "integer", "exclusiveMinimum": 0},
@@ -15,17 +17,56 @@
           "type": "array",
           "items": {"enum": ["announcements", "assignments", "files", "pages", "modules", "syllabus"]}
         },
-        "folders": {"type": "object", "additionalProperties": {"type": "string"}}
+        "folders": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/credentialFreeKey"},
+          "additionalProperties": {"type": "string"}
+        }
       }
     },
-    "features": {"type": "object"},
+    "features": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "jira": {
+          "oneOf": [
+            {"$ref": "#/$defs/featureSwitch"},
+            {"type": "null"}
+          ]
+        },
+        "wiki": {
+          "oneOf": [
+            {"$ref": "#/$defs/featureSwitch"},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
     "jira": {
-      "type": "object",
+      "type": ["object", "null"],
+      "additionalProperties": false,
       "required": ["epic"],
       "properties": {
         "epic": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$"}
       }
     },
-    "wiki": {"type": "object", "properties": {"split_rules": {"type": "string"}}}
+    "wiki": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {"split_rules": {"type": "string"}}
+    }
+  },
+  "$defs": {
+    "featureSwitch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"enabled": {"type": "boolean"}}
+    },
+    "credentialFreeKey": {
+      "type": "string",
+      "not": {
+        "pattern": "(?:^|[_-])(?:[Tt][Oo][Kk][Ee][Nn]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss]?|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]|[Aa][Pp][Ii][^A-Za-z0-9]?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss][^A-Za-z0-9]?[Tt][Oo][Kk][Ee][Nn]|[Cc][Ll][Ii][Ee][Nn][Tt][^A-Za-z0-9]?[Ss][Ee][Cc][Rr][Ee][Tt]|[Cc][Aa][Nn][Vv][Aa][Ss][^A-Za-z0-9]?[Tt][Oo][Kk][Ee][Nn]|[Jj][Ii][Rr][Aa][^A-Za-z0-9]?[Tt][Oo][Kk][Ee][Nn])(?:[_-]|$)"
+      }
+    }
   }
 }

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime, tzinfo
 import hashlib
 import json
 import os
@@ -11,8 +11,14 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from corum.config import CourseConfig, load_workspace, resolve_features
-from corum.run import RunManifest
-from corum.state import course_sync_lock, read_canvas_state, write_canvas_state, write_latest_run
+from corum.run import Change, Failure, RunManifest, StageResult
+from corum.state import (
+    course_sync_lock,
+    read_canvas_state,
+    read_latest_run,
+    write_canvas_state,
+    write_latest_run,
+)
 
 from . import convert, placement
 from .client import CanvasClient
@@ -83,9 +89,59 @@ def changed_pages(pages: list[dict], seen: dict) -> list[dict]:
     return changed
 
 
-def announcement_name(record: dict) -> str:
+def _zone(value: str | tzinfo) -> tzinfo:
+    from zoneinfo import ZoneInfo
+
+    return ZoneInfo(value) if isinstance(value, str) else value
+
+
+def _details(**values: object) -> dict[str, object]:
+    return {key: value for key, value in values.items() if value is not None}
+
+
+def _change(
+    source: str,
+    kind: str,
+    item_id: object,
+    summary: str,
+    raw_path: str | None,
+    **details: object,
+) -> Change:
+    identifier = str(item_id)
+    return Change(
+        id=f"canvas:{source}:{identifier}",
+        source=source,
+        item_id=identifier,
+        kind=kind,
+        summary=summary,
+        raw_path=raw_path,
+        details=_details(**details),
+    )
+
+
+def _failure(
+    source: str,
+    kind: str,
+    item_id: object | None,
+    error: str,
+    raw_path: str | None = None,
+    **details: object,
+) -> Failure:
+    identifier = None if item_id is None else str(item_id)
+    return Failure(
+        id=f"canvas:{source}" + (f":{identifier}" if identifier is not None else ""),
+        source=source,
+        item_id=identifier,
+        kind=kind,
+        error=error,
+        raw_path=raw_path,
+        details=_details(**details),
+    )
+
+
+def announcement_name(record: dict, timezone: str | tzinfo = UTC) -> str:
     timestamp = record.get("posted_at") or record.get("delayed_post_at") or record.get("created_at")
-    converted = convert.sgt(timestamp) if timestamp else None
+    converted = convert.local_time(timestamp, timezone) if timestamp else None
     return f"{converted[:10] if converted else 'undated'}-{convert.slug(record.get('title'))}"
 
 
@@ -95,8 +151,8 @@ def unique(target: Path, discriminator: str) -> Path:
     return target.with_name(f"{target.stem}-{convert.slug(discriminator)}{target.suffix}")
 
 
-def _now() -> str:
-    return datetime.now(convert.TZ).isoformat(timespec="seconds")
+def _now(timezone: str | tzinfo = UTC) -> str:
+    return datetime.now(_zone(timezone)).isoformat(timespec="seconds")
 
 
 def _under_raw(root: Path, relative: str) -> Path:
@@ -135,7 +191,11 @@ def write_body(path: Path, fields: dict, html: str, link_list: list[dict], image
     )
 
 
-def write_modules(path: Path, trees: list[tuple[dict, list[dict]]]) -> None:
+def write_modules(
+    path: Path,
+    trees: list[tuple[dict, list[dict]]],
+    timezone: str | tzinfo = UTC,
+) -> None:
     lines: list[str] = []
     for module, items in trees:
         lines.extend([f"## {module.get('name')}\n", "| # | Type | Title |", "| --- | --- | --- |"])
@@ -144,7 +204,9 @@ def write_modules(path: Path, trees: list[tuple[dict, list[dict]]]) -> None:
             lines.append(f"| {item.get('position')} | {item.get('type')} | {title} |")
         lines.append("")
     path.parent.mkdir(parents=True, exist_ok=True)
-    header = convert.frontmatter({"source": "canvas", "kind": "modules", "fetched": _now()})
+    header = convert.frontmatter(
+        {"source": "canvas", "kind": "modules", "fetched": _now(timezone)}
+    )
     path.write_text(header + "\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
@@ -170,22 +232,43 @@ async def fetch_announcements(
     seen: dict,
     dry_run: bool,
     canvas_host: str,
+    timezone: str | tzinfo = UTC,
 ):
     records = await client.get_all(f"/courses/{course_id}/discussion_topics", only_announcements=True)
-    changes: list[str] = []
+    changes: list[Change] = []
     entries: dict[str, str | None] = {}
-    failures: list[str] = []
+    failures: list[Failure] = []
     for record in new_announcements(records, seen):
-        changes.append(f"announcement {record['id']} · {record.get('title')}")
+        item_id = str(record["id"])
+        posted = convert.local_time(record.get("posted_at"), timezone)
+        relative = f"announcements/{announcement_name(record, timezone)}-{convert.slug(item_id)}.md"
+        summary = f"announcement {item_id} · {record.get('title')}"
+        details = _details(
+            title=record.get("title"),
+            author=record.get("user_name"),
+            posted=posted,
+            url=convert.strip_verifier(record.get("html_url")) if record.get("html_url") else None,
+        )
         if dry_run:
+            changes.append(
+                _change("announcements", "announcement", item_id, summary, relative, **details)
+            )
             continue
         html = record.get("message") or ""
-        target = unique(
-            _under_raw(course_dir / "raw", f"announcements/{announcement_name(record)}.md"),
-            str(record["id"]),
-        )
+        target = _under_raw(course_dir / "raw", relative)
         image_paths, problems = await _save_images(client, html, target.parent)
-        failures.extend(problems)
+        if problems:
+            failures.append(
+                _failure(
+                    "announcements",
+                    "announcement",
+                    item_id,
+                    f"announcement {item_id} not captured: {'; '.join(problems)}",
+                    relative,
+                    **details,
+                )
+            )
+            continue
         write_body(
             target,
             {
@@ -195,15 +278,17 @@ async def fetch_announcements(
                 "url": record.get("html_url"),
                 "title": record.get("title"),
                 "author": record.get("user_name"),
-                "posted": convert.sgt(record.get("posted_at")),
-                "fetched": _now(),
+                "posted": posted,
+                "fetched": _now(timezone),
             },
             html,
             convert.links(html, canvas_host),
             image_paths,
         )
-        if not problems:
-            entries[str(record["id"])] = convert.sgt(record.get("posted_at"))
+        entries[item_id] = posted
+        changes.append(
+            _change("announcements", "announcement", item_id, summary, relative, **details)
+        )
     return changes, entries, failures
 
 
@@ -214,20 +299,29 @@ async def fetch_assignments(
     seen: dict,
     dry_run: bool,
     canvas_host: str,
+    timezone: str | tzinfo = UTC,
 ):
     records = await client.get_all(f"/courses/{course_id}/assignments")
-    changes: list[str] = []
+    changes: list[Change] = []
     entries: dict[str, str | None] = {}
     for record in new_assignments(records, seen):
-        due = convert.sgt(record.get("due_at"))
-        changes.append(f"assignment {record['id']} · {record.get('name')} · due {due or 'none'}")
+        item_id = str(record["id"])
+        due = convert.local_time(record.get("due_at"), timezone)
+        relative = f"assignments/{convert.slug(record.get('name'))}-{convert.slug(item_id)}.md"
+        summary = f"assignment {item_id} · {record.get('name')} · due {due or 'none'}"
+        details = _details(
+            title=record.get("name"),
+            due=due,
+            points=record.get("points_possible"),
+            url=convert.strip_verifier(record.get("html_url")) if record.get("html_url") else None,
+        )
         if dry_run:
+            changes.append(
+                _change("assignments", "assignment", item_id, summary, relative, **details)
+            )
             continue
         html = record.get("description") or ""
-        target = unique(
-            _under_raw(course_dir / "raw", f"assignments/{convert.slug(record.get('name'))}.md"),
-            str(record["id"]),
-        )
+        target = _under_raw(course_dir / "raw", relative)
         write_body(
             target,
             {
@@ -238,13 +332,16 @@ async def fetch_assignments(
                 "title": record.get("name"),
                 "due": due,
                 "points": record.get("points_possible"),
-                "fetched": _now(),
+                "fetched": _now(timezone),
             },
             html,
             convert.links(html, canvas_host),
             {},
         )
-        entries[str(record["id"])] = due
+        entries[item_id] = due
+        changes.append(
+            _change("assignments", "assignment", item_id, summary, relative, **details)
+        )
     return changes, entries, []
 
 
@@ -258,22 +355,37 @@ async def fetch_files(
 ):
     records = await client.get_all(f"/courses/{course_id}/files")
     known = await placement.folder_paths(client, course_id)
-    changes: list[str] = []
+    changes: list[Change] = []
     entries: dict[str, str] = {}
-    failures: list[str] = []
+    failures: list[Failure] = []
     for record in new_files(records, seen):
         relative = placement.place(known.get(record.get("folder_id")), record["display_name"], folders)
+        item_id = str(record["id"])
+        summary = f"file {item_id} · {relative}"
+        details = _details(
+            display_name=record.get("display_name"),
+            folder_id=str(record["folder_id"]) if record.get("folder_id") is not None else None,
+        )
         if dry_run:
-            changes.append(f"file {record['id']} · {relative}")
+            changes.append(_change("files", "file", item_id, summary, relative, **details))
             continue
         try:
             target = _under_raw(course_dir / "raw", relative)
             await client.download(record["url"], target)
         except Exception as error:
-            failures.append(f"file {record['id']} not downloaded: {error}")
+            failures.append(
+                _failure(
+                    "files",
+                    "file",
+                    item_id,
+                    f"file {item_id} not downloaded: {error}",
+                    relative,
+                    **details,
+                )
+            )
             continue
-        changes.append(f"file {record['id']} · {relative}")
-        entries[str(record["id"])] = relative
+        changes.append(_change("files", "file", item_id, summary, relative, **details))
+        entries[item_id] = relative
     return changes, entries, failures
 
 
@@ -294,6 +406,7 @@ async def fetch_pages(
     seen: dict,
     dry_run: bool,
     canvas_host: str,
+    timezone: str | tzinfo = UTC,
 ):
     try:
         listed = await client.get_all(f"/courses/{course_id}/pages")
@@ -305,20 +418,27 @@ async def fetch_pages(
         pass
     else:
         listed = [front] + [page for page in listed if page.get("url") != front.get("url")]
-    changes: list[str] = []
+    changes: list[Change] = []
     entries: dict[str, str | None] = {}
     for page in changed_pages(listed, seen):
-        changes.append(f"page {page['url']} · {page.get('title')}")
+        item_id = str(page["url"])
+        relative = f"pages/{convert.slug(page.get('title'))}-{convert.slug(item_id)}.md"
+        updated = convert.local_time(page.get("updated_at"), timezone)
+        summary = f"page {item_id} · {page.get('title')}"
+        details = _details(
+            title=page.get("title"),
+            page_url=item_id,
+            updated=updated,
+            url=convert.strip_verifier(page.get("html_url")) if page.get("html_url") else None,
+        )
         if dry_run:
+            changes.append(_change("pages", "page", item_id, summary, relative, **details))
             continue
         body = page.get("body")
         if body is None:
             page = await client.get(f"/courses/{course_id}/pages/{page['url']}")
             body = page.get("body") or ""
-        target = unique(
-            _under_raw(course_dir / "raw", f"pages/{convert.slug(page.get('title'))}.md"),
-            page["url"],
-        )
+        target = _under_raw(course_dir / "raw", relative)
         write_body(
             target,
             {
@@ -327,14 +447,15 @@ async def fetch_pages(
                 "page_url": page["url"],
                 "url": page.get("html_url"),
                 "title": page.get("title"),
-                "updated": convert.sgt(page.get("updated_at")),
-                "fetched": _now(),
+                "updated": updated,
+                "fetched": _now(timezone),
             },
             body,
             convert.links(body, canvas_host),
             {},
         )
-        entries[page["url"]] = convert.sgt(page.get("updated_at"))
+        entries[item_id] = updated
+        changes.append(_change("pages", "page", item_id, summary, relative, **details))
     return changes, entries, []
 
 
@@ -344,22 +465,34 @@ async def fetch_modules(
     course_id: int,
     seen: dict,
     dry_run: bool,
+    timezone: str | tzinfo = UTC,
 ):
     trees: list[tuple[dict, list[dict]]] = []
     entries: dict[str, str] = {}
-    changes: list[str] = []
+    changes: list[Change] = []
     for module in await client.get_all(f"/courses/{course_id}/modules"):
         items = await client.get_all(f"/courses/{course_id}/modules/{module['id']}/items")
         trees.append((module, items))
         digest = module_digest(module, items)
         if seen.get(str(module["id"])) != digest:
-            changes.append(f"module {module['id']} · {module.get('name')}")
+            changes.append(
+                _change(
+                    "modules",
+                    "module",
+                    module["id"],
+                    f"module {module['id']} · {module.get('name')}",
+                    "modules.md",
+                    name=module.get("name"),
+                    position=module.get("position"),
+                    digest=digest,
+                )
+            )
         entries[str(module["id"])] = digest
     if not changes:
         return [], {}, []
     if dry_run:
         return changes, {}, []
-    write_modules(course_dir / "raw" / "modules.md", trees)
+    write_modules(course_dir / "raw" / "modules.md", trees, timezone)
     return changes, entries, []
 
 
@@ -370,22 +503,37 @@ async def fetch_syllabus(
     seen: str | None,
     dry_run: bool,
     canvas_host: str,
+    timezone: str | tzinfo = UTC,
 ):
     record = await client.get(f"/courses/{course_id}", **{"include[]": "syllabus_body"})
     html = record.get("syllabus_body") or ""
     digest = content_hash(html)
     if digest == seen:
         return [], seen, []
+    change = _change(
+        "syllabus",
+        "syllabus",
+        "syllabus",
+        "syllabus changed",
+        "syllabus.md",
+        digest=digest,
+        url=convert.strip_verifier(record.get("html_url")) if record.get("html_url") else None,
+    )
     if dry_run:
-        return ["syllabus changed"], seen, []
+        return [change], seen, []
     write_body(
         course_dir / "raw" / "syllabus.md",
-        {"source": "canvas", "kind": "syllabus", "url": record.get("html_url"), "fetched": _now()},
+        {
+            "source": "canvas",
+            "kind": "syllabus",
+            "url": record.get("html_url"),
+            "fetched": _now(timezone),
+        },
         html,
         convert.links(html, canvas_host),
         {},
     )
-    return ["syllabus changed"], digest, []
+    return [change], digest, []
 
 
 async def sync_course(vault: Path, course: CourseConfig, dry_run: bool) -> RunManifest:
@@ -400,38 +548,98 @@ async def sync_course(vault: Path, course: CourseConfig, dry_run: bool) -> RunMa
         if not token:
             raise ValueError("CORUM_CANVAS_TOKEN environment variable is required")
         client = CanvasClient(str(workspace.canvas.host), token)
-        state = read_canvas_state(course_dir)
+        state = read_canvas_state(course_dir, course.canvas.sources)
         sources = state["sources"]
         host = str(workspace.canvas.host).rstrip("/")
+        timezone = workspace.workspace.timezone
         jobs = {}
         for source in course.canvas.sources:
             seen = sources.get(source)
             if source == "announcements":
-                jobs[source] = fetch_announcements(client, course_dir, course.canvas.id, seen or {}, dry_run, host)
+                jobs[source] = fetch_announcements(
+                    client,
+                    course_dir,
+                    course.canvas.id,
+                    seen or {},
+                    dry_run,
+                    host,
+                    timezone,
+                )
             elif source == "assignments":
-                jobs[source] = fetch_assignments(client, course_dir, course.canvas.id, seen or {}, dry_run, host)
+                jobs[source] = fetch_assignments(
+                    client,
+                    course_dir,
+                    course.canvas.id,
+                    seen or {},
+                    dry_run,
+                    host,
+                    timezone,
+                )
             elif source == "files":
                 jobs[source] = fetch_files(
                     client, course_dir, course.canvas.id, seen or {}, course.canvas.folders, dry_run
                 )
             elif source == "pages":
-                jobs[source] = fetch_pages(client, course_dir, course.canvas.id, seen or {}, dry_run, host)
+                jobs[source] = fetch_pages(
+                    client,
+                    course_dir,
+                    course.canvas.id,
+                    seen or {},
+                    dry_run,
+                    host,
+                    timezone,
+                )
             elif source == "modules":
-                jobs[source] = fetch_modules(client, course_dir, course.canvas.id, seen or {}, dry_run)
+                jobs[source] = fetch_modules(
+                    client,
+                    course_dir,
+                    course.canvas.id,
+                    seen or {},
+                    dry_run,
+                    timezone,
+                )
             elif source == "syllabus":
-                jobs[source] = fetch_syllabus(client, course_dir, course.canvas.id, seen, dry_run, host)
+                jobs[source] = fetch_syllabus(
+                    client,
+                    course_dir,
+                    course.canvas.id,
+                    seen,
+                    dry_run,
+                    host,
+                    timezone,
+                )
 
         results = await asyncio.gather(*jobs.values(), return_exceptions=True)
-        changes: list[str] = []
-        failures: list[tuple[str, str]] = []
+        changes: list[Change | str] = []
+        failures: list[Failure | tuple[str, str]] = []
         updates: dict[str, object] = {}
         for source, result in zip(jobs, results):
             if isinstance(result, Exception):
-                failures.append((source, str(result)))
+                failures.append(
+                    _failure(source, source, None, str(result))
+                )
                 continue
             source_changes, entries, source_failures = result
-            changes.extend(source_changes)
-            failures.extend((source, failure) for failure in source_failures)
+            for item in source_changes:
+                if isinstance(item, Change):
+                    changes.append(item)
+                else:
+                    kind = str(item).partition(" ")[0]
+                    digest = hashlib.sha256(str(item).encode("utf-8")).hexdigest()[:16]
+                    changes.append(
+                        Change(
+                            id=f"legacy:{source}:{digest}",
+                            source=source,
+                            kind=kind,
+                            summary=str(item),
+                        )
+                    )
+            for item in source_failures:
+                failures.append(
+                    item
+                    if isinstance(item, Failure)
+                    else _failure(source, source, None, str(item))
+                )
             updates[source] = entries
 
         if not dry_run:
@@ -440,10 +648,26 @@ async def sync_course(vault: Path, course: CourseConfig, dry_run: bool) -> RunMa
                     sources[source] = entries
                 elif entries:
                     sources.setdefault(source, {}).update(entries)
-            state["synced_at"] = _now()
+            state["synced_at"] = _now(timezone)
             write_canvas_state(course_dir, state)
 
-        manifest = RunManifest.create(course.code, features, changes=changes, failures=failures)
+        manifest = RunManifest.create(
+            course.code,
+            features,
+            changes=changes,
+            failures=failures,
+            sources=course.canvas.sources,
+            timezone=workspace.workspace.timezone,
+        )
+        previous = read_latest_run(course_dir)
+        if previous is not None:
+            for stage in ("jira", "wiki"):
+                prior_stage = previous[stage]
+                if (
+                    features[stage]
+                    and prior_stage.get("reconciliation_required") is True
+                ):
+                    setattr(manifest, stage, StageResult.model_validate(prior_stage))
         if not dry_run:
             write_latest_run(course_dir, manifest.model_dump(mode="json"))
         return manifest

@@ -9,6 +9,12 @@ from typing import Annotated, Any, Literal
 from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from corum.config import CourseConfig, load_workspace, resolve_features
+from corum.run import AppliedItem, StageFailure, StageResult
+from corum.state import (
+    latest_stage_requires_reconciliation,
+    read_latest_run,
+    update_latest_run_stage,
+)
 from corum.validation import (
     require_https_origin,
     require_identifier,
@@ -21,7 +27,7 @@ from corum.validation import (
 )
 
 from . import cache
-from .client import JiraClient
+from .client import JiraClient, JiraMutationError
 
 
 Identifier = Annotated[str, AfterValidator(require_identifier)]
@@ -103,15 +109,33 @@ class JiraPlan(BaseModel):
 
 
 class AppliedAction(_StrictModel):
+    id: str
+    action_index: int = Field(ge=0)
     action: Literal["create", "update", "transition"]
     key: IssueKey
+
+
+class ActionFailure(_StrictModel):
+    id: str
+    action_index: int = Field(ge=0)
+    action: Literal["create", "update", "transition"]
+    key: IssueKey | None = None
+    phase: Literal["mutation", "fetch", "cache"]
+    error: str
+    write_state: Literal["not_applied", "applied", "unknown"]
+    retry_safe: bool
 
 
 class ApplyResult(_StrictModel):
     course: str
     epic: str
     dry_run: bool
+    status: Literal["pending", "up_to_date", "applied", "partial", "failed"]
     applied: list[AppliedAction]
+    failures: list[ActionFailure] = Field(default_factory=list)
+    reconciliation_required: bool = False
+    retry_safe: bool = True
+    reconciled: bool = False
 
 
 class JiraDisabled(ValueError):
@@ -120,6 +144,10 @@ class JiraDisabled(ValueError):
 
 class InvalidPlan(ValueError):
     """A syntactically valid plan does not target the selected configuration."""
+
+
+class ReconciliationRequired(ValueError):
+    """A prior uncertain Jira write must be reconciled before more actions."""
 
 
 def _validate_plan(vault: Path, course: CourseConfig, plan: JiraPlan):
@@ -235,7 +263,7 @@ async def _reconcile_cache(
     course: CourseConfig,
     epic: str,
     client: JiraClient,
-) -> None:
+) -> list[dict[str, Any]]:
     children = [_normalized_jira_issue(raw) for raw in await client.epic_children(epic)]
     cache.reconcile(
         vault,
@@ -246,6 +274,138 @@ async def _reconcile_cache(
             "complete": True,
             "issues": children,
         },
+    )
+    return children
+
+
+async def _preflight_owned_targets(
+    vault: Path,
+    course: CourseConfig,
+    plan: JiraPlan,
+    client: JiraClient,
+) -> None:
+    raw_children = await client.epic_children(plan.epic)
+    children = [_normalized_jira_issue(raw) for raw in raw_children]
+    owned = {issue["key"] for issue in children}
+    targets = {
+        action.key
+        for action in plan.actions
+        if isinstance(action, (UpdateAction, TransitionAction))
+    }
+    outside = sorted(targets - owned)
+    if outside:
+        raise InvalidPlan(
+            "Jira action target(s) do not belong to configured epic "
+            f"{plan.epic}: {', '.join(outside)}"
+        )
+    cache.reconcile(
+        vault,
+        course,
+        {
+            "epic": plan.epic,
+            "reconciled_at": datetime.now(UTC).isoformat(),
+            "complete": True,
+            "issues": children,
+        },
+    )
+
+
+def _stage_result(result: ApplyResult) -> StageResult:
+    return StageResult(
+        status=result.status,
+        applied=[
+            AppliedItem(
+                id=item.id,
+                action=item.action,
+                target=item.key,
+                details={"action_index": item.action_index, "key": item.key},
+            )
+            for item in result.applied
+        ],
+        failures=[
+            StageFailure(
+                id=item.id,
+                action=item.action,
+                target=item.key,
+                error=item.error,
+                write_state=item.write_state,
+                retry_safe=item.retry_safe,
+                details={"action_index": item.action_index, "phase": item.phase},
+            )
+            for item in result.failures
+        ],
+        reconciliation_required=result.reconciliation_required,
+        retry_safe=result.retry_safe,
+        reconciled=result.reconciled,
+    )
+
+
+def _record_result(vault: Path, course: CourseConfig, result: ApplyResult) -> ApplyResult:
+    update_latest_run_stage(
+        vault / "courses" / course.code,
+        "jira",
+        _stage_result(result).model_dump(mode="json"),
+    )
+    return result
+
+
+def _failed_result(
+    course: CourseConfig,
+    plan: JiraPlan,
+    applied: list[AppliedAction],
+    failure: ActionFailure,
+) -> ApplyResult:
+    return ApplyResult(
+        course=course.code,
+        epic=plan.epic,
+        dry_run=False,
+        status="partial" if applied else "failed",
+        applied=applied,
+        failures=[failure],
+        reconciliation_required=failure.write_state != "not_applied" or bool(applied),
+        retry_safe=failure.retry_safe and not applied,
+    )
+
+
+def _reconciled_result(
+    course: CourseConfig,
+    plan: JiraPlan,
+    previous: dict,
+) -> ApplyResult:
+    """Preserve a partial run's evidence after its remote cache is refreshed."""
+    stage = StageResult.model_validate(previous["jira"])
+    applied = [
+        AppliedAction(
+            id=item.id,
+            action_index=item.details["action_index"],
+            action=item.action,
+            key=item.target,
+        )
+        for item in stage.applied
+    ]
+    failures = [
+        ActionFailure(
+            id=item.id,
+            action_index=item.details["action_index"],
+            action=item.action,
+            key=item.target,
+            phase=item.details["phase"],
+            error=item.error,
+            write_state=item.write_state,
+            retry_safe=item.retry_safe,
+        )
+        for item in stage.failures
+    ]
+    return ApplyResult(
+        course=course.code,
+        epic=plan.epic,
+        dry_run=False,
+        status=stage.status,
+        applied=applied,
+        failures=failures,
+        reconciliation_required=False,
+        retry_safe=stage.retry_safe,
+        reconciled=True,
     )
 
 
@@ -260,22 +420,157 @@ async def apply_plan(
     """Apply a fully validated plan in order and cache each resulting issue."""
     jira = _validate_plan(vault, course, plan)
     if dry_run:
-        return ApplyResult(course=course.code, epic=plan.epic, dry_run=True, applied=[])
+        return ApplyResult(
+            course=course.code,
+            epic=plan.epic,
+            dry_run=True,
+            status="pending",
+            applied=[],
+        )
 
-    if not plan.actions and not cache.exists(vault, course):
-        await _reconcile_cache(vault, course, plan.epic, client)
+    course_dir = vault / "courses" / course.code
+    retry_blocked = latest_stage_requires_reconciliation(course_dir, "jira")
+    if plan.actions and retry_blocked:
+        raise ReconciliationRequired(
+            "Jira reconciliation is required before retry; apply an exact empty plan first"
+        )
+    previous_run = read_latest_run(course_dir)
+
+    if not plan.actions:
+        reconciled = False
+        if retry_blocked:
+            await _reconcile_cache(vault, course, plan.epic, client)
+            if previous_run is None:
+                raise ReconciliationRequired(
+                    "Jira reconciliation state disappeared during apply"
+                )
+            return _record_result(
+                vault,
+                course,
+                _reconciled_result(course, plan, previous_run),
+            )
+        if (
+            previous_run is not None
+            and previous_run["jira"].get("reconciled") is True
+            and previous_run["jira"].get("retry_safe") is False
+        ):
+            return _record_result(
+                vault,
+                course,
+                _reconciled_result(course, plan, previous_run),
+            )
+        if not cache.exists(vault, course):
+            await _reconcile_cache(vault, course, plan.epic, client)
+            reconciled = True
+        return _record_result(
+            vault,
+            course,
+            ApplyResult(
+                course=course.code,
+                epic=plan.epic,
+                dry_run=False,
+                status="up_to_date",
+                applied=[],
+                reconciled=reconciled,
+            ),
+        )
+
+    await _preflight_owned_targets(vault, course, plan, client)
 
     applied: list[AppliedAction] = []
-    for action in plan.actions:
-        if isinstance(action, CreateAction):
-            key = await client.create_issue({"project": jira.project, **_fields(action.issue)})
-        elif isinstance(action, UpdateAction):
-            key = action.key
-            await client.update_fields(key, _fields(action.set))
-        else:
-            key = action.key
-            await client.transition_issue(key, jira.transitions[action.transition])
-        issue = _normalized_jira_issue(await client.fetch_issue(key))
-        await _upsert_with_recovery(vault, course, plan.epic, issue, client)
-        applied.append(AppliedAction(action=action.action, key=key))
-    return ApplyResult(course=course.code, epic=plan.epic, dry_run=False, applied=applied)
+    for index, action in enumerate(plan.actions):
+        key: str | None = None
+        try:
+            if isinstance(action, CreateAction):
+                returned_key = await client.create_issue(
+                    {"project": jira.project, **_fields(action.issue)}
+                )
+                try:
+                    key = require_issue_key(returned_key, "created Jira issue key")
+                except ValueError as error:
+                    raise JiraMutationError(
+                        "successful Jira create response is missing a valid issue key",
+                        write_state="applied",
+                    ) from error
+            elif isinstance(action, UpdateAction):
+                key = action.key
+                await client.update_fields(key, _fields(action.set))
+            else:
+                key = action.key
+                await client.transition_issue(key, jira.transitions[action.transition])
+        except Exception as error:
+            write_state = getattr(error, "write_state", "unknown")
+            failure = ActionFailure(
+                id=f"jira:{index}:{action.action}:{key or 'unknown'}:mutation",
+                action_index=index,
+                action=action.action,
+                key=key,
+                phase="mutation",
+                error=str(error),
+                write_state=write_state,
+                retry_safe=write_state == "not_applied",
+            )
+            return _record_result(
+                vault,
+                course,
+                _failed_result(course, plan, applied, failure),
+            )
+
+        applied.append(
+            AppliedAction(
+                id=f"jira:{index}:{action.action}:{key}",
+                action_index=index,
+                action=action.action,
+                key=key,
+            )
+        )
+        try:
+            raw_issue = await client.fetch_issue(key)
+            issue = _normalized_jira_issue(raw_issue)
+        except Exception as error:
+            failure = ActionFailure(
+                id=f"jira:{index}:{action.action}:{key}:fetch",
+                action_index=index,
+                action=action.action,
+                key=key,
+                phase="fetch",
+                error=str(error),
+                write_state="applied",
+                retry_safe=False,
+            )
+            return _record_result(
+                vault,
+                course,
+                _failed_result(course, plan, applied, failure),
+            )
+        try:
+            await _upsert_with_recovery(vault, course, plan.epic, issue, client)
+        except Exception as error:
+            failure = ActionFailure(
+                id=f"jira:{index}:{action.action}:{key}:cache",
+                action_index=index,
+                action=action.action,
+                key=key,
+                phase="cache",
+                error=str(error),
+                write_state="applied",
+                retry_safe=False,
+            )
+            return _record_result(
+                vault,
+                course,
+                _failed_result(course, plan, applied, failure),
+            )
+
+    return _record_result(
+        vault,
+        course,
+        ApplyResult(
+            course=course.code,
+            epic=plan.epic,
+            dry_run=False,
+            status="applied",
+            applied=applied,
+            reconciled=True,
+        ),
+    )

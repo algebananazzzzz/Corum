@@ -1,3 +1,4 @@
+import yaml
 from bs4 import BeautifulSoup
 
 from corum.canvas import convert
@@ -78,3 +79,27 @@ def test_frontmatter_omits_empty_fields_and_renders_links():
     assert "author" not in out
     assert out.startswith("---\nsource: canvas\n")
     assert "  - type: external\n    text: F\n    url: https://x\n" in out
+
+
+def test_frontmatter_safe_serializes_canvas_controlled_scalars():
+    out = convert.frontmatter(
+        {
+            "source": "canvas",
+            "title": "Deadline: Friday\n---\nnot: frontmatter",
+            "enabled_like": "yes",
+        }
+    )
+
+    document, body = out.removeprefix("---\n").rsplit("\n---\n", 1)
+    assert yaml.safe_load(document) == {
+        "source": "canvas",
+        "title": "Deadline: Friday\n---\nnot: frontmatter",
+        "enabled_like": "yes",
+    }
+    assert body == "\n"
+
+
+def test_canvas_timestamp_conversion_honors_selected_timezone():
+    assert convert.local_time(
+        "2026-09-06T01:30:00Z", "America/New_York"
+    ) == "2026-09-05T21:30:00-04:00"

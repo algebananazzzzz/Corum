@@ -3,24 +3,25 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime, tzinfo
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
+import yaml
 from bs4 import BeautifulSoup
 from markdownify import markdownify
 
 
-TZ = ZoneInfo("Asia/Singapore")
 _NOISE_CLASSES = ("external_link_icon", "screenreader-only")
 _MOBILE_CONFIG = "BlueCanvasMobileConfig.js"
 
 
-def sgt(raw: str | None) -> str | None:
-    """Return a Canvas instant in Singapore time."""
+def local_time(raw: str | None, timezone: str | tzinfo = UTC) -> str | None:
+    """Return a Canvas instant in the selected workspace timezone."""
     if not raw:
         return None
-    return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(TZ).isoformat()
+    zone = ZoneInfo(timezone) if isinstance(timezone, str) else timezone
+    return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(zone).isoformat()
 
 
 def strip_verifier(url: str) -> str:
@@ -101,19 +102,33 @@ def to_markdown(html: str, image_paths: dict[str, str] | None = None) -> str:
 
 def frontmatter(fields: dict, link_list: list[dict] | None = None) -> str:
     """Render raw-material frontmatter from scalar fields and links."""
-    lines = ["---"]
-    for key, value in fields.items():
-        if value is not None:
-            lines.append(f"{key}: {value}")
-    for link in link_list or []:
-        if len(lines) == 1 or lines[-1] != "links:":
-            lines.append("links:")
-        lines.extend(
-            [
-                f"  - type: {link['type']}",
-                f"    text: {link['text']}",
-                f"    url: {link['url']}",
-            ]
+    class _FrontmatterDumper(yaml.SafeDumper):
+        def increase_indent(self, flow=False, indentless=False):
+            return super().increase_indent(flow, False)
+
+    def represent_string(dumper, value):
+        unsafe_plain = "\n" in value or ": " in value or value.strip().casefold() in {
+            "yes",
+            "no",
+            "true",
+            "false",
+            "null",
+            "on",
+            "off",
+        }
+        return dumper.represent_scalar(
+            "tag:yaml.org,2002:str", value, style='"' if unsafe_plain else None
         )
-    lines.append("---")
-    return "\n".join(lines) + "\n\n"
+
+    _FrontmatterDumper.add_representer(str, represent_string)
+    payload = {key: value for key, value in fields.items() if value is not None}
+    if link_list:
+        payload["links"] = link_list
+    document = yaml.dump(
+        payload,
+        Dumper=_FrontmatterDumper,
+        allow_unicode=True,
+        default_flow_style=False,
+        sort_keys=False,
+    ).rstrip()
+    return f"---\n{document}\n---\n\n"

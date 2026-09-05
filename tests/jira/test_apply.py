@@ -18,6 +18,8 @@ from corum.jira import JiraClient
 from corum.jira import cache
 from corum.jira import apply as jira_apply
 from corum.jira.apply import InvalidPlan, JiraDisabled, JiraPlan, apply_plan
+from corum.run import AppliedItem, RunManifest, StageFailure, StageResult
+from corum.state import write_latest_run
 
 
 SCHEMAS = Path(__file__).parents[2] / "schemas"
@@ -135,6 +137,36 @@ async def test_complete_plan_is_semantically_validated_before_first_client_call(
 
 
 @pytest.mark.asyncio
+async def test_update_target_must_be_a_current_child_of_the_configured_epic_before_mutation(
+    tmp_path,
+):
+    write_workspace(tmp_path)
+    write_course(tmp_path, "CS3103")
+    course = load_course(tmp_path, "CS3103")
+    plan = JiraPlan.model_validate(
+        {
+            "schema": 1,
+            "course": "CS3103",
+            "epic": "STUDY-1",
+            "actions": [
+                {"action": "update", "key": "STUDY-99", "set": {"summary": "Unsafe"}}
+            ],
+        }
+    )
+
+    class OwnershipClient(RecordingClient):
+        async def epic_children(self, epic):
+            self.events.append(("children", epic))
+            return [fetched_issue("STUDY-2")]
+
+    client = OwnershipClient()
+    with pytest.raises(InvalidPlan, match="do not belong to configured epic"):
+        await apply_plan(tmp_path, course, plan, client=client)
+
+    assert client.events == [("children", "STUDY-1")]
+
+
+@pytest.mark.asyncio
 async def test_dry_run_validates_without_network_or_cache_writes(tmp_path):
     write_workspace(tmp_path)
     write_course(tmp_path, "CS3103")
@@ -193,6 +225,22 @@ class RecordingClient:
         return []
 
 
+def write_pending_manifest(root: Path, *, reconciliation_required: bool = False) -> None:
+    course_dir = root / "courses/CS3103"
+    manifest = RunManifest.create(
+        "CS3103",
+        {"jira": True, "wiki": False},
+        timezone="Asia/Singapore",
+    )
+    if reconciliation_required:
+        manifest.jira = StageResult(
+            status="partial",
+            reconciliation_required=True,
+            retry_safe=False,
+        )
+    write_latest_run(course_dir, manifest.model_dump(mode="json"))
+
+
 @pytest.mark.asyncio
 async def test_empty_plan_bootstraps_missing_cache_from_epic_children(tmp_path):
     write_workspace(tmp_path)
@@ -249,12 +297,18 @@ async def test_actions_apply_sequentially_fetch_results_and_atomically_upsert_ca
             ],
         }
     )
-    client = RecordingClient()
+    class OwnedClient(RecordingClient):
+        async def epic_children(self, epic):
+            self.events.append(("children", epic))
+            return [fetched_issue("STUDY-2"), fetched_issue("STUDY-3")]
+
+    client = OwnedClient()
 
     result = await apply_plan(tmp_path, course, plan, client=client)
 
     assert [entry.action for entry in result.applied] == ["create", "update", "transition"]
     assert client.events == [
+        ("children", "STUDY-1"),
         (
             "create",
             {
@@ -295,18 +349,232 @@ async def test_missing_cache_is_reconciled_from_every_epic_child_then_upserted(t
     class RecoveringClient(RecordingClient):
         async def epic_children(self, epic):
             self.events.append(("children", epic))
-            return [fetched_issue("STUDY-3")]
+            return [fetched_issue("STUDY-2"), fetched_issue("STUDY-3")]
 
     client = RecoveringClient()
     await apply_plan(tmp_path, course, plan, client=client)
 
     assert client.events == [
+        ("children", "STUDY-1"),
         ("update", "STUDY-2", {"summary": "Changed"}),
         ("fetch", "STUDY-2"),
-        ("children", "STUDY-1"),
     ]
     stored = json.loads((tmp_path / "courses/CS3103/state/jira.json").read_text())
     assert [row["key"] for row in stored["issues"]] == ["STUDY-2", "STUDY-3"]
+
+
+@pytest.mark.asyncio
+async def test_missing_create_key_returns_structured_reconciliation_required_result(tmp_path):
+    write_workspace(tmp_path)
+    write_course(tmp_path, "CS3103")
+    course = load_course(tmp_path, "CS3103")
+    write_pending_manifest(tmp_path)
+    plan = JiraPlan.model_validate(
+        {
+            "schema": 1,
+            "course": "CS3103",
+            "epic": "STUDY-1",
+            "actions": [
+                {
+                    "action": "create",
+                    "issue": {
+                        "type": "Task",
+                        "parent": "STUDY-1",
+                        "summary": "Created but key missing",
+                    },
+                }
+            ],
+        }
+    )
+
+    class MissingKeyClient(RecordingClient):
+        async def create_issue(self, fields):
+            self.events.append(("create", fields))
+            return None
+
+    result = await apply_plan(tmp_path, course, plan, client=MissingKeyClient())
+
+    assert result.status == "failed"
+    assert result.applied == []
+    assert result.reconciliation_required is True
+    assert result.retry_safe is False
+    assert result.failures[0].write_state == "applied"
+    assert result.failures[0].action_index == 0
+    latest = json.loads((tmp_path / "courses/CS3103/state/latest-run.json").read_text())
+    assert latest["jira"]["status"] == "failed"
+    assert latest["jira"]["reconciliation_required"] is True
+    assert latest["jira"]["retry_safe"] is False
+
+
+@pytest.mark.asyncio
+async def test_fetch_failure_preserves_every_known_remote_write_in_partial_result(tmp_path):
+    write_workspace(tmp_path)
+    write_course(tmp_path, "CS3103")
+    course = load_course(tmp_path, "CS3103")
+    write_pending_manifest(tmp_path)
+    plan = JiraPlan.model_validate(
+        {
+            "schema": 1,
+            "course": "CS3103",
+            "epic": "STUDY-1",
+            "actions": [
+                {"action": "update", "key": "STUDY-2", "set": {"summary": "First"}},
+                {"action": "transition", "key": "STUDY-3", "transition": "this_week"},
+            ],
+        }
+    )
+    workspace = yaml.safe_load((tmp_path / "corum.yaml").read_text())
+    workspace["jira"]["transitions"] = {"this_week": "2"}
+    (tmp_path / "corum.yaml").write_text(yaml.safe_dump(workspace))
+
+    class PartialClient(RecordingClient):
+        async def epic_children(self, epic):
+            self.events.append(("children", epic))
+            return [fetched_issue("STUDY-2"), fetched_issue("STUDY-3")]
+
+        async def fetch_issue(self, key):
+            self.events.append(("fetch", key))
+            if key == "STUDY-3":
+                raise RuntimeError("fetch unavailable")
+            return fetched_issue(key, summary="First")
+
+    result = await apply_plan(tmp_path, course, plan, client=PartialClient())
+
+    assert result.status == "partial"
+    assert [(item.action, item.key) for item in result.applied] == [
+        ("update", "STUDY-2"),
+        ("transition", "STUDY-3"),
+    ]
+    assert result.failures[0].phase == "fetch"
+    assert result.failures[0].write_state == "applied"
+    assert result.reconciliation_required is True
+    stored = json.loads((tmp_path / "courses/CS3103/state/jira.json").read_text())
+    assert [issue["key"] for issue in stored["issues"]] == ["STUDY-2", "STUDY-3"]
+
+
+@pytest.mark.asyncio
+async def test_nonempty_plan_is_blocked_after_uncertain_write_until_empty_reconciliation(
+    tmp_path,
+):
+    write_workspace(tmp_path)
+    write_course(tmp_path, "CS3103")
+    course = load_course(tmp_path, "CS3103")
+    write_pending_manifest(tmp_path, reconciliation_required=True)
+    plan = JiraPlan.model_validate(
+        {
+            "schema": 1,
+            "course": "CS3103",
+            "epic": "STUDY-1",
+            "actions": [
+                {
+                    "action": "create",
+                    "issue": {"type": "Task", "parent": "STUDY-1", "summary": "Duplicate"},
+                }
+            ],
+        }
+    )
+    client = RecordingClient()
+
+    with pytest.raises(jira_apply.ReconciliationRequired, match="empty plan"):
+        await apply_plan(tmp_path, course, plan, client=client)
+
+    assert client.events == []
+
+
+@pytest.mark.asyncio
+async def test_empty_reconciliation_preserves_partial_write_evidence(tmp_path):
+    write_workspace(tmp_path)
+    write_course(tmp_path, "CS3103")
+    course = load_course(tmp_path, "CS3103")
+    manifest = RunManifest.create(
+        "CS3103",
+        {"jira": True, "wiki": False},
+        timezone="Asia/Singapore",
+    )
+    manifest.jira = StageResult(
+        status="partial",
+        applied=[
+            AppliedItem(
+                id="jira:0:update:STUDY-2",
+                action="update",
+                target="STUDY-2",
+                details={"action_index": 0, "key": "STUDY-2"},
+            )
+        ],
+        failures=[
+            StageFailure(
+                id="jira:1:create:unknown:mutation",
+                action="create",
+                error="successful create returned no key",
+                write_state="applied",
+                retry_safe=False,
+                details={"action_index": 1, "phase": "mutation"},
+            )
+        ],
+        reconciliation_required=True,
+        retry_safe=False,
+    )
+    write_latest_run(
+        tmp_path / "courses/CS3103", manifest.model_dump(mode="json")
+    )
+    plan = JiraPlan(schema=1, course="CS3103", epic="STUDY-1", actions=[])
+
+    class ReconciliationClient(RecordingClient):
+        async def epic_children(self, epic):
+            self.events.append(("children", epic))
+            return [fetched_issue("STUDY-2"), fetched_issue("STUDY-3")]
+
+    result = await apply_plan(tmp_path, course, plan, client=ReconciliationClient())
+
+    assert result.status == "partial"
+    assert [item.key for item in result.applied] == ["STUDY-2"]
+    assert result.failures[0].write_state == "applied"
+    assert result.reconciled is True
+    assert result.reconciliation_required is False
+    assert result.retry_safe is False
+    latest = json.loads((tmp_path / "courses/CS3103/state/latest-run.json").read_text())
+    assert latest["jira"]["status"] == "partial"
+    assert latest["jira"]["applied"][0]["target"] == "STUDY-2"
+    assert latest["jira"]["failures"][0]["write_state"] == "applied"
+    assert latest["jira"]["reconciliation_required"] is False
+    assert latest["jira"]["retry_safe"] is False
+    assert latest["jira"]["reconciled"] is True
+
+    repeated = await apply_plan(
+        tmp_path,
+        course,
+        plan,
+        client=FailIfCalledClient(),
+    )
+    assert repeated.status == "partial"
+    assert [item.key for item in repeated.applied] == ["STUDY-2"]
+    repeated_latest = json.loads(
+        (tmp_path / "courses/CS3103/state/latest-run.json").read_text()
+    )
+    assert repeated_latest["jira"]["failures"] == latest["jira"]["failures"]
+
+
+@pytest.mark.asyncio
+async def test_jira_client_rejects_successful_create_response_without_issue_key():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(201, json={"id": "10001"})
+
+    client = JiraClient(
+        "https://example.atlassian.net",
+        "student@example.com",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(jira_apply.JiraMutationError, match="missing a valid issue key"):
+        await client.create_issue(
+            {
+                "project": "STUDY",
+                "type": "Task",
+                "parent": "STUDY-1",
+                "summary": "Task",
+            }
+        )
 
 
 def test_plan_models_and_schema_reject_unknown_or_ambiguous_actions():
@@ -702,6 +970,43 @@ def test_cli_empty_plan_bootstraps_missing_cache(tmp_path, monkeypatch, capsys):
     assert client.events == [("children", "STUDY-1")]
     assert json.loads(capsys.readouterr().out)["applied"] == []
     assert (tmp_path / "courses/CS3103/state/jira.json").is_file()
+
+
+def test_cli_emits_structured_partial_result_and_exits_nonzero(tmp_path, monkeypatch, capsys):
+    write_workspace(tmp_path)
+    write_course(tmp_path, "CS3103")
+    write_pending_manifest(tmp_path)
+    plan = {
+        "schema": 1,
+        "course": "CS3103",
+        "epic": "STUDY-1",
+        "actions": [
+            {
+                "action": "create",
+                "issue": {
+                    "type": "Task",
+                    "parent": "STUDY-1",
+                    "summary": "Created without a returned key",
+                },
+            }
+        ],
+    }
+
+    class MissingKeyClient(RecordingClient):
+        async def create_issue(self, fields):
+            return None
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(json.dumps(plan)))
+    monkeypatch.setenv("CORUM_JIRA_EMAIL", "student@example.com")
+    monkeypatch.setenv("CORUM_JIRA_API_TOKEN", "secret")
+    monkeypatch.setattr(cli, "JiraClient", lambda site, email, token: MissingKeyClient())
+
+    assert cli.main(["jira", "apply", "CS3103"]) == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "failed"
+    assert output["reconciliation_required"] is True
+    assert output["retry_safe"] is False
 
 
 def test_cli_disabled_jira_exits_before_reading_credential_environment(tmp_path, monkeypatch, capsys):

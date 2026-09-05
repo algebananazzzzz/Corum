@@ -20,6 +20,14 @@ from corum.validation import (
 _INLINE_MARKUP = re.compile(r"\[([^\]]+)]\((https?://[^)]+)\)|\*\*([^*]+)\*\*")
 
 
+class JiraMutationError(RuntimeError):
+    """A Jira mutation response cannot prove a safe automatic retry."""
+
+    def __init__(self, message: str, *, write_state: str = "unknown") -> None:
+        super().__init__(message)
+        self.write_state = write_state
+
+
 def _inline_adf(value: str) -> list[dict[str, Any]]:
     nodes: list[dict[str, Any]] = []
     offset = 0
@@ -108,7 +116,15 @@ class JiraClient:
         async with self._new_client() as client:
             response = await client.post("issue", json={"fields": _jira_fields(fields)})
             response.raise_for_status()
-            return response.json()["key"]
+            try:
+                payload = response.json()
+                key = payload.get("key") if isinstance(payload, dict) else None
+                return require_issue_key(key, "created Jira issue key")
+            except (ValueError, json.JSONDecodeError) as error:
+                raise JiraMutationError(
+                    "successful Jira create response is missing a valid issue key",
+                    write_state="applied",
+                ) from error
 
     async def update_fields(self, key: str, fields: dict[str, Any]) -> None:
         async with self._new_client() as client:

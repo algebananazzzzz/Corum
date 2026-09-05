@@ -77,8 +77,10 @@ that needs them.
 - Use exact source labels and page-range provenance below supported headings.
 - Add new pages and deliberate skipped ranges to `wiki/index.md`.
 - Run the wiki lint before finalizing a source.
-- Advance `state/wiki.json` only after every planned page, index edit, provenance
-  check, and lint check for that source succeeds.
+- Advance `state/wiki.json` only through
+  `skills/linting-wiki/scripts/lint-wiki.py --finalize`, after every planned page,
+  index edit, provenance check, and lint check for that source succeeds. Never edit
+  `state/wiki.json` or `state/latest-run.json` directly.
 - Preserve successful independent work on partial failure, but never advance failed
   work or hide its retry state.
 

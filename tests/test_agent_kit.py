@@ -11,6 +11,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from corum.run import Change, RunManifest
+from corum.state import write_latest_run
+
 
 ROOT = Path(__file__).parents[1]
 AGENT_KIT = ROOT / "agent-kit"
@@ -113,6 +116,16 @@ def test_each_skill_has_discoverable_frontmatter_and_resolved_references():
         assert all((skill_dir / target).is_file() for target in relative_markdown_links)
 
 
+def test_sync_skill_routes_machine_owned_wiki_state_through_the_finalizer():
+    instructions = (AGENT_KIT / "skills/sync-course/SKILL.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "--finalize {{WIKI_FINALIZATION_PAYLOAD}}" in instructions
+    assert "Never edit `state/wiki.json` or `state/latest-run.json` directly" in instructions
+    assert "Exit 2 means lint findings" in instructions
+
+
 def test_agent_kit_has_generic_templates_without_legacy_dependencies():
     expected_templates = {
         "Changelog.md",
@@ -170,7 +183,7 @@ def test_linter_reports_index_drift_from_the_v1_vault_layout(tmp_path):
         check=False,
     )
 
-    assert completed.returncode == 0
+    assert completed.returncode == 2
     assert "drift" in completed.stdout
     assert "courses/DEMO/wiki/concepts/Routing" in completed.stdout
     assert "marker L1 cites no finalized source" in completed.stdout
@@ -189,7 +202,7 @@ def test_linter_reports_index_drift_from_the_v1_vault_layout(tmp_path):
         check=False,
     )
 
-    assert preview.returncode == 0
+    assert preview.returncode == 2
     assert "coverage" not in preview.stdout
     assert json.loads((course / "state/wiki.json").read_text()) == {
         "schema": 1,
@@ -291,7 +304,7 @@ def test_linter_reports_citations_beyond_the_pdf_page_count(tmp_path):
         check=False,
     )
 
-    assert completed.returncode == 0
+    assert completed.returncode == 2
     assert "out of range p2-999" in completed.stdout
 
 
@@ -322,6 +335,222 @@ def test_linter_previews_null_provenance_without_mutating_state(tmp_path):
     assert completed.returncode == 0
     assert completed.stdout.strip() == "DEMO clean"
     assert (course / "state/wiki.json").read_text(encoding="utf-8") == state
+
+
+def _write_finalizable_run(course: Path) -> RunManifest:
+    manifest = RunManifest.create(
+        course.name,
+        {"jira": False, "wiki": True},
+        changes=[
+            Change(
+                id="canvas:pages:topic",
+                source="pages",
+                item_id="topic",
+                kind="page",
+                summary="page topic · Topic",
+                raw_path="notes/topic.md",
+                details={"title": "Topic"},
+            )
+        ],
+        sources=["pages"],
+        timezone="Asia/Singapore",
+    )
+    write_latest_run(course, manifest.model_dump(mode="json"))
+    return manifest
+
+
+def _write_finalization_payload(
+    path: Path,
+    manifest: RunManifest,
+    *,
+    source_path: str = "notes/topic.md",
+) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "run_id": manifest.run_id,
+                "course": manifest.course,
+                "sources": [
+                    {
+                        "id": "canvas:pages:topic",
+                        "path": source_path,
+                        "provenance": None,
+                    }
+                ],
+                "applied": [],
+                "failures": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_linter_finalization_mode_validates_then_updates_both_machine_states(tmp_path):
+    course = tmp_path / "courses/DEMO"
+    (course / "state").mkdir(parents=True)
+    (course / "raw/notes").mkdir(parents=True)
+    (course / "wiki").mkdir()
+    (course / "raw/notes/topic.md").write_text("captured", encoding="utf-8")
+    (course / "wiki/index.md").write_text("# Index\n", encoding="utf-8")
+    manifest = _write_finalizable_run(course)
+    payload = tmp_path / "finalize.json"
+    _write_finalization_payload(payload, manifest)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(AGENT_KIT / "skills/linting-wiki/scripts/lint-wiki.py"),
+            "DEMO",
+            "--finalize",
+            str(payload),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout.strip() == "DEMO finalized"
+    assert json.loads((course / "state/wiki.json").read_text()) == {
+        "schema": 1,
+        "ingested": {"notes/topic.md": None},
+    }
+    latest = json.loads((course / "state/latest-run.json").read_text())
+    assert latest["wiki"]["status"] == "applied"
+    assert latest["wiki"]["reconciliation_required"] is False
+    assert latest["wiki"]["applied"][0]["id"] == "wiki:finalize:canvas:pages:topic"
+    assert latest["wiki"]["applied"][0]["target"] == "notes/topic.md"
+
+
+def test_failed_wiki_finalization_records_failure_without_creating_wiki_state(tmp_path):
+    course = tmp_path / "courses/DEMO"
+    (course / "state").mkdir(parents=True)
+    (course / "wiki").mkdir()
+    (course / "wiki/index.md").write_text("# Index\n", encoding="utf-8")
+    manifest = _write_finalizable_run(course)
+    payload = tmp_path / "finalize.json"
+    payload.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "run_id": manifest.run_id,
+                "course": manifest.course,
+                "sources": [],
+                "applied": [],
+                "failures": [
+                    {
+                        "id": "wiki:create:topic",
+                        "action": "create",
+                        "path": "wiki/concepts/Topic.md",
+                        "source_ids": ["canvas:pages:topic"],
+                        "error": "authoring outcome could not be confirmed",
+                        "write_state": "unknown",
+                        "retry_safe": False,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(AGENT_KIT / "skills/linting-wiki/scripts/lint-wiki.py"),
+            "DEMO",
+            "--finalize",
+            str(payload),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout.strip() == "DEMO wiki failed recorded"
+    assert not (course / "state/wiki.json").exists()
+    latest = json.loads((course / "state/latest-run.json").read_text())
+    assert latest["wiki"]["status"] == "failed"
+    assert latest["wiki"]["applied"] == []
+    assert latest["wiki"]["failures"] == [
+        {
+            "id": "wiki:create:topic",
+            "action": "create",
+            "target": "wiki/concepts/Topic.md",
+            "error": "authoring outcome could not be confirmed",
+            "write_state": "unknown",
+            "retry_safe": False,
+            "details": {"source_ids": ["canvas:pages:topic"]},
+        }
+    ]
+    assert latest["wiki"]["reconciliation_required"] is True
+    assert latest["wiki"]["retry_safe"] is False
+
+
+def test_linter_finalization_rejects_payload_not_matching_exact_manifest_source(tmp_path):
+    course = tmp_path / "courses/DEMO"
+    (course / "state").mkdir(parents=True)
+    (course / "raw/notes").mkdir(parents=True)
+    (course / "wiki").mkdir()
+    (course / "raw/notes/topic.md").write_text("captured", encoding="utf-8")
+    (course / "raw/notes/other.md").write_text("other", encoding="utf-8")
+    (course / "wiki/index.md").write_text("# Index\n", encoding="utf-8")
+    manifest = _write_finalizable_run(course)
+    payload = tmp_path / "finalize.json"
+    _write_finalization_payload(payload, manifest, source_path="notes/other.md")
+    before = (course / "state/latest-run.json").read_bytes()
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(AGENT_KIT / "skills/linting-wiki/scripts/lint-wiki.py"),
+            "DEMO",
+            "--finalize",
+            str(payload),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert "does not match current run manifest" in completed.stdout
+    assert (course / "state/latest-run.json").read_bytes() == before
+    assert not (course / "state/wiki.json").exists()
+
+
+def test_pdf_lint_uses_declared_python_reader_without_pdfinfo_on_path(tmp_path):
+    course = tmp_path / "courses/DEMO"
+    (course / "state").mkdir(parents=True)
+    (course / "raw").mkdir()
+    (course / "wiki").mkdir()
+    (course / "state/wiki.json").write_text(
+        '{"schema": 1, "ingested": {}}', encoding="utf-8"
+    )
+    (course / "wiki/index.md").write_text("# Index\n", encoding="utf-8")
+    _write_minimal_pdf(course / "raw/topic.pdf")
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(AGENT_KIT / "skills/linting-wiki/scripts/lint-wiki.py"),
+            "DEMO",
+            "--pending-null",
+            "topic.pdf",
+        ],
+        cwd=tmp_path,
+        env={**os.environ, "PATH": ""},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout.strip() == "DEMO clean"
 
 
 def test_linter_rejects_a_corrupt_null_provenance_pdf(tmp_path):

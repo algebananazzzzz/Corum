@@ -13,8 +13,11 @@ invent information missing from the capture.
 
 Always read the selected course manifest, `courses/{{COURSE}}/course.yaml`, and only
 the successful current-run changes under `courses/{{COURSE}}/raw/`. Treat manifest
-failures as unknown captures: copy their source and error to `unresolved_capture`,
-but do not scope, omit, approve, or finalize their unseen contents.
+failures as unknown captures: copy their stable item ID, source, raw path when known,
+and error to `unresolved_capture`, but do not scope, omit, approve, or finalize their
+unseen contents. Carry every successful change's manifest `id` and exact `raw_path`
+through all evidence and source-finalization records; do not reconstruct either from
+a title or summary.
 
 | Effective feature | Inputs |
 | --- | --- |
@@ -27,6 +30,13 @@ An enabled Jira cache is a caller-owned precondition. If `state/jira.json` is
 absent, return `status: error` with code `jira_cache_missing` and the exact path;
 the caller must bootstrap it with the exact empty-plan workflow before retrying.
 Never reconcile or call Jira from this read-only skill.
+
+When the supplied manifest carries a reconciled Jira `partial` or `failed` result,
+use its `applied` and `failures` as prior-write evidence and the refreshed complete
+cache as authoritative state. Produce a new minimal plan from that comparison.
+Never reproduce an old action merely because it failed to return a key, and return
+an error for manual reconciliation if the cache cannot disambiguate an uncertain
+create.
 
 When wiki is enabled for the first time, absence of both `state/wiki.json` and
 `wiki/` is an empty initial wiki. For any unreadable required enabled input, return
@@ -48,10 +58,10 @@ member of this closed union; extra fields are forbidden:
 - `update`: `action`, `key`, and `set` only.
 - `transition`: `action`, `key`, and `transition` only.
 
-Put source paths, display titles, reasons, and before/after detail in the parallel
-`evidence` array keyed by `action_index`, never inside an action. Preserve precise
-dates, times, paths, and values. Each action must be executable without rereading raw
-content.
+Put source IDs, raw-relative source paths, display titles, reasons, and before/after
+detail in the parallel `evidence` array keyed by `action_index`, never inside an
+action. Preserve precise dates, times, paths, and values. Each action must be
+executable without rereading raw content.
 
 ## Decide wiki actions
 
@@ -60,19 +70,21 @@ content.
 - **No Action:** the source is administrative, duplicate, or adds no knowledge.
 
 Scope concepts rather than lectures. One source may support several concepts and
-several sources may support one concept. Give every source a path, stable provenance
-label, and exact PDF range. A concept action must state the knowledge to cover and
-the evidence ranges, not draft prose.
+several sources may support one concept. Give every source its manifest ID, exact
+raw-relative path, stable provenance label, and exact PDF range. A concept action
+must state the knowledge to cover and the evidence ranges, not draft prose.
 
 ## Plan source finalization
 
 For every successfully read, ingestion-eligible source in this run, provide one
 outcome:
 
-- `ingested`: relative raw path, provenance label or justified `null`, and every
-  concept page that must succeed first.
-- `skipped`: source, label, page ranges, and deliberate reason for the wiki index.
-- `ignored`: administrative source and reason, outside wiki finalization.
+- `ingested`: stable manifest change ID, exact relative raw path, provenance label or
+  justified `null`, and every concept page that must succeed first.
+- `skipped`: stable manifest change ID, exact relative raw path, label, page ranges,
+  and deliberate reason for the wiki index.
+- `ignored`: stable manifest change ID, exact relative raw path, administrative
+  reason, and no wiki finalization.
 
 `state/wiki.json` owns only `schema` and `ingested`. Never invent page IDs, remote
 IDs, versions, or content hashes. A source becomes ingested only after all planned
@@ -90,7 +102,12 @@ Return only valid JSON with this structure:
   "status": "ok",
   "course": "{{COURSE}}",
   "unresolved_capture": [
-    {"source": "{{SOURCE}}", "error": "{{CAPTURE_ERROR}}"}
+    {
+      "id": "{{FAILURE_ID}}",
+      "source": "{{SOURCE}}",
+      "path": "{{RAW_PATH_OR_NULL}}",
+      "error": "{{CAPTURE_ERROR}}"
+    }
   ],
   "jira": {
     "status": "enabled",
@@ -125,7 +142,8 @@ Return only valid JSON with this structure:
     "evidence": [
       {
         "action_index": 0,
-        "sources": ["raw/{{SOURCE_PATH}}"],
+        "source_ids": ["{{CHANGE_ID}}"],
+        "sources": ["{{SOURCE_PATH}}"],
         "reason": "{{WHY_REQUIRED}}"
       }
     ]
@@ -137,7 +155,7 @@ Return only valid JSON with this structure:
         "action": "enrich",
         "page": "wiki/concepts/{{CONCEPT}}.md",
         "sources": [
-          {"path": "raw/{{SOURCE_PATH}}", "label": "{{LABEL}}", "pages": "p3-18"}
+          {"id": "{{CHANGE_ID}}", "path": "{{SOURCE_PATH}}", "label": "{{LABEL}}", "pages": "p3-18"}
         ],
         "coverage": ["{{KNOWLEDGE}}"],
         "reason": "{{WHY_MISSING}}"
@@ -146,6 +164,7 @@ Return only valid JSON with this structure:
     "finalize": {
       "ingested": [
         {
+          "id": "{{CHANGE_ID}}",
           "path": "{{SOURCE_PATH}}",
           "value": "{{LABEL}}",
           "after": ["wiki/concepts/{{CONCEPT}}.md"]

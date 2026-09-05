@@ -80,3 +80,38 @@ def validate_vault(root: Path) -> tuple[WorkspaceConfig, list[CourseConfig]]:
                 )
         courses.append(course)
     return workspace, courses
+
+
+def validate_selected_courses(
+    root: Path,
+    requested_codes: list[str],
+) -> tuple[WorkspaceConfig, list[CourseConfig]]:
+    """Validate only explicitly selected courses, leaving unrelated files untouched."""
+    workspace = load_workspace(root, validate_jira=False)
+    courses_directory = root / "courses"
+    available = {
+        path.parent.name.upper(): path.parent.name
+        for path in courses_directory.glob("*/course.yaml")
+    } if courses_directory.exists() else {}
+    missing = [code.upper() for code in requested_codes if code.upper() not in available]
+    if missing:
+        raise ValueError(f"no course configuration for: {', '.join(missing)}")
+
+    courses: list[CourseConfig] = []
+    for requested in requested_codes:
+        directory_code = available[requested.upper()]
+        course = load_course(root, directory_code, validate_jira=False)
+        if course.code != directory_code:
+            raise ValueError(
+                f"course code {course.code} does not match directory {directory_code}"
+            )
+        if resolve_features(workspace, course).jira:
+            if workspace.jira is None:
+                workspace = load_workspace(root)
+            course = load_course(root, directory_code)
+            if workspace.jira is None or course.jira is None:
+                raise ValueError(
+                    f"enabled Jira requires workspace and course Jira configuration for {course.code}"
+                )
+        courses.append(course)
+    return workspace, courses

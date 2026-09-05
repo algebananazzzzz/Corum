@@ -26,7 +26,16 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["kind", "summary"],
-            "properties": {"kind": {"type": "string"}, "summary": {"type": "string"}}
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "source": {"type": "string", "minLength": 1},
+              "item_id": {"type": ["string", "null"]},
+              "kind": {"type": "string"},
+              "status": {"const": "changed"},
+              "summary": {"type": "string"},
+              "raw_path": {"type": ["string", "null"]},
+              "details": {"type": "object"}
+            }
           }
         },
         "failures": {
@@ -35,7 +44,30 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["source", "error"],
-            "properties": {"source": {"type": "string"}, "error": {"type": "string"}}
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "source": {"type": "string", "minLength": 1},
+              "item_id": {"type": ["string", "null"]},
+              "kind": {"type": "string"},
+              "status": {"const": "failed"},
+              "error": {"type": "string"},
+              "raw_path": {"type": ["string", "null"]},
+              "details": {"type": "object"}
+            }
+          }
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "status", "changes", "failures"],
+            "properties": {
+              "source": {"type": "string", "minLength": 1},
+              "status": {"enum": ["up_to_date", "changed", "partial", "failed"]},
+              "changes": {"type": "array", "items": {"type": "string"}},
+              "failures": {"type": "array", "items": {"type": "string"}}
+            }
           }
         }
       }
@@ -51,7 +83,45 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["status"],
-      "properties": {"status": {"$ref": "#/$defs/status"}}
+      "properties": {
+        "status": {"$ref": "#/$defs/status"},
+        "applied": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/appliedItem"}
+        },
+        "failures": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stageFailure"}
+        },
+        "reconciliation_required": {"type": "boolean"},
+        "retry_safe": {"type": "boolean"},
+        "reconciled": {"type": "boolean"}
+      }
+    },
+    "appliedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "action", "target"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "action": {"type": "string", "minLength": 1},
+        "target": {"type": "string", "minLength": 1},
+        "details": {"type": "object"}
+      }
+    },
+    "stageFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "error"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "action": {"type": ["string", "null"]},
+        "target": {"type": ["string", "null"]},
+        "error": {"type": "string"},
+        "write_state": {"enum": ["not_applied", "applied", "unknown"]},
+        "retry_safe": {"type": "boolean"},
+        "details": {"type": "object"}
+      }
     }
   }
 }

@@ -9,6 +9,8 @@ import yaml
 
 from corum.canvas import sync
 from corum.config import load_course
+from corum.run import RunManifest, StageResult
+from corum.state import write_latest_run
 from corum.workspace import validate_vault
 
 
@@ -160,7 +162,20 @@ async def test_files_download_with_verifier_and_use_configured_folder(tmp_path):
     changes, entries, failures = await sync.fetch_files(
         client, tmp_path, 1, {}, {"Lecture Slides": "lectures"}, dry_run=False
     )
-    assert changes == ["file 1 · lectures/L3.pdf"]
+    assert [change.summary for change in changes] == ["file 1 · lectures/L3.pdf"]
+    assert changes[0].model_dump() == {
+        "id": "canvas:files:1",
+        "source": "files",
+        "item_id": "1",
+        "kind": "file",
+        "status": "changed",
+        "summary": "file 1 · lectures/L3.pdf",
+        "raw_path": "lectures/L3.pdf",
+        "details": {
+            "display_name": "L3.pdf",
+            "folder_id": "7",
+        },
+    }
     assert entries == {"1": "lectures/L3.pdf"}
     assert failures == []
     assert client.downloads[0][0].endswith("verifier=secret")
@@ -181,7 +196,7 @@ async def test_files_refuse_a_path_that_escapes_raw(tmp_path):
     assert entries == {}
     assert client.downloads == []
     assert changes == []
-    assert any("not downloaded" in failure for failure in failures)
+    assert any("not downloaded" in failure.error for failure in failures)
 
 
 @pytest.mark.asyncio
@@ -201,8 +216,11 @@ async def test_one_failed_file_does_not_discard_an_earlier_download(tmp_path):
     assert entries == {"1": "A.pdf"}
     assert (tmp_path / "raw" / "A.pdf").exists()
     assert not (tmp_path / "raw" / "B.pdf").exists()
-    assert changes == ["file 1 · A.pdf"]
-    assert failures == ["file 2 not downloaded: HTTP 403"]
+    assert [change.summary for change in changes] == ["file 1 · A.pdf"]
+    assert [failure.error for failure in failures] == ["file 2 not downloaded: HTTP 403"]
+    assert failures[0].id == "canvas:files:2"
+    assert failures[0].item_id == "2"
+    assert failures[0].raw_path == "B.pdf"
 
 
 @pytest.mark.asyncio
@@ -216,7 +234,7 @@ async def test_dry_run_reports_files_without_downloading(tmp_path):
         }
     )
     changes, entries, failures = await sync.fetch_files(client, tmp_path, 1, {}, {}, dry_run=True)
-    assert changes == ["file 1 · A.pdf"]
+    assert [change.summary for change in changes] == ["file 1 · A.pdf"]
     assert entries == {}
     assert failures == []
     assert client.downloads == []
@@ -244,10 +262,10 @@ async def test_pages_fall_back_to_modules_when_pages_listing_is_closed(tmp_path)
     changes, entries, failures = await sync.fetch_pages(
         client, tmp_path, 1, {}, dry_run=False, canvas_host="https://canvas.example.edu"
     )
-    assert changes == ["page lesson · Lesson 1.3"]
+    assert [change.summary for change in changes] == ["page lesson · Lesson 1.3"]
     assert "lesson" in entries
     assert failures == []
-    text = (tmp_path / "raw" / "pages" / "lesson-1.3.md").read_text()
+    text = (tmp_path / "raw" / "pages" / "lesson-1.3-lesson.md").read_text()
     assert "type: internal" in text
 
 
@@ -258,7 +276,7 @@ async def test_syllabus_writes_only_when_body_digest_moves(tmp_path):
     changes, digest, failures = await sync.fetch_syllabus(
         client, tmp_path, 1, None, dry_run=False, canvas_host="https://canvas.example.edu"
     )
-    assert changes == ["syllabus changed"]
+    assert [change.summary for change in changes] == ["syllabus changed"]
     assert failures == []
     assert (tmp_path / "raw" / "syllabus.md").exists()
     changes_again, same, failures_again = await sync.fetch_syllabus(
@@ -273,7 +291,9 @@ def stub_capture_functions(monkeypatch, **overrides):
     async def empty(*args, **kwargs):
         return [], {}, []
 
-    async def empty_syllabus(client, course_dir, course_id, seen, dry_run, canvas_host):
+    async def empty_syllabus(
+        client, course_dir, course_id, seen, dry_run, canvas_host, timezone
+    ):
         return [], seen, []
 
     for source in ("announcements", "assignments", "files", "pages", "modules"):
@@ -401,9 +421,121 @@ async def test_failed_announcement_image_is_partial_and_announcement_is_retryabl
 
     state = json.loads((vault / "courses/CS3103/state/canvas.json").read_text())
     assert state["sources"]["announcements"] == {}
-    assert manifest.canvas.status == "partial"
+    assert manifest.canvas.status == "failed"
+    assert manifest.canvas.changes == []
     assert manifest.canvas.failures[0].source == "announcements"
+    assert manifest.canvas.failures[0].id == "canvas:announcements:9"
+    assert manifest.canvas.failures[0].item_id == "9"
+    assert manifest.canvas.failures[0].raw_path == "announcements/2026-08-28-new-9.md"
     assert "image not downloaded" in manifest.canvas.failures[0].error
+    assert list((vault / "courses/CS3103/raw/announcements").glob("*.md")) == []
+
+
+@pytest.mark.asyncio
+async def test_failed_announcement_retry_uses_the_same_deterministic_path(tmp_path):
+    record = {
+        "id": 9,
+        "title": "New",
+        "posted_at": "2026-08-28T03:59:02Z",
+        "message": '<p>Read</p><img src="https://assets.example.net/image.png">',
+    }
+    client = FakeCanvasClient(
+        {
+            ("get_all", "/discussion_topics"): [record],
+            ("download", "https://assets.example.net/image.png"): RuntimeError("HTTP 404"),
+        }
+    )
+
+    first_changes, first_entries, first_failures = await sync.fetch_announcements(
+        client,
+        tmp_path,
+        1,
+        {},
+        False,
+        "https://canvas.example.edu",
+        "Asia/Singapore",
+    )
+    client.routes[("download", "https://assets.example.net/image.png")] = b"image"
+    second_changes, second_entries, second_failures = await sync.fetch_announcements(
+        client,
+        tmp_path,
+        1,
+        {},
+        False,
+        "https://canvas.example.edu",
+        "Asia/Singapore",
+    )
+
+    assert first_changes == []
+    assert first_entries == {}
+    assert first_failures[0].raw_path == "announcements/2026-08-28-new-9.md"
+    assert second_failures == []
+    assert second_entries == {"9": "2026-08-28T11:59:02+08:00"}
+    assert second_changes[0].raw_path == first_failures[0].raw_path
+    assert [path.name for path in (tmp_path / "raw/announcements").glob("*.md")] == [
+        "2026-08-28-new-9.md"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_first_sync_bootstraps_watched_canvas_state_in_the_state_layer(tmp_path, monkeypatch):
+    vault, course = make_vault(tmp_path, sources=["announcements", "syllabus"])
+    (vault / "courses/CS3103/state/canvas.json").unlink()
+    stub_capture_functions(monkeypatch)
+    monkeypatch.setenv("CORUM_CANVAS_TOKEN", "secret")
+    monkeypatch.setattr(sync, "CanvasClient", lambda host, token: FakeCanvasClient())
+
+    manifest = await sync.sync_course(vault, course, dry_run=False)
+
+    state = json.loads((vault / "courses/CS3103/state/canvas.json").read_text())
+    assert state["sources"] == {"announcements": {}, "syllabus": None}
+    assert [item.model_dump() for item in manifest.canvas.sources] == [
+        {
+            "source": "announcements",
+            "status": "up_to_date",
+            "changes": [],
+            "failures": [],
+        },
+        {
+            "source": "syllabus",
+            "status": "up_to_date",
+            "changes": [],
+            "failures": [],
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_new_capture_preserves_an_unresolved_jira_retry_barrier(tmp_path, monkeypatch):
+    vault, _ = make_vault(tmp_path, sources=[])
+    course_file = vault / "courses/CS3103/course.yaml"
+    configured = yaml.safe_load(course_file.read_text())
+    configured["features"]["jira"]["enabled"] = True
+    configured["jira"] = {"epic": "STUDY-1"}
+    course_file.write_text(yaml.safe_dump(configured))
+    course = load_course(vault, "CS3103")
+    previous = RunManifest.create(
+        "CS3103",
+        {"jira": True, "wiki": True},
+        timezone="Asia/Singapore",
+    )
+    previous.jira = StageResult(
+        status="partial",
+        reconciliation_required=True,
+        retry_safe=False,
+    )
+    write_latest_run(
+        vault / "courses/CS3103", previous.model_dump(mode="json")
+    )
+    stub_capture_functions(monkeypatch)
+    monkeypatch.setenv("CORUM_CANVAS_TOKEN", "secret")
+    monkeypatch.setattr(sync, "CanvasClient", lambda host, token: FakeCanvasClient())
+
+    manifest = await sync.sync_course(vault, course, dry_run=False)
+
+    assert manifest.jira.status == "partial"
+    assert manifest.jira.reconciliation_required is True
+    assert manifest.jira.retry_safe is False
 
 
 @pytest.mark.asyncio
