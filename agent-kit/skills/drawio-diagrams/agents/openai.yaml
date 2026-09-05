@@ -1,0 +1,4 @@
+interface:
+  display_name: "Draw.io Diagrams"
+  short_description: "Create and safely edit Obsidian Draw.io diagrams"
+  default_prompt: "Use $drawio-diagrams to create or edit an editable Draw.io diagram for this wiki."

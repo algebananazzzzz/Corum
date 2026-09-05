@@ -1,11 +1,14 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "corum"
 version = "0.1.0"
 description = "Configuration and tooling for private Corum academic vaults"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.12",
@@ -27,6 +30,34 @@ corum = "corum.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.data-files]
+"share/corum/agent-kit" = ["agent-kit/AGENTS.base.md"]
+"share/corum/agent-kit/skills/authoring-wiki" = ["agent-kit/skills/authoring-wiki/SKILL.md"]
+"share/corum/agent-kit/skills/authoring-wiki/references" = [
+    "agent-kit/skills/authoring-wiki/references/authoring-markdown.md",
+    "agent-kit/skills/authoring-wiki/references/course-split-rules.md",
+    "agent-kit/skills/authoring-wiki/references/markdown-conventions.md",
+]
+"share/corum/agent-kit/skills/drawio-diagrams" = ["agent-kit/skills/drawio-diagrams/SKILL.md"]
+"share/corum/agent-kit/skills/drawio-diagrams/agents" = ["agent-kit/skills/drawio-diagrams/agents/openai.yaml"]
+"share/corum/agent-kit/skills/drawio-diagrams/references" = ["agent-kit/skills/drawio-diagrams/references/obsidian-format.md"]
+"share/corum/agent-kit/skills/drawio-diagrams/scripts" = ["agent-kit/skills/drawio-diagrams/scripts/drawio_pair.py"]
+"share/corum/agent-kit/skills/linting-wiki" = ["agent-kit/skills/linting-wiki/SKILL.md"]
+"share/corum/agent-kit/skills/linting-wiki/scripts" = ["agent-kit/skills/linting-wiki/scripts/lint-wiki.py"]
+"share/corum/agent-kit/skills/scope-course" = ["agent-kit/skills/scope-course/SKILL.md"]
+"share/corum/agent-kit/skills/scope-course/references" = ["agent-kit/skills/scope-course/references/jira-board.md"]
+"share/corum/agent-kit/skills/sync-course" = ["agent-kit/skills/sync-course/SKILL.md"]
+"share/corum/agent-kit/templates" = [
+    "agent-kit/templates/Changelog.md",
+    "agent-kit/templates/Conventions and Milestones.md",
+]
+"share/corum/agent-kit/templates/wiki" = [
+    "agent-kit/templates/wiki/concept.md",
+    "agent-kit/templates/wiki/explainer.md",
+    "agent-kit/templates/wiki/index.md",
+    "agent-kit/templates/wiki/reference.md",
+]
 
 [tool.pytest.ini_options]
 filterwarnings = [

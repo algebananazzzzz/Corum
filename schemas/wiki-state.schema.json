@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Corum wiki source-finalization state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "ingested"],
+  "properties": {
+    "schema": {"const": 1},
+    "ingested": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+      },
+      "additionalProperties": {
+        "type": ["string", "null"]
+      }
+    }
+  }
+}

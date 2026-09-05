@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
+import sysconfig
 
 import yaml
 
@@ -19,13 +21,31 @@ DEFAULT_WORKSPACE = {
 }
 
 
+def _agent_kit() -> Path:
+    candidates = (
+        Path(sysconfig.get_path("data")) / "share/corum/agent-kit",
+        Path(__file__).resolve().parents[2] / "agent-kit",
+    )
+    for candidate in candidates:
+        if (candidate / "AGENTS.base.md").is_file():
+            return candidate
+    raise RuntimeError("installed Corum agent kit is missing")
+
+
 def initialize(root: Path) -> Path:
     root = root.resolve()
     if root.exists() and (not root.is_dir() or any(root.iterdir())):
         raise ValueError(f"refusing to initialize non-empty target: {root}")
+    agent_kit = _agent_kit()
     root.mkdir(parents=True, exist_ok=True)
     (root / "courses").mkdir()
     (root / "corum.yaml").write_text(yaml.safe_dump(DEFAULT_WORKSPACE, sort_keys=False))
+    (root / "AGENTS.md").write_text(
+        (agent_kit / "AGENTS.base.md").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    shutil.copytree(agent_kit / "skills", root / "skills")
+    shutil.copytree(agent_kit / "templates", root / "templates")
     return root
 
 
