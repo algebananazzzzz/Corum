@@ -7,14 +7,16 @@ from pathlib import Path
 import httpx
 import pytest
 import yaml
+from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema import ValidationError as SchemaValidationError
 from jsonschema import validate
 from pydantic import ValidationError
 
 from corum import cli
-from corum.config import load_course
+from corum.config import JiraWorkspace, load_course, load_workspace
 from corum.jira import JiraClient
 from corum.jira import cache
+from corum.jira import apply as jira_apply
 from corum.jira.apply import InvalidPlan, JiraDisabled, JiraPlan, apply_plan
 
 
@@ -427,6 +429,216 @@ async def test_http_client_uses_basic_auth_rest_v3_adf_and_token_pagination():
         if request.url.path == "/rest/api/3/search/jql"
     ]
     assert search_payloads[0]["jql"] == 'parent = "STUDY-1"'
+
+
+@pytest.mark.parametrize(
+    "site",
+    [
+        "http://example.atlassian.net",
+        "https://example.atlassian.net/jira",
+        "https://example.atlassian.net?tenant=other",
+        "https://user@example.atlassian.net",
+    ],
+)
+def test_client_rejects_non_https_or_non_origin_sites_before_authentication(site):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("invalid Jira sites must not reach an authenticated transport")
+
+    with pytest.raises(ValueError, match="HTTPS origin"):
+        JiraClient(site, "student@example.com", "secret", transport=httpx.MockTransport(handler))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["update", "transition", "fetch"])
+async def test_client_rejects_traversal_issue_keys_before_authenticated_request(operation):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("invalid Jira keys must not reach an authenticated transport")
+
+    client = JiraClient(
+        "https://example.atlassian.net",
+        "student@example.com",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(ValueError, match="issue key"):
+        if operation == "update":
+            await client.update_fields("../myself", {"summary": "Unsafe"})
+        elif operation == "transition":
+            await client.transition_issue("../myself", "2")
+        else:
+            await client.fetch_issue("../myself")
+
+
+@pytest.mark.asyncio
+async def test_client_rejects_unsafe_project_parent_epic_and_transition_before_request():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("invalid Jira identifiers must not reach an authenticated transport")
+
+    client = JiraClient(
+        "https://example.atlassian.net",
+        "student@example.com",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(ValueError, match="project key"):
+        await client.create_issue(
+            {"project": "../MYSELF", "type": "Task", "parent": "STUDY-1", "summary": "Unsafe"}
+        )
+    with pytest.raises(ValueError, match="issue key"):
+        await client.create_issue(
+            {"project": "STUDY", "type": "Task", "parent": "../MYSELF", "summary": "Unsafe"}
+        )
+    with pytest.raises(ValueError, match="issue key"):
+        await client.epic_children('../myself" OR project IS NOT EMPTY')
+    with pytest.raises(ValueError, match="transition ID"):
+        await client.transition_issue("STUDY-2", "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("project", "transitions", "match"),
+    [
+        ("", {"this_week": "2"}, "project"),
+        ("STUDY", {"this_week": ""}, "transition"),
+    ],
+)
+async def test_all_resolved_config_values_are_preflighted_before_first_action(
+    tmp_path, monkeypatch, project, transitions, match
+):
+    write_workspace(tmp_path)
+    write_course(tmp_path, "CS3103")
+    course = load_course(tmp_path, "CS3103")
+    workspace = load_workspace(tmp_path)
+    unsafe_jira = JiraWorkspace.model_construct(
+        site=workspace.jira.site,
+        project=project,
+        transitions=transitions,
+    )
+    monkeypatch.setattr(
+        jira_apply,
+        "load_workspace",
+        lambda vault: workspace.model_copy(update={"jira": unsafe_jira}),
+    )
+    plan = JiraPlan.model_validate(
+        {
+            "schema": 1,
+            "course": "CS3103",
+            "epic": "STUDY-1",
+            "actions": [
+                {"action": "update", "key": "STUDY-2", "set": {"summary": "First"}},
+                {"action": "transition", "key": "STUDY-2", "transition": "this_week"},
+            ],
+        }
+    )
+
+    with pytest.raises(InvalidPlan, match=match):
+        await apply_plan(tmp_path, course, plan, client=FailIfCalledClient())
+
+
+def _plan_schema_accepts(value: dict) -> bool:
+    schema = json.loads((SCHEMAS / "jira-plan.schema.json").read_text())
+    return not list(
+        Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(value)
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (
+            {
+                "schema": 1,
+                "course": "CS3103",
+                "epic": "STUDY-1",
+                "actions": [
+                    {"action": "update", "key": "STUDY-2", "set": {"due": "2026-09-11"}}
+                ],
+            },
+            True,
+        ),
+        ({"schema": True, "course": "CS3103", "epic": "STUDY-1", "actions": []}, False),
+        ({"schema": 1.0, "course": "CS3103", "epic": "STUDY-1", "actions": []}, True),
+        ({"schema": 1, "course": "   ", "epic": "STUDY-1", "actions": []}, False),
+        ({"schema": 1, "course": "CS3103", "epic": "../MYSELF", "actions": []}, False),
+        (
+            {
+                "schema": 1,
+                "course": "CS3103",
+                "epic": "STUDY-1",
+                "actions": [{"action": "update", "key": "../myself", "set": {"due": None}}],
+            },
+            False,
+        ),
+        (
+            {
+                "schema": 1,
+                "course": "CS3103",
+                "epic": "STUDY-1",
+                "actions": [
+                    {
+                        "action": "create",
+                        "issue": {"type": "Task", "parent": "NOPE", "summary": "Task"},
+                    }
+                ],
+            },
+            False,
+        ),
+        (
+            {
+                "schema": 1,
+                "course": "CS3103",
+                "epic": "STUDY-1",
+                "actions": [
+                    {"action": "transition", "key": "STUDY-2", "transition": "   "}
+                ],
+            },
+            False,
+        ),
+        (
+            {
+                "schema": 1,
+                "course": "CS3103",
+                "epic": "STUDY-1",
+                "actions": [
+                    {"action": "update", "key": "STUDY-2", "set": {"summary": "   "}}
+                ],
+            },
+            False,
+        ),
+        (
+            {
+                "schema": 1,
+                "course": "CS3103",
+                "epic": "STUDY-1",
+                "actions": [
+                    {"action": "update", "key": "STUDY-2", "set": {"due": "2026-02-30"}}
+                ],
+            },
+            False,
+        ),
+        (
+            {
+                "schema": 1,
+                "course": "CS3103",
+                "epic": "STUDY-1",
+                "actions": [
+                    {"action": "update", "key": "STUDY-2", "set": {"due": 0}}
+                ],
+            },
+            False,
+        ),
+    ],
+)
+def test_plan_model_and_schema_have_bidirectional_acceptance_agreement(value, expected):
+    try:
+        JiraPlan.model_validate(value)
+    except ValidationError:
+        model_accepts = False
+    else:
+        model_accepts = True
+
+    assert model_accepts is expected
+    assert _plan_schema_accepts(value) is expected
 
 
 def test_cli_dry_run_prints_validated_plan_without_credentials_or_client(tmp_path, monkeypatch, capsys):

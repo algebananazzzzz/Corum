@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from jsonschema import Draft202012Validator, FormatChecker
 
 from corum.config import load_course
 from corum.jira import cache
@@ -230,3 +231,37 @@ def test_failed_atomic_replace_preserves_previous_bytes_and_cleans_scratch(
 
     assert target.read_bytes() == before
     assert list(target.parent.glob(".jira-*.json")) == []
+
+
+@pytest.mark.parametrize(
+    ("due", "expected"),
+    [
+        ("2026-09-11", True),
+        (None, True),
+        ("tomorrow", False),
+        ("2026-02-30", False),
+        ("20260911", False),
+    ],
+)
+def test_cache_runtime_and_state_schema_agree_on_due_dates(due, expected):
+    state = {
+        "schema": 1,
+        "reconciled_at": STAMP,
+        "issues": [issue(due=due, labels=["assessment", "session"])],
+    }
+    schema_path = Path(__file__).parents[2] / "schemas/jira-state.schema.json"
+    schema_accepts = not list(
+        Draft202012Validator(
+            json.loads(schema_path.read_text()),
+            format_checker=FormatChecker(),
+        ).iter_errors(state)
+    )
+    try:
+        cache.normalize_cache(state)
+    except cache.CacheError:
+        runtime_accepts = False
+    else:
+        runtime_accepts = True
+
+    assert runtime_accepts is expected
+    assert schema_accepts is expected

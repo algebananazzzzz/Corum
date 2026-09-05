@@ -6,15 +6,29 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from corum.config import CourseConfig, load_workspace, resolve_features
+from corum.validation import (
+    require_https_origin,
+    require_identifier,
+    require_iso_date,
+    require_issue_key,
+    require_nonblank,
+    require_project_key,
+    require_schema_one,
+    require_transition_id,
+)
 
 from . import cache
 from .client import JiraClient
 
 
-NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+Identifier = Annotated[str, AfterValidator(require_identifier)]
+IssueKey = Annotated[str, AfterValidator(require_issue_key)]
+NonBlank = Annotated[str, AfterValidator(require_nonblank)]
+PlanDate = Annotated[date, BeforeValidator(require_iso_date)]
+SchemaOne = Annotated[Literal[1], BeforeValidator(require_schema_one)]
 
 
 class _StrictModel(BaseModel):
@@ -23,19 +37,19 @@ class _StrictModel(BaseModel):
 
 class CreateIssue(_StrictModel):
     type: Literal["Task", "Session", "Milestone"]
-    parent: NonEmpty
-    summary: NonEmpty
+    parent: IssueKey
+    summary: NonBlank
     description: str | None = None
-    due: date | None = None
+    due: PlanDate | None = None
     labels: list[str] | None = None
 
 
 class UpdateFields(_StrictModel):
     type: Literal["Task", "Session", "Milestone"] | None = None
-    parent: NonEmpty | None = None
-    summary: NonEmpty | None = None
+    parent: IssueKey | None = None
+    summary: NonBlank | None = None
     description: str | None = None
-    due: date | None = None
+    due: PlanDate | None = None
     labels: list[str] | None = None
 
     @model_validator(mode="before")
@@ -63,14 +77,14 @@ class CreateAction(_StrictModel):
 
 class UpdateAction(_StrictModel):
     action: Literal["update"]
-    key: NonEmpty
+    key: IssueKey
     set: UpdateFields
 
 
 class TransitionAction(_StrictModel):
     action: Literal["transition"]
-    key: NonEmpty
-    transition: NonEmpty
+    key: IssueKey
+    transition: Identifier
 
 
 PlanAction = Annotated[
@@ -82,15 +96,15 @@ PlanAction = Annotated[
 class JiraPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema: Literal[1]
-    course: NonEmpty
-    epic: NonEmpty
+    schema: SchemaOne
+    course: Identifier
+    epic: IssueKey
     actions: list[PlanAction]
 
 
 class AppliedAction(_StrictModel):
     action: Literal["create", "update", "transition"]
-    key: str
+    key: IssueKey
 
 
 class ApplyResult(_StrictModel):
@@ -114,6 +128,12 @@ def _validate_plan(vault: Path, course: CourseConfig, plan: JiraPlan):
         raise JiraDisabled(f"Jira is disabled for {course.code}")
     if workspace.jira is None or course.jira is None:
         raise InvalidPlan(f"enabled Jira configuration is incomplete for {course.code}")
+    try:
+        require_https_origin(str(workspace.jira.site))
+        require_project_key(workspace.jira.project)
+        require_issue_key(course.jira.epic, "configured Jira epic key")
+    except ValueError as error:
+        raise InvalidPlan(f"invalid configured Jira value: {error}") from error
     if plan.course != course.code:
         raise InvalidPlan(
             f"plan course {plan.course!r} does not match selected course {course.code!r}"
@@ -132,8 +152,17 @@ def _validate_plan(vault: Path, course: CourseConfig, plan: JiraPlan):
             raise InvalidPlan(
                 f"actions[{index}] parent {parent!r} does not match plan epic {plan.epic!r}"
             )
-        if isinstance(action, TransitionAction) and action.transition not in workspace.jira.transitions:
-            raise InvalidPlan(f"actions[{index}] names unknown Jira transition {action.transition!r}")
+        if isinstance(action, TransitionAction):
+            if action.transition not in workspace.jira.transitions:
+                raise InvalidPlan(
+                    f"actions[{index}] names unknown Jira transition {action.transition!r}"
+                )
+            try:
+                require_transition_id(workspace.jira.transitions[action.transition])
+            except ValueError as error:
+                raise InvalidPlan(
+                    f"actions[{index}] has invalid configured transition: {error}"
+                ) from error
     return workspace.jira
 
 

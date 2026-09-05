@@ -18,10 +18,10 @@
       "additionalProperties": false,
       "required": ["key", "type", "summary", "status", "due", "labels", "description", "updated_at"],
       "properties": {
-        "key": {"type": "string", "minLength": 1},
-        "type": {"type": "string", "minLength": 1},
-        "summary": {"type": "string", "minLength": 1},
-        "status": {"type": "string", "minLength": 1},
+        "key": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$"},
+        "type": {"type": "string", "pattern": "\\S"},
+        "summary": {"type": "string", "pattern": "\\S"},
+        "status": {"type": "string", "pattern": "\\S"},
         "due": {"type": ["string", "null"], "format": "date"},
         "labels": {
           "oneOf": [

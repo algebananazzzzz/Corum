@@ -20,9 +20,17 @@
       "type": "object",
       "required": ["site", "project"],
       "properties": {
-        "site": {"type": "string", "format": "uri"},
-        "project": {"type": "string"},
-        "transitions": {"type": "object", "additionalProperties": {"type": "string"}}
+        "site": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://[^/?#@]+/?$"
+        },
+        "project": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"},
+        "transitions": {
+          "type": "object",
+          "propertyNames": {"pattern": "^\\S+$"},
+          "additionalProperties": {"type": "string", "pattern": "^[0-9]+$"}
+        }
       }
     },
     "calendar": {

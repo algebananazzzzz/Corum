@@ -7,7 +7,15 @@ from typing import Literal
 import warnings
 
 import yaml
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator
+
+from .validation import (
+    require_https_origin,
+    require_identifier,
+    require_issue_key,
+    require_project_key,
+    require_transition_id,
+)
 
 
 warnings.filterwarnings(
@@ -45,6 +53,25 @@ class JiraWorkspace(BaseModel):
     project: str
     transitions: dict[str, str] = Field(default_factory=dict)
 
+    @field_validator("site")
+    @classmethod
+    def site_is_https_origin(cls, value: HttpUrl) -> HttpUrl:
+        require_https_origin(str(value))
+        return value
+
+    @field_validator("project")
+    @classmethod
+    def project_has_jira_key_syntax(cls, value: str) -> str:
+        return require_project_key(value)
+
+    @field_validator("transitions")
+    @classmethod
+    def transitions_are_named_ids(cls, value: dict[str, str]) -> dict[str, str]:
+        for name, transition_id in value.items():
+            require_identifier(name, "Jira transition name")
+            require_transition_id(transition_id)
+        return value
+
 
 class CalendarFiles(BaseModel):
     timetable: Path
@@ -73,6 +100,11 @@ class CourseFeatures(BaseModel):
 
 class JiraCourse(BaseModel):
     epic: str
+
+    @field_validator("epic")
+    @classmethod
+    def epic_has_issue_key_syntax(cls, value: str) -> str:
+        return require_issue_key(value, "Jira epic key")
 
 
 class WikiCourse(BaseModel):

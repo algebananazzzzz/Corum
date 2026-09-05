@@ -22,7 +22,9 @@
     "jira": {
       "type": "object",
       "required": ["epic"],
-      "properties": {"epic": {"type": "string"}}
+      "properties": {
+        "epic": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$"}
+      }
     },
     "wiki": {"type": "object", "properties": {"split_rules": {"type": "string"}}}
   }

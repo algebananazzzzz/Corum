@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from corum.config import CourseConfig
+from corum.validation import require_iso_date, require_issue_key
 
 
 CACHE_FIELDS = {"schema", "reconciled_at", "issues"}
@@ -55,6 +56,22 @@ def _optional_string(value: Any, name: str) -> str | None:
     return value
 
 
+def _optional_date(value: Any, name: str) -> str | None:
+    if value is None:
+        return None
+    try:
+        return require_iso_date(value, name)
+    except ValueError as error:
+        raise CacheError(str(error)) from error
+
+
+def _issue_key(value: Any, name: str) -> str:
+    try:
+        return require_issue_key(value, name)
+    except ValueError as error:
+        raise CacheError(str(error)) from error
+
+
 def _timestamp(value: Any, name: str) -> str:
     value = _required_string(value, name)
     try:
@@ -82,11 +99,11 @@ def normalize_issue(value: Any, name: str = "issue") -> dict[str, Any]:
     raw = _object(value, name)
     _only_fields(raw, ISSUE_FIELDS, name)
     return {
-        "key": _required_string(raw.get("key"), f"{name}.key"),
+        "key": _issue_key(raw.get("key"), f"{name}.key"),
         "type": _required_string(raw.get("type"), f"{name}.type"),
         "summary": _required_string(raw.get("summary"), f"{name}.summary"),
         "status": _required_string(raw.get("status"), f"{name}.status"),
-        "due": _optional_string(raw.get("due"), f"{name}.due"),
+        "due": _optional_date(raw.get("due"), f"{name}.due"),
         "labels": _labels(raw.get("labels"), f"{name}.labels"),
         "description": _optional_string(raw.get("description"), f"{name}.description"),
         "updated_at": _optional_timestamp(raw.get("updated_at"), f"{name}.updated_at"),

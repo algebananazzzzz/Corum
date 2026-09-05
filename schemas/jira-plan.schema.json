@@ -6,8 +6,8 @@
   "required": ["schema", "course", "epic", "actions"],
   "properties": {
     "schema": {"const": 1},
-    "course": {"type": "string", "minLength": 1},
-    "epic": {"type": "string", "minLength": 1},
+    "course": {"type": "string", "pattern": "^\\S+$"},
+    "epic": {"$ref": "#/$defs/issueKey"},
     "actions": {
       "type": "array",
       "items": {
@@ -20,6 +20,9 @@
     }
   },
   "$defs": {
+    "issueKey": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$"},
+    "nonBlank": {"type": "string", "pattern": "\\S"},
+    "identifier": {"type": "string", "pattern": "^\\S+$"},
     "issueType": {"enum": ["Task", "Session", "Milestone"]},
     "labels": {"type": ["array", "null"], "items": {"type": "string"}},
     "createFields": {
@@ -28,8 +31,8 @@
       "required": ["type", "parent", "summary"],
       "properties": {
         "type": {"$ref": "#/$defs/issueType"},
-        "parent": {"type": "string", "minLength": 1},
-        "summary": {"type": "string", "minLength": 1},
+        "parent": {"$ref": "#/$defs/issueKey"},
+        "summary": {"$ref": "#/$defs/nonBlank"},
         "description": {"type": ["string", "null"]},
         "due": {"type": ["string", "null"], "format": "date"},
         "labels": {"$ref": "#/$defs/labels"}
@@ -41,8 +44,8 @@
       "minProperties": 1,
       "properties": {
         "type": {"$ref": "#/$defs/issueType"},
-        "parent": {"type": "string", "minLength": 1},
-        "summary": {"type": "string", "minLength": 1},
+        "parent": {"$ref": "#/$defs/issueKey"},
+        "summary": {"$ref": "#/$defs/nonBlank"},
         "description": {"type": ["string", "null"]},
         "due": {"type": ["string", "null"], "format": "date"},
         "labels": {"$ref": "#/$defs/labels"}
@@ -63,7 +66,7 @@
       "required": ["action", "key", "set"],
       "properties": {
         "action": {"const": "update"},
-        "key": {"type": "string", "minLength": 1},
+        "key": {"$ref": "#/$defs/issueKey"},
         "set": {"$ref": "#/$defs/updateFields"}
       }
     },
@@ -73,8 +76,8 @@
       "required": ["action", "key", "transition"],
       "properties": {
         "action": {"const": "transition"},
-        "key": {"type": "string", "minLength": 1},
-        "transition": {"type": "string", "minLength": 1}
+        "key": {"$ref": "#/$defs/issueKey"},
+        "transition": {"$ref": "#/$defs/identifier"}
       }
     }
   }
