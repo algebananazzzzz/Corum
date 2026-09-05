@@ -80,10 +80,9 @@ Corum/
 │   ├── AGENTS.base.md
 │   ├── skills/
 │   │   ├── sync-course/
-│   │   ├── scope-jira/
-│   │   ├── scope-wiki/
-│   │   ├── author-wiki/
-│   │   ├── lint-wiki/
+│   │   ├── scope-course/
+│   │   ├── authoring-wiki/
+│   │   ├── linting-wiki/
 │   │   └── drawio-diagrams/
 │   └── templates/
 │       ├── workspace/
@@ -107,6 +106,12 @@ Corum/
 ```
 
 Only first-party, importable Python code belongs under `src/corum`. Skills and templates remain visible under `agent-kit` because they are instructions and source assets rather than Python modules.
+
+The tree describes ownership boundaries, not a requirement to create empty modules. Implementation starts with the fewest files that deliver each tested slice and splits a file only when it acquires a second responsibility.
+
+## Reuse policy
+
+Corum is extracted from the current AcademicsWiki repository rather than rewritten from memory. Existing Canvas conversion, placement, change detection, atomic state, Jira cache, wiki linting, templates, and skills are copied with their tests, then refactored only where they depend on the old vault layout, Canvas MCP, mandatory Jira, or mandatory wiki behavior. No compatibility shim is added to Corum for the old layout.
 
 ## Responsibility boundaries
 
@@ -140,7 +145,7 @@ Skills own semantic judgment and orchestration:
 - presenting one approval gate before Jira or wiki mutation;
 - coordinating deterministic helpers and reporting their results.
 
-The Jira scoper and wiki scoper are independent. Neither feature is allowed to assume the other is enabled.
+The read-only `scope-course` skill scopes only the enabled outputs. Its Jira and wiki result sections are independent, and neither section is allowed to assume the other feature or its files exist.
 
 ## User vault format
 
