@@ -139,9 +139,9 @@ def lint(
         ingested[relative] = None
     for relative, label in ingested.items():
         source = raw_source(course, relative)
+        total = page_count(source)
         if not label:
             continue
-        total = page_count(source)
         if total is None:
             continue
         valid_pages = set(range(1, total + 1))

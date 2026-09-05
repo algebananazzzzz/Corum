@@ -69,6 +69,23 @@ def _write_drawio_pair(svg: Path) -> None:
     )
 
 
+def _write_custom_drawio_pair(svg: Path, svg_body: str, cells: list[str]) -> None:
+    svg.write_text(
+        f'<svg xmlns="http://www.w3.org/2000/svg">{svg_body}</svg>',
+        encoding="utf-8",
+    )
+    encoded_cells = "".join(
+        f'<mxCell id="{index}" parent="1" value="{value}"/>'
+        for index, value in enumerate(cells, 2)
+    )
+    Path(f"{svg}.xml").write_text(
+        '<mxfile><diagram><mxGraphModel><root>'
+        '<mxCell id="0"/><mxCell id="1" parent="0"/>'
+        f"{encoded_cells}</root></mxGraphModel></diagram></mxfile>",
+        encoding="utf-8",
+    )
+
+
 def test_agent_kit_contains_only_declared_skills():
     root = AGENT_KIT / "skills"
 
@@ -307,6 +324,35 @@ def test_linter_previews_null_provenance_without_mutating_state(tmp_path):
     assert (course / "state/wiki.json").read_text(encoding="utf-8") == state
 
 
+def test_linter_rejects_a_corrupt_null_provenance_pdf(tmp_path):
+    course = tmp_path / "courses" / "DEMO"
+    (course / "state").mkdir(parents=True)
+    (course / "raw").mkdir()
+    (course / "wiki").mkdir()
+    (course / "state/wiki.json").write_text(
+        '{"schema": 1, "ingested": {}}', encoding="utf-8"
+    )
+    (course / "wiki/index.md").write_text("# Index\n", encoding="utf-8")
+    (course / "raw/corrupt.pdf").write_bytes(b"not a PDF")
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(AGENT_KIT / "skills/linting-wiki/scripts/lint-wiki.py"),
+            "DEMO",
+            "--pending-null",
+            "corrupt.pdf",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert "could not inspect PDF" in completed.stdout
+
+
 def test_linter_rejects_empty_provenance_labels_in_state_and_preview(tmp_path):
     course = tmp_path / "courses" / "DEMO"
     (course / "state").mkdir(parents=True)
@@ -357,6 +403,46 @@ def test_drawio_replace_changes_only_exact_label_nodes(tmp_path):
     assert "Long suffix" not in svg.read_text(encoding="utf-8")
     assert "Long suffix" not in Path(f"{svg}.xml").read_text(encoding="utf-8")
     module.DrawioPair(svg).validate(strict=True)
+
+
+def test_drawio_replace_ignores_a_matching_fragment_in_a_larger_visible_label(tmp_path):
+    module = _load_drawio_pair_module()
+    svg = tmp_path / "diagram.svg"
+    _write_custom_drawio_pair(
+        svg,
+        "<text>Short</text>"
+        "<text><tspan>Short</tspan><tspan> suffix</tspan></text>",
+        ["Short", "Short suffix"],
+    )
+
+    source_hits, svg_hits = module.DrawioPair(svg).replace("Short", "Long")
+
+    assert (source_hits, svg_hits) == (1, 1)
+    root = module.ET.fromstring(svg.read_text(encoding="utf-8"))
+    labels = [
+        "".join(node.itertext())
+        for node in root.iter()
+        if module.local_name(node.tag) == "text"
+    ]
+    assert labels == ["Long", "Short suffix"]
+    module.DrawioPair(svg).validate(strict=True)
+
+
+def test_drawio_replace_preserves_inline_source_label_markup(tmp_path):
+    module = _load_drawio_pair_module()
+    svg = tmp_path / "diagram.svg"
+    _write_custom_drawio_pair(
+        svg,
+        "<text>Short</text>",
+        ["&lt;b&gt;Short&lt;/b&gt;"],
+    )
+
+    module.DrawioPair(svg).replace("Short", "Long")
+
+    pair = module.DrawioPair(svg)
+    values = [cell.get("value") for cell in pair.cells() if cell.get("value")]
+    assert values == ["<b>Long</b>"]
+    pair.validate(strict=True)
 
 
 def test_drawio_replace_failure_preserves_both_original_files(tmp_path, monkeypatch):

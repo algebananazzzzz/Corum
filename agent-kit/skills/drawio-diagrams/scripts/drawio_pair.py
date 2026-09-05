@@ -19,7 +19,6 @@ import zlib
 
 EM_DASH = "\N{EM DASH}"
 ENCODE_SAFE = "~()*!.'-_"
-SVG_LABEL_TAGS = {"div", "span", "text", "tspan"}
 
 
 class PairError(ValueError):
@@ -48,6 +47,67 @@ def label_tokens(value: str) -> list[str]:
 
 def local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
+
+
+def visible_label_nodes(node: ET.Element):
+    """Yield complete rendered label containers without nested label fragments."""
+    name = local_name(node.tag)
+    if name == "text":
+        yield node
+        return
+    if name == "div":
+        has_nested_div = any(
+            local_name(child.tag) == "div"
+            for child in node.iter()
+            if child is not node
+        )
+        if has_nested_div:
+            for child in node:
+                yield from visible_label_nodes(child)
+        else:
+            yield node
+        return
+    if name in {"span", "tspan"}:
+        yield node
+        return
+    for child in node:
+        yield from visible_label_nodes(child)
+
+
+def replace_element_text(node: ET.Element, new: str) -> None:
+    slots: list[tuple[ET.Element, str]] = []
+
+    def collect(element: ET.Element) -> None:
+        if element.text is not None:
+            slots.append((element, "text"))
+        for child in element:
+            collect(child)
+            if child.tail is not None:
+                slots.append((child, "tail"))
+
+    collect(node)
+    for index, (element, attribute) in enumerate(slots):
+        setattr(element, attribute, new if index == 0 else "")
+
+
+def replace_source_label(value: str, new: str) -> str:
+    if "<" not in value:
+        return new
+    parts = re.split(r"(<[^>]+>)", value)
+    text_parts = [
+        index
+        for index, part in enumerate(parts)
+        if not part.startswith("<") and html.unescape(part).strip()
+    ]
+    if len(text_parts) != 1:
+        raise PairError(
+            "formatted source label spans multiple text nodes; edit through Obsidian instead"
+        )
+    index = text_parts[0]
+    match = re.fullmatch(r"(\s*)(.*?)(\s*)", parts[index], flags=re.S)
+    assert match is not None
+    parts[index] = f"{match.group(1)}{html.escape(new, quote=False)}{match.group(3)}"
+    return "".join(parts)
 
 
 def contains_sequence(haystack: list[str], needle: list[str]) -> bool:
@@ -245,17 +305,19 @@ class DrawioPair:
         if EM_DASH in new:
             raise PairError("new text contains an em dash")
 
-        source_hits = 0
-        for cell in self.cells():
-            value = cell.get("value")
-            if value and plain_label(value) == old:
-                cell.set("value", new)
-                source_hits += 1
+        source_matches = [
+            cell
+            for cell in self.cells()
+            if (value := cell.get("value")) and plain_label(value) == old
+        ]
+        source_hits = len(source_matches)
+        for cell in source_matches:
+            cell.set("value", replace_source_label(cell.get("value", ""), new))
 
         svg_hits = 0
-        for node in self.svg_root.iter():
-            if local_name(node.tag) in SVG_LABEL_TAGS and node.text == old:
-                node.text = new
+        for node in visible_label_nodes(self.svg_root):
+            if "".join(node.itertext()) == old:
+                replace_element_text(node, new)
                 svg_hits += 1
         if source_hits == 0:
             raise PairError(f"source does not contain exact text: {old!r}")
