@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Corum exact Jira application plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "course", "epic", "actions"],
+  "properties": {
+    "schema": {"const": 1},
+    "course": {"type": "string", "minLength": 1},
+    "epic": {"type": "string", "minLength": 1},
+    "actions": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"$ref": "#/$defs/create"},
+          {"$ref": "#/$defs/update"},
+          {"$ref": "#/$defs/transition"}
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "issueType": {"enum": ["Task", "Session", "Milestone"]},
+    "labels": {"type": ["array", "null"], "items": {"type": "string"}},
+    "createFields": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "parent", "summary"],
+      "properties": {
+        "type": {"$ref": "#/$defs/issueType"},
+        "parent": {"type": "string", "minLength": 1},
+        "summary": {"type": "string", "minLength": 1},
+        "description": {"type": ["string", "null"]},
+        "due": {"type": ["string", "null"], "format": "date"},
+        "labels": {"$ref": "#/$defs/labels"}
+      }
+    },
+    "updateFields": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "type": {"$ref": "#/$defs/issueType"},
+        "parent": {"type": "string", "minLength": 1},
+        "summary": {"type": "string", "minLength": 1},
+        "description": {"type": ["string", "null"]},
+        "due": {"type": ["string", "null"], "format": "date"},
+        "labels": {"$ref": "#/$defs/labels"}
+      }
+    },
+    "create": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "issue"],
+      "properties": {
+        "action": {"const": "create"},
+        "issue": {"$ref": "#/$defs/createFields"}
+      }
+    },
+    "update": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "key", "set"],
+      "properties": {
+        "action": {"const": "update"},
+        "key": {"type": "string", "minLength": 1},
+        "set": {"$ref": "#/$defs/updateFields"}
+      }
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "key", "transition"],
+      "properties": {
+        "action": {"const": "transition"},
+        "key": {"type": "string", "minLength": 1},
+        "transition": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

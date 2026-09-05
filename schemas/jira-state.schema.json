@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Corum Jira state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "reconciled_at", "issues"],
+  "properties": {
+    "schema": {"const": 1},
+    "reconciled_at": {"type": ["string", "null"], "format": "date-time"},
+    "issues": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/issue"}
+    }
+  },
+  "$defs": {
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "type", "summary", "status", "due", "labels", "description", "updated_at"],
+      "properties": {
+        "key": {"type": "string", "minLength": 1},
+        "type": {"type": "string", "minLength": 1},
+        "summary": {"type": "string", "minLength": 1},
+        "status": {"type": "string", "minLength": 1},
+        "due": {"type": ["string", "null"], "format": "date"},
+        "labels": {
+          "oneOf": [
+            {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+            {"type": "null"}
+          ]
+        },
+        "description": {"type": ["string", "null"]},
+        "updated_at": {"type": ["string", "null"], "format": "date-time"}
+      }
+    }
+  }
+}
