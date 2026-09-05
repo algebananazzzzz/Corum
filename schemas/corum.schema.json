@@ -16,7 +16,15 @@
       "properties": {"host": {"type": "string", "format": "uri"}}
     },
     "features": {"type": "object"},
-    "jira": {"type": "object"},
+    "jira": {
+      "type": "object",
+      "required": ["site", "project"],
+      "properties": {
+        "site": {"type": "string", "format": "uri"},
+        "project": {"type": "string"},
+        "transitions": {"type": "object", "additionalProperties": {"type": "string"}}
+      }
+    },
     "calendar": {
       "type": "object",
       "required": ["timetable", "term"],

@@ -19,7 +19,11 @@
       }
     },
     "features": {"type": "object"},
-    "jira": {"type": "object", "properties": {"epic": {"type": "string"}}},
+    "jira": {
+      "type": "object",
+      "required": ["epic"],
+      "properties": {"epic": {"type": "string"}}
+    },
     "wiki": {"type": "object", "properties": {"split_rules": {"type": "string"}}}
   }
 }
