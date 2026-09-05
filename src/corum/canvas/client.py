@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -25,13 +26,23 @@ class CanvasClient:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._base_url = f"{host.rstrip('/')}/api/v1/"
+        self._origin = self._url_origin(host)
         self._headers = {"Authorization": f"Bearer {token}"}
         self._transport = transport
 
-    def _new_client(self) -> httpx.AsyncClient:
+    @staticmethod
+    def _url_origin(url: str) -> tuple[str, str, int | None]:
+        parsed = urlsplit(url)
+        scheme = parsed.scheme.lower()
+        if scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError(f"download URL must use http or https: {url!r}")
+        default_port = 443 if scheme == "https" else 80
+        return scheme, parsed.hostname.lower(), parsed.port or default_port
+
+    def _new_client(self, *, authenticated: bool = True) -> httpx.AsyncClient:
         return httpx.AsyncClient(
             base_url=self._base_url,
-            headers=self._headers,
+            headers=self._headers if authenticated else None,
             follow_redirects=True,
             timeout=httpx.Timeout(30.0, connect=10.0),
             transport=self._transport,
@@ -95,8 +106,9 @@ class CanvasClient:
 
     async def download(self, url: str, target: Path) -> int:
         """Stream a Canvas download to ``target`` and return the byte count."""
+        authenticated = self._url_origin(url) == self._origin
         target.parent.mkdir(parents=True, exist_ok=True)
-        async with self._new_client() as client:
+        async with self._new_client(authenticated=authenticated) as client:
             for attempt in range(self._MAX_RATE_LIMIT_RETRIES + 1):
                 async with client.stream("GET", url) as response:
                     if response.status_code == httpx.codes.TOO_MANY_REQUESTS:

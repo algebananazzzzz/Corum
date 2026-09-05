@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from collections.abc import Iterable, Mapping
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -46,15 +47,14 @@ class RunManifest(BaseModel):
         effective_features: dict[str, bool],
         *,
         changes: list[str] | None = None,
-        failures: dict[str, str] | None = None,
+        failures: Mapping[str, str] | Iterable[tuple[str, str]] | None = None,
         now: datetime | None = None,
     ) -> "RunManifest":
         change_records = [
             Change(kind=summary.partition(" ")[0], summary=summary) for summary in changes or []
         ]
-        failure_records = [
-            Failure(source=source, error=error) for source, error in (failures or {}).items()
-        ]
+        failure_items = failures.items() if isinstance(failures, Mapping) else failures or []
+        failure_records = [Failure(source=source, error=error) for source, error in failure_items]
         if failure_records and change_records:
             canvas_status = "partial"
         elif failure_records:

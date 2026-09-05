@@ -30,6 +30,19 @@ def test_canvas_state_is_atomically_replaced_without_temp_residue(tmp_path):
     assert sorted(path.name for path in (course_dir / "state").iterdir()) == ["canvas.json"]
 
 
+def test_canvas_state_refuses_an_escaping_state_symlink(tmp_path):
+    course_dir = tmp_path / "courses" / "CS3103"
+    outside = tmp_path / "outside"
+    course_dir.mkdir(parents=True)
+    outside.mkdir()
+    (course_dir / "state").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="outside"):
+        write_canvas_state(course_dir, {"schema": 1, "synced_at": None, "sources": {}})
+
+    assert not (outside / "canvas.json").exists()
+
+
 def test_run_manifest_derives_structured_canvas_statuses():
     unchanged = RunManifest.create("CS3103", {"jira": False, "wiki": True})
     changed = RunManifest.create(

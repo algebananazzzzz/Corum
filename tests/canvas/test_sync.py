@@ -9,6 +9,7 @@ import yaml
 
 from corum.canvas import sync
 from corum.config import load_course
+from corum.workspace import validate_vault
 
 
 class FakeCanvasClient:
@@ -156,11 +157,12 @@ async def test_files_download_with_verifier_and_use_configured_folder(tmp_path):
             ("download", "/files/1?verifier=secret"): b"pdf",
         }
     )
-    changes, entries = await sync.fetch_files(
+    changes, entries, failures = await sync.fetch_files(
         client, tmp_path, 1, {}, {"Lecture Slides": "lectures"}, dry_run=False
     )
     assert changes == ["file 1 · lectures/L3.pdf"]
     assert entries == {"1": "lectures/L3.pdf"}
+    assert failures == []
     assert client.downloads[0][0].endswith("verifier=secret")
     assert (tmp_path / "raw" / "lectures" / "L3.pdf").read_bytes() == b"pdf"
 
@@ -175,10 +177,11 @@ async def test_files_refuse_a_path_that_escapes_raw(tmp_path):
             ("get_all", "/folders"): [],
         }
     )
-    changes, entries = await sync.fetch_files(client, tmp_path, 1, {}, {}, dry_run=False)
+    changes, entries, failures = await sync.fetch_files(client, tmp_path, 1, {}, {}, dry_run=False)
     assert entries == {}
     assert client.downloads == []
-    assert any("not downloaded" in change for change in changes)
+    assert changes == []
+    assert any("not downloaded" in failure for failure in failures)
 
 
 @pytest.mark.asyncio
@@ -194,11 +197,12 @@ async def test_one_failed_file_does_not_discard_an_earlier_download(tmp_path):
             ("download", "https://c/2"): RuntimeError("HTTP 403"),
         }
     )
-    changes, entries = await sync.fetch_files(client, tmp_path, 1, {}, {}, dry_run=False)
+    changes, entries, failures = await sync.fetch_files(client, tmp_path, 1, {}, {}, dry_run=False)
     assert entries == {"1": "A.pdf"}
     assert (tmp_path / "raw" / "A.pdf").exists()
     assert not (tmp_path / "raw" / "B.pdf").exists()
-    assert any("file 2 not downloaded" in change for change in changes)
+    assert changes == ["file 1 · A.pdf"]
+    assert failures == ["file 2 not downloaded: HTTP 403"]
 
 
 @pytest.mark.asyncio
@@ -211,9 +215,10 @@ async def test_dry_run_reports_files_without_downloading(tmp_path):
             ("get_all", "/folders"): [],
         }
     )
-    changes, entries = await sync.fetch_files(client, tmp_path, 1, {}, {}, dry_run=True)
+    changes, entries, failures = await sync.fetch_files(client, tmp_path, 1, {}, {}, dry_run=True)
     assert changes == ["file 1 · A.pdf"]
     assert entries == {}
+    assert failures == []
     assert client.downloads == []
     assert not (tmp_path / "raw").exists()
 
@@ -236,11 +241,12 @@ async def test_pages_fall_back_to_modules_when_pages_listing_is_closed(tmp_path)
             ("get", "/front_page"): RuntimeError("HTTP 404"),
         }
     )
-    changes, entries = await sync.fetch_pages(
+    changes, entries, failures = await sync.fetch_pages(
         client, tmp_path, 1, {}, dry_run=False, canvas_host="https://canvas.example.edu"
     )
     assert changes == ["page lesson · Lesson 1.3"]
     assert "lesson" in entries
+    assert failures == []
     text = (tmp_path / "raw" / "pages" / "lesson-1.3.md").read_text()
     assert "type: internal" in text
 
@@ -249,24 +255,26 @@ async def test_pages_fall_back_to_modules_when_pages_listing_is_closed(tmp_path)
 async def test_syllabus_writes_only_when_body_digest_moves(tmp_path):
     body = {"syllabus_body": "<p>Weighting: 40%</p>"}
     client = FakeCanvasClient({("get", "/courses/1"): body})
-    changes, digest = await sync.fetch_syllabus(
+    changes, digest, failures = await sync.fetch_syllabus(
         client, tmp_path, 1, None, dry_run=False, canvas_host="https://canvas.example.edu"
     )
     assert changes == ["syllabus changed"]
+    assert failures == []
     assert (tmp_path / "raw" / "syllabus.md").exists()
-    changes_again, same = await sync.fetch_syllabus(
+    changes_again, same, failures_again = await sync.fetch_syllabus(
         client, tmp_path, 1, digest, dry_run=False, canvas_host="https://canvas.example.edu"
     )
     assert changes_again == []
     assert same == digest
+    assert failures_again == []
 
 
 def stub_capture_functions(monkeypatch, **overrides):
     async def empty(*args, **kwargs):
-        return [], {}
+        return [], {}, []
 
     async def empty_syllabus(client, course_dir, course_id, seen, dry_run, canvas_host):
-        return [], seen
+        return [], seen, []
 
     for source in ("announcements", "assignments", "files", "pages", "modules"):
         monkeypatch.setattr(sync, f"fetch_{source}", overrides.get(source, empty))
@@ -276,7 +284,7 @@ def stub_capture_functions(monkeypatch, **overrides):
 @pytest.mark.asyncio
 async def test_partial_source_failure_advances_only_successful_state(tmp_path, monkeypatch):
     async def announcement(*args, **kwargs):
-        return ["announcement 9 · New"], {"9": "2026-08-28T11:59:02+08:00"}
+        return ["announcement 9 · New"], {"9": "2026-08-28T11:59:02+08:00"}, []
 
     async def files(*args, **kwargs):
         raise RuntimeError("HTTP 403")
@@ -298,7 +306,7 @@ async def test_partial_source_failure_advances_only_successful_state(tmp_path, m
 @pytest.mark.asyncio
 async def test_dry_run_leaves_canvas_state_and_manifest_untouched(tmp_path, monkeypatch):
     async def announcement(*args, **kwargs):
-        return ["announcement 9 · New"], {"9": "new"}
+        return ["announcement 9 · New"], {"9": "new"}, []
 
     vault, course = make_vault(tmp_path, sources=["announcements"])
     stub_capture_functions(monkeypatch, announcements=announcement)
@@ -343,3 +351,140 @@ async def test_existing_course_lock_fails_clearly_and_is_not_removed(tmp_path, m
         await sync.sync_course(vault, course, dry_run=False)
 
     assert lock.read_text() == "another process"
+
+
+@pytest.mark.asyncio
+async def test_failed_file_download_is_structured_and_kept_retryable(tmp_path, monkeypatch):
+    vault, course = make_vault(tmp_path, sources=["files"])
+    client = FakeCanvasClient(
+        {
+            ("get_all", "/files"): [
+                {"id": 2, "display_name": "B.pdf", "folder_id": None, "url": "https://c/2"}
+            ],
+            ("get_all", "/folders"): [],
+            ("download", "https://c/2"): RuntimeError("HTTP 403"),
+        }
+    )
+    monkeypatch.setenv("CORUM_CANVAS_TOKEN", "secret")
+    monkeypatch.setattr(sync, "CanvasClient", lambda host, token: client)
+
+    manifest = await sync.sync_course(vault, course, dry_run=False)
+
+    state = json.loads((vault / "courses/CS3103/state/canvas.json").read_text())
+    assert state["sources"]["files"] == {}
+    assert manifest.canvas.status == "failed"
+    assert manifest.canvas.changes == []
+    assert manifest.canvas.failures[0].source == "files"
+    assert "file 2 not downloaded" in manifest.canvas.failures[0].error
+
+
+@pytest.mark.asyncio
+async def test_failed_announcement_image_is_partial_and_announcement_is_retryable(tmp_path, monkeypatch):
+    vault, course = make_vault(tmp_path, sources=["announcements"])
+    client = FakeCanvasClient(
+        {
+            ("get_all", "/discussion_topics"): [
+                {
+                    "id": 9,
+                    "title": "New",
+                    "posted_at": "2026-08-28T03:59:02Z",
+                    "message": '<p>Read</p><img src="https://assets.example.net/missing.png">',
+                }
+            ],
+            ("download", "https://assets.example.net/missing.png"): RuntimeError("HTTP 404"),
+        }
+    )
+    monkeypatch.setenv("CORUM_CANVAS_TOKEN", "secret")
+    monkeypatch.setattr(sync, "CanvasClient", lambda host, token: client)
+
+    manifest = await sync.sync_course(vault, course, dry_run=False)
+
+    state = json.loads((vault / "courses/CS3103/state/canvas.json").read_text())
+    assert state["sources"]["announcements"] == {}
+    assert manifest.canvas.status == "partial"
+    assert manifest.canvas.failures[0].source == "announcements"
+    assert "image not downloaded" in manifest.canvas.failures[0].error
+
+
+@pytest.mark.asyncio
+async def test_folder_discovery_failure_does_not_download_or_advance_files(tmp_path, monkeypatch):
+    vault, course = make_vault(tmp_path, sources=["files"])
+    client = FakeCanvasClient(
+        {
+            ("get_all", "/files"): [
+                {"id": 1, "display_name": "L3.pdf", "folder_id": 7, "url": "https://c/1"}
+            ],
+            ("get_all", "/folders"): RuntimeError("HTTP 403"),
+            ("download", "https://c/1"): b"must not land",
+        }
+    )
+    monkeypatch.setenv("CORUM_CANVAS_TOKEN", "secret")
+    monkeypatch.setattr(sync, "CanvasClient", lambda host, token: client)
+
+    manifest = await sync.sync_course(vault, course, dry_run=False)
+
+    state = json.loads((vault / "courses/CS3103/state/canvas.json").read_text())
+    assert state["sources"]["files"] == {}
+    assert client.downloads == []
+    assert manifest.canvas.status == "failed"
+    assert manifest.canvas.failures[0].source == "files"
+
+
+@pytest.mark.asyncio
+async def test_traversing_course_code_is_rejected_before_any_vault_write(tmp_path, monkeypatch):
+    vault, course = make_vault(tmp_path, sources=[])
+    traversing = course.model_copy(update={"code": "../../escape"})
+    monkeypatch.setenv("CORUM_CANVAS_TOKEN", "secret")
+
+    with pytest.raises(ValueError, match="course code"):
+        await sync.sync_course(vault, traversing, dry_run=False)
+
+    assert not (tmp_path / "escape").exists()
+
+
+@pytest.mark.asyncio
+async def test_mismatched_course_code_is_rejected_before_creating_a_directory(tmp_path, monkeypatch):
+    vault, course = make_vault(tmp_path, sources=[])
+    mismatched = course.model_copy(update={"code": "WRONG"})
+    monkeypatch.setenv("CORUM_CANVAS_TOKEN", "secret")
+
+    with pytest.raises(ValueError, match="configured course directory"):
+        await sync.sync_course(vault, mismatched, dry_run=False)
+
+    assert not (vault / "courses/WRONG").exists()
+
+
+def test_course_code_must_match_its_configuration_directory(tmp_path):
+    vault, _ = make_vault(tmp_path, sources=[])
+    course_file = vault / "courses/CS3103/course.yaml"
+    configured = yaml.safe_load(course_file.read_text())
+    configured["code"] = "WRONG"
+    course_file.write_text(yaml.safe_dump(configured))
+
+    with pytest.raises(ValueError, match="does not match directory CS3103"):
+        validate_vault(vault)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("escaping_path", ["course", "raw", "state"])
+async def test_vault_paths_may_not_escape_through_symlinks(tmp_path, monkeypatch, escaping_path):
+    vault, course = make_vault(tmp_path, sources=[])
+    course_dir = vault / "courses/CS3103"
+    outside = tmp_path / f"outside-{escaping_path}"
+    if escaping_path == "course":
+        course_dir.rename(outside)
+        course_dir.symlink_to(outside, target_is_directory=True)
+    elif escaping_path == "raw":
+        (course_dir / "raw").rmdir()
+        outside.mkdir()
+        (course_dir / "raw").symlink_to(outside, target_is_directory=True)
+    else:
+        (course_dir / "state").rename(outside)
+        (course_dir / "state").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setenv("CORUM_CANVAS_TOKEN", "secret")
+
+    with pytest.raises(ValueError, match="outside"):
+        await sync.sync_course(vault, course, dry_run=False)
+
+    assert not (outside / ".sync.lock").exists()
+    assert not (outside / "latest-run.json").exists()

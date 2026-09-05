@@ -73,5 +73,36 @@ async def test_download_streams_response_to_target_and_returns_its_size(tmp_path
         transport=httpx.MockTransport(handler),
     )
     target = tmp_path / "files" / "notes.pdf"
-    assert await client.download("https://files.example.edu/notes.pdf", target) == 11
+    assert await client.download("https://canvas.example.edu/files/notes.pdf", target) == 11
     assert target.read_bytes() == b"course file"
+
+
+@pytest.mark.asyncio
+async def test_download_never_sends_canvas_credentials_to_a_cross_origin_asset(tmp_path: Path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == "https://assets.example.net/image.png"
+        assert "Authorization" not in request.headers
+        return httpx.Response(200, content=b"image")
+
+    client = CanvasClient(
+        "https://canvas.example.edu",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    target = tmp_path / "image.png"
+    assert await client.download("https://assets.example.net/image.png", target) == 5
+    assert target.read_bytes() == b"image"
+
+
+@pytest.mark.asyncio
+async def test_download_rejects_non_http_asset_schemes_before_request(tmp_path: Path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("invalid schemes must not reach the transport")
+
+    client = CanvasClient(
+        "https://canvas.example.edu",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(ValueError, match="http"):
+        await client.download("file:///etc/passwd", tmp_path / "passwd")

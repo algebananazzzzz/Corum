@@ -107,6 +107,26 @@ def _under_raw(root: Path, relative: str) -> Path:
     return target
 
 
+def _validated_course_dir(vault: Path, code: str) -> Path:
+    if not code or Path(code).name != code or code in {".", ".."}:
+        raise ValueError(f"invalid course code: {code!r}")
+    vault_root = vault.resolve()
+    courses_root = (vault_root / "courses").resolve()
+    if not courses_root.is_relative_to(vault_root):
+        raise ValueError(f"courses directory resolves outside vault: {vault_root / 'courses'}")
+    configured_course = courses_root / code
+    if not configured_course.is_dir():
+        raise ValueError(f"course code {code} has no configured course directory")
+    course_dir = configured_course.resolve()
+    if not course_dir.is_relative_to(courses_root):
+        raise ValueError(f"course directory resolves outside vault: {courses_root / code}")
+    for name in ("raw", "state"):
+        child = (course_dir / name).resolve()
+        if not child.is_relative_to(course_dir):
+            raise ValueError(f"{name} directory resolves outside course: {course_dir / name}")
+    return course_dir
+
+
 def write_body(path: Path, fields: dict, html: str, link_list: list[dict], image_paths: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -154,6 +174,7 @@ async def fetch_announcements(
     records = await client.get_all(f"/courses/{course_id}/discussion_topics", only_announcements=True)
     changes: list[str] = []
     entries: dict[str, str | None] = {}
+    failures: list[str] = []
     for record in new_announcements(records, seen):
         changes.append(f"announcement {record['id']} · {record.get('title')}")
         if dry_run:
@@ -164,7 +185,7 @@ async def fetch_announcements(
             str(record["id"]),
         )
         image_paths, problems = await _save_images(client, html, target.parent)
-        changes.extend(problems)
+        failures.extend(problems)
         write_body(
             target,
             {
@@ -181,8 +202,9 @@ async def fetch_announcements(
             convert.links(html, canvas_host),
             image_paths,
         )
-        entries[str(record["id"])] = convert.sgt(record.get("posted_at"))
-    return changes, entries
+        if not problems:
+            entries[str(record["id"])] = convert.sgt(record.get("posted_at"))
+    return changes, entries, failures
 
 
 async def fetch_assignments(
@@ -223,7 +245,7 @@ async def fetch_assignments(
             {},
         )
         entries[str(record["id"])] = due
-    return changes, entries
+    return changes, entries, []
 
 
 async def fetch_files(
@@ -235,12 +257,10 @@ async def fetch_files(
     dry_run: bool,
 ):
     records = await client.get_all(f"/courses/{course_id}/files")
-    try:
-        known = await placement.folder_paths(client, course_id)
-    except Exception:
-        known = {}
+    known = await placement.folder_paths(client, course_id)
     changes: list[str] = []
     entries: dict[str, str] = {}
+    failures: list[str] = []
     for record in new_files(records, seen):
         relative = placement.place(known.get(record.get("folder_id")), record["display_name"], folders)
         if dry_run:
@@ -250,11 +270,11 @@ async def fetch_files(
             target = _under_raw(course_dir / "raw", relative)
             await client.download(record["url"], target)
         except Exception as error:
-            changes.append(f"file {record['id']} not downloaded: {error}")
+            failures.append(f"file {record['id']} not downloaded: {error}")
             continue
         changes.append(f"file {record['id']} · {relative}")
         entries[str(record["id"])] = relative
-    return changes, entries
+    return changes, entries, failures
 
 
 async def _pages_via_modules(client: CanvasClient, course_id: int) -> list[dict]:
@@ -315,7 +335,7 @@ async def fetch_pages(
             {},
         )
         entries[page["url"]] = convert.sgt(page.get("updated_at"))
-    return changes, entries
+    return changes, entries, []
 
 
 async def fetch_modules(
@@ -336,11 +356,11 @@ async def fetch_modules(
             changes.append(f"module {module['id']} · {module.get('name')}")
         entries[str(module["id"])] = digest
     if not changes:
-        return [], {}
+        return [], {}, []
     if dry_run:
-        return changes, {}
+        return changes, {}, []
     write_modules(course_dir / "raw" / "modules.md", trees)
-    return changes, entries
+    return changes, entries, []
 
 
 async def fetch_syllabus(
@@ -355,9 +375,9 @@ async def fetch_syllabus(
     html = record.get("syllabus_body") or ""
     digest = content_hash(html)
     if digest == seen:
-        return [], seen
+        return [], seen, []
     if dry_run:
-        return ["syllabus changed"], seen
+        return ["syllabus changed"], seen, []
     write_body(
         course_dir / "raw" / "syllabus.md",
         {"source": "canvas", "kind": "syllabus", "url": record.get("html_url"), "fetched": _now()},
@@ -365,11 +385,11 @@ async def fetch_syllabus(
         convert.links(html, canvas_host),
         {},
     )
-    return ["syllabus changed"], digest
+    return ["syllabus changed"], digest, []
 
 
 async def sync_course(vault: Path, course: CourseConfig, dry_run: bool) -> RunManifest:
-    course_dir = vault / "courses" / course.code
+    course_dir = _validated_course_dir(vault, course.code)
     with course_sync_lock(course_dir):
         workspace = load_workspace(vault)
         features = resolve_features(workspace, course).model_dump()
@@ -400,14 +420,15 @@ async def sync_course(vault: Path, course: CourseConfig, dry_run: bool) -> RunMa
 
         results = await asyncio.gather(*jobs.values(), return_exceptions=True)
         changes: list[str] = []
-        failures: dict[str, str] = {}
+        failures: list[tuple[str, str]] = []
         updates: dict[str, object] = {}
         for source, result in zip(jobs, results):
             if isinstance(result, Exception):
-                failures[source] = str(result)
+                failures.append((source, str(result)))
                 continue
-            source_changes, entries = result
+            source_changes, entries, source_failures = result
             changes.extend(source_changes)
+            failures.extend((source, failure) for failure in source_failures)
             updates[source] = entries
 
         if not dry_run:

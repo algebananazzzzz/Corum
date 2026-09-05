@@ -36,7 +36,12 @@ def validate_vault(root: Path) -> tuple[WorkspaceConfig, list[CourseConfig]]:
     if not courses_directory.exists():
         return workspace, courses
     for course_file in sorted(courses_directory.glob("*/course.yaml")):
-        course = load_course(root, course_file.parent.name)
+        directory_code = course_file.parent.name
+        course = load_course(root, directory_code)
+        if course.code != directory_code:
+            raise ValueError(
+                f"course code {course.code} does not match directory {directory_code}"
+            )
         features = resolve_features(workspace, course)
         if features.jira and (workspace.jira is None or course.jira is None):
             raise ValueError(f"enabled Jira requires workspace and course Jira configuration for {course.code}")

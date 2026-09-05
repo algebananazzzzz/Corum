@@ -11,7 +11,11 @@ from typing import Iterator
 
 
 def _state_path(course_dir: Path, name: str) -> Path:
-    return course_dir / "state" / name
+    resolved_course = course_dir.resolve()
+    state_dir = (course_dir / "state").resolve()
+    if not state_dir.is_relative_to(resolved_course):
+        raise ValueError(f"state directory resolves outside course: {course_dir / 'state'}")
+    return state_dir / name
 
 
 def read_canvas_state(course_dir: Path) -> dict:
