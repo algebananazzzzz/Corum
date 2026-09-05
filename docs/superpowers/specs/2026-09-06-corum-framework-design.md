@@ -348,7 +348,7 @@ corum jira apply COURSE
 
 `corum sync` is the deterministic Canvas primitive. It validates configuration, locks each selected course, captures watched sources, writes `raw/`, advances only successfully read Canvas state, writes `latest-run.json`, and prints either human-readable or JSON output. It does not invoke an LLM, author wiki pages, or write Jira.
 
-`corum doctor` validates configuration, schemas, required files, enabled-feature requirements, credentials, path containment, and Canvas/Jira connectivity without mutating the vault.
+`corum doctor` validates local configuration, schemas, required files, enabled-feature requirements, credential presence, and path containment without mutating the vault or calling external services.
 
 `corum jira apply` accepts an exact structured plan from standard input, validates that it targets the selected course and configured epic, applies changes sequentially, and atomically upserts the normalized cache after each successful write. It never invents or rescopes actions.
 
