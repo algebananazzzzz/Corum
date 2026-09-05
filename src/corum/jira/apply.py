@@ -226,18 +226,27 @@ async def _upsert_with_recovery(
         cache.upsert(vault, course, {"epic": epic, "issue": issue})
         return
     except cache.CacheError:
-        children = [_normalized_jira_issue(raw) for raw in await client.epic_children(epic)]
-        cache.reconcile(
-            vault,
-            course,
-            {
-                "epic": epic,
-                "reconciled_at": datetime.now(UTC).isoformat(),
-                "complete": True,
-                "issues": children,
-            },
-        )
+        await _reconcile_cache(vault, course, epic, client)
     cache.upsert(vault, course, {"epic": epic, "issue": issue})
+
+
+async def _reconcile_cache(
+    vault: Path,
+    course: CourseConfig,
+    epic: str,
+    client: JiraClient,
+) -> None:
+    children = [_normalized_jira_issue(raw) for raw in await client.epic_children(epic)]
+    cache.reconcile(
+        vault,
+        course,
+        {
+            "epic": epic,
+            "reconciled_at": datetime.now(UTC).isoformat(),
+            "complete": True,
+            "issues": children,
+        },
+    )
 
 
 async def apply_plan(
@@ -252,6 +261,9 @@ async def apply_plan(
     jira = _validate_plan(vault, course, plan)
     if dry_run:
         return ApplyResult(course=course.code, epic=plan.epic, dry_run=True, applied=[])
+
+    if not plan.actions and not cache.exists(vault, course):
+        await _reconcile_cache(vault, course, plan.epic, client)
 
     applied: list[AppliedAction] = []
     for action in plan.actions:

@@ -206,6 +206,11 @@ def _read_cache(target: Path) -> dict[str, Any]:
         raise CacheError(f"could not read {target}: {error}") from error
 
 
+def exists(vault: Path, course: CourseConfig) -> bool:
+    """Return whether the configured course has a Jira cache file."""
+    return _target(vault, course).is_file()
+
+
 def _write_atomic(target: Path, value: dict[str, Any]) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     scratch: Path | None = None

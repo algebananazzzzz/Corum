@@ -7,9 +7,11 @@ import argparse
 import base64
 import binascii
 import html
+import os
 from pathlib import Path
 import re
 import sys
+import tempfile
 import urllib.parse
 import xml.etree.ElementTree as ET
 import zlib
@@ -17,6 +19,7 @@ import zlib
 
 EM_DASH = "\N{EM DASH}"
 ENCODE_SAFE = "~()*!.'-_"
+SVG_LABEL_TAGS = {"div", "span", "text", "tspan"}
 
 
 class PairError(ValueError):
@@ -41,6 +44,10 @@ def plain_label(value: str) -> str:
 
 def label_tokens(value: str) -> list[str]:
     return re.findall(r"[A-Za-z0-9./+():→-]+", plain_label(value))
+
+
+def local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
 
 
 def contains_sequence(haystack: list[str], needle: list[str]) -> bool:
@@ -69,6 +76,33 @@ def encode_payload(model: ET.Element) -> str:
     compressor = zlib.compressobj(level=9, wbits=-15)
     compressed = compressor.compress(encoded) + compressor.flush()
     return base64.b64encode(compressed).decode("ascii")
+
+
+def write_staged(path: Path, contents: str, descriptor: int | None = None) -> None:
+    if descriptor is None:
+        opened = path.open("x", encoding="utf-8")
+    else:
+        opened = os.fdopen(descriptor, "w", encoding="utf-8")
+    with opened as stream:
+        stream.write(contents)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def restore_atomic(path: Path, contents: bytes) -> None:
+    descriptor, scratch_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}-restore-"
+    )
+    scratch = Path(scratch_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(contents)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(scratch, path)
+    except BaseException:
+        scratch.unlink(missing_ok=True)
+        raise
 
 
 class DrawioPair:
@@ -214,27 +248,62 @@ class DrawioPair:
         source_hits = 0
         for cell in self.cells():
             value = cell.get("value")
-            if value and old in value:
-                cell.set("value", value.replace(old, new))
-                source_hits += value.count(old)
+            if value and plain_label(value) == old:
+                cell.set("value", new)
+                source_hits += 1
 
-        svg_hits = self.svg_text.count(old)
+        svg_hits = 0
+        for node in self.svg_root.iter():
+            if local_name(node.tag) in SVG_LABEL_TAGS and node.text == old:
+                node.text = new
+                svg_hits += 1
         if source_hits == 0:
             raise PairError(f"source does not contain exact text: {old!r}")
         if svg_hits == 0:
             raise PairError(
                 "SVG does not contain the same exact text; edit through Obsidian instead"
             )
-
-        updated_svg = self.svg_text.replace(old, new)
+        updated_svg = ET.tostring(self.svg_root, encoding="unicode")
         updated_source = self.source_with_model()
         parse_xml(self.svg_path, updated_svg)
         reloaded = parse_xml(self.source_path, updated_source)
         if reloaded.find("diagram") is None:
             raise PairError("updated sidecar lost its diagram element")
 
-        self.svg_path.write_text(updated_svg, encoding="utf-8")
-        self.source_path.write_text(updated_source, encoding="utf-8")
+        descriptor, staged_name = tempfile.mkstemp(
+            dir=self.svg_path.parent,
+            prefix=f".{self.svg_path.stem}-",
+            suffix=".svg",
+        )
+        staged_svg = Path(staged_name)
+        staged_source = sidecar_path(staged_svg)
+        try:
+            write_staged(staged_svg, updated_svg, descriptor)
+            write_staged(staged_source, updated_source)
+            DrawioPair(staged_svg).validate(strict=True)
+
+            originals = {
+                self.source_path: self.source_path.read_bytes(),
+                self.svg_path: self.svg_path.read_bytes(),
+            }
+            replaced: list[Path] = []
+            try:
+                os.replace(staged_source, self.source_path)
+                replaced.append(self.source_path)
+                os.replace(staged_svg, self.svg_path)
+                replaced.append(self.svg_path)
+            except BaseException as error:
+                try:
+                    for path in reversed(replaced):
+                        restore_atomic(path, originals[path])
+                except BaseException as rollback_error:
+                    raise PairError(
+                        f"pair commit failed and rollback failed: {rollback_error}"
+                    ) from error
+                raise
+        finally:
+            staged_svg.unlink(missing_ok=True)
+            staged_source.unlink(missing_ok=True)
         return source_hits, svg_hits
 
 

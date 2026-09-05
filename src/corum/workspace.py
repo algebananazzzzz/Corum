@@ -50,20 +50,33 @@ def initialize(root: Path) -> Path:
 
 
 def validate_vault(root: Path) -> tuple[WorkspaceConfig, list[CourseConfig]]:
-    workspace = load_workspace(root)
+    workspace = load_workspace(root, validate_jira=False)
     courses = []
     courses_directory = root / "courses"
-    if not courses_directory.exists():
+    course_files = (
+        sorted(courses_directory.glob("*/course.yaml"))
+        if courses_directory.exists()
+        else []
+    )
+    if not course_files:
+        if workspace.features.jira.enabled:
+            workspace = load_workspace(root)
         return workspace, courses
-    for course_file in sorted(courses_directory.glob("*/course.yaml")):
+    for course_file in course_files:
         directory_code = course_file.parent.name
-        course = load_course(root, directory_code)
+        course = load_course(root, directory_code, validate_jira=False)
         if course.code != directory_code:
             raise ValueError(
                 f"course code {course.code} does not match directory {directory_code}"
             )
         features = resolve_features(workspace, course)
-        if features.jira and (workspace.jira is None or course.jira is None):
-            raise ValueError(f"enabled Jira requires workspace and course Jira configuration for {course.code}")
+        if features.jira:
+            if workspace.jira is None:
+                workspace = load_workspace(root)
+            course = load_course(root, directory_code)
+            if workspace.jira is None or course.jira is None:
+                raise ValueError(
+                    f"enabled Jira requires workspace and course Jira configuration for {course.code}"
+                )
         courses.append(course)
     return workspace, courses

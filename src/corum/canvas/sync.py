@@ -391,8 +391,11 @@ async def fetch_syllabus(
 async def sync_course(vault: Path, course: CourseConfig, dry_run: bool) -> RunManifest:
     course_dir = _validated_course_dir(vault, course.code)
     with course_sync_lock(course_dir):
-        workspace = load_workspace(vault)
-        features = resolve_features(workspace, course).model_dump()
+        workspace = load_workspace(vault, validate_jira=False)
+        resolved_features = resolve_features(workspace, course)
+        if resolved_features.jira:
+            workspace = load_workspace(vault)
+        features = resolved_features.model_dump()
         token = os.environ.get("CORUM_CANVAS_TOKEN")
         if not token:
             raise ValueError("CORUM_CANVAS_TOKEN environment variable is required")

@@ -14,7 +14,10 @@
         "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
       },
       "additionalProperties": {
-        "type": ["string", "null"]
+        "oneOf": [
+          {"type": "string", "minLength": 1, "pattern": "\\S"},
+          {"type": "null"}
+        ]
       }
     }
   }

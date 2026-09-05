@@ -55,13 +55,21 @@ def as_ranges(pages: set[int]) -> str:
 def page_count(path: Path) -> int | None:
     if path.suffix.lower() != ".pdf":
         return None
-    completed = subprocess.run(
-        ["pdfinfo", str(path)], capture_output=True, text=True, check=False
-    )
+    try:
+        completed = subprocess.run(
+            ["pdfinfo", str(path)], capture_output=True, text=True, check=False
+        )
+    except OSError as error:
+        raise ValueError(f"could not inspect PDF {path}: {error}") from error
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or "pdfinfo failed"
+        raise ValueError(f"could not inspect PDF {path}: {detail}")
     for line in completed.stdout.splitlines():
         if line.startswith("Pages:"):
-            return int(line.split()[1])
-    return None
+            pages = int(line.split()[1])
+            if pages > 0:
+                return pages
+    raise ValueError(f"could not inspect PDF {path}: pdfinfo reported no page count")
 
 
 def raw_source(course: Path, relative: str) -> Path:
@@ -69,10 +77,20 @@ def raw_source(course: Path, relative: str) -> Path:
     source = (raw / relative).resolve()
     if not source.is_relative_to(raw):
         raise ValueError(f"source path resolves outside course raw directory: {relative}")
+    try:
+        with source.open("rb") as stream:
+            stream.read(1)
+    except OSError as error:
+        raise ValueError(f"could not read source {relative}: {error}") from error
     return source
 
 
-def lint(vault: Path, code: str, pending: list[str] | None = None) -> list[str]:
+def lint(
+    vault: Path,
+    code: str,
+    pending: list[str] | None = None,
+    pending_null: list[str] | None = None,
+) -> list[str]:
     vault = vault.resolve()
     courses = (vault / "courses").resolve()
     course = (courses / code).resolve()
@@ -101,21 +119,39 @@ def lint(vault: Path, code: str, pending: list[str] | None = None) -> list[str]:
             cited.setdefault(label, set()).update(pages_cited(spec.replace("p", "")))
 
     ingested = dict(state.get("ingested", {}))
+    for relative, label in ingested.items():
+        if label is not None and (
+            not isinstance(label, str) or not label.strip()
+        ):
+            raise ValueError(f"{relative} must have a non-empty provenance label or null")
     for item in pending or []:
         if "=" not in item:
             raise ValueError("pending source must be LABEL=RELATIVE_PATH")
         label, relative = item.split("=", 1)
-        if not label or not relative:
+        if not label.strip() or not relative:
             raise ValueError("pending source must be LABEL=RELATIVE_PATH")
         raw_source(course, relative)
         ingested[relative] = label
+    for relative in pending_null or []:
+        if not relative:
+            raise ValueError("pending null source must be RELATIVE_PATH")
+        raw_source(course, relative)
+        ingested[relative] = None
     for relative, label in ingested.items():
+        source = raw_source(course, relative)
         if not label:
             continue
-        total = page_count(raw_source(course, relative))
+        total = page_count(source)
         if total is None:
             continue
-        gap = set(range(1, total + 1)) - cited.get(label, set())
+        valid_pages = set(range(1, total + 1))
+        source_citations = cited.get(label, set())
+        outside = source_citations - valid_pages
+        if outside:
+            findings.add(
+                f"coverage  {relative} cited as {label}, out of range {as_ranges(outside)}"
+            )
+        gap = valid_pages - source_citations
         if gap:
             findings.add(
                 f"coverage  {relative} cited as {label}, uncited {as_ranges(gap)}"
@@ -169,13 +205,20 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="LABEL=RELATIVE_PATH",
         help="validate a planned source without changing wiki state",
     )
+    parser.add_argument(
+        "--pending-null",
+        action="append",
+        default=[],
+        metavar="RELATIVE_PATH",
+        help="validate a planned null-provenance source without changing wiki state",
+    )
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
     try:
-        findings = lint(args.vault, args.course, args.pending)
+        findings = lint(args.vault, args.course, args.pending, args.pending_null)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"lint-wiki: {error}")
         return 1

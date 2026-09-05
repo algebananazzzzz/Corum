@@ -32,7 +32,9 @@ still owns factual content and finalization.
 - Update source and SVG in one operation. Close a stale editor without saving before
   reopening an externally changed pair.
 - Use `scripts/drawio_pair.py replace` only for exact single-line labels. Use the
-  plugin for geometry, wrapping, or style changes.
+  plugin for geometry, wrapping, or style changes. Replacement matches complete
+  visible label nodes, never substrings, and commits the validated SVG/sidecar pair
+  together with rollback on a write failure.
 - Read [Obsidian pair format](references/obsidian-format.md) for compressed sources,
   programmatic creation, and plugin recognition.
 

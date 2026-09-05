@@ -23,6 +23,11 @@ but do not scope, omit, approve, or finalize their unseen contents.
 | Wiki enabled | `state/wiki.json`, wiki index/pages, configured split rule, and changed raw sources |
 | Wiki disabled | None: do not read wiki state, pages, templates, or raw content for wiki planning |
 
+An enabled Jira cache is a caller-owned precondition. If `state/jira.json` is
+absent, return `status: error` with code `jira_cache_missing` and the exact path;
+the caller must bootstrap it with the exact empty-plan workflow before retrying.
+Never reconcile or call Jira from this read-only skill.
+
 When wiki is enabled for the first time, absence of both `state/wiki.json` and
 `wiki/` is an empty initial wiki. For any unreadable required enabled input, return
 only `status: error` with a stable code and exact path; never return a partial plan.
@@ -72,6 +77,9 @@ outcome:
 `state/wiki.json` owns only `schema` and `ingested`. Never invent page IDs, remote
 IDs, versions, or content hashes. A source becomes ingested only after all planned
 pages, required index edits, provenance checks, and lint validation succeed.
+Labels must contain a non-whitespace character. Use `null`, never an empty string,
+only when no provenance marker is justified; the caller previews that source with
+`--pending-null` before finalization.
 
 ## Return JSON
 

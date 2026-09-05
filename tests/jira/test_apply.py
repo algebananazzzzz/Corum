@@ -194,6 +194,27 @@ class RecordingClient:
 
 
 @pytest.mark.asyncio
+async def test_empty_plan_bootstraps_missing_cache_from_epic_children(tmp_path):
+    write_workspace(tmp_path)
+    write_course(tmp_path, "CS3103")
+    course = load_course(tmp_path, "CS3103")
+    plan = JiraPlan(schema=1, course="CS3103", epic="STUDY-1", actions=[])
+
+    class BootstrapClient(RecordingClient):
+        async def epic_children(self, epic):
+            self.events.append(("children", epic))
+            return [fetched_issue("STUDY-3")]
+
+    client = BootstrapClient()
+    result = await apply_plan(tmp_path, course, plan, client=client)
+
+    assert result.applied == []
+    assert client.events == [("children", "STUDY-1")]
+    stored = json.loads((tmp_path / "courses/CS3103/state/jira.json").read_text())
+    assert [row["key"] for row in stored["issues"]] == ["STUDY-3"]
+
+
+@pytest.mark.asyncio
 async def test_actions_apply_sequentially_fetch_results_and_atomically_upsert_cache(tmp_path):
     write_workspace(tmp_path)
     workspace = yaml.safe_load((tmp_path / "corum.yaml").read_text())
@@ -663,6 +684,24 @@ def test_cli_dry_run_prints_validated_plan_without_credentials_or_client(tmp_pat
     assert cli.main(["jira", "apply", "CS3103", "--dry-run"]) == 0
     assert json.loads(capsys.readouterr().out) == plan
     assert not (tmp_path / "courses/CS3103/state/jira.json").exists()
+
+
+def test_cli_empty_plan_bootstraps_missing_cache(tmp_path, monkeypatch, capsys):
+    write_workspace(tmp_path)
+    write_course(tmp_path, "CS3103")
+    plan = {"schema": 1, "course": "CS3103", "epic": "STUDY-1", "actions": []}
+    client = RecordingClient()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(json.dumps(plan)))
+    monkeypatch.setenv("CORUM_JIRA_EMAIL", "student@example.com")
+    monkeypatch.setenv("CORUM_JIRA_API_TOKEN", "secret")
+    monkeypatch.setattr(cli, "JiraClient", lambda site, email, token: client)
+
+    assert cli.main(["jira", "apply", "CS3103"]) == 0
+
+    assert client.events == [("children", "STUDY-1")]
+    assert json.loads(capsys.readouterr().out)["applied"] == []
+    assert (tmp_path / "courses/CS3103/state/jira.json").is_file()
 
 
 def test_cli_disabled_jira_exits_before_reading_credential_environment(tmp_path, monkeypatch, capsys):

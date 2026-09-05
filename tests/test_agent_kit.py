@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -16,6 +19,54 @@ AGENT_KIT = ROOT / "agent-kit"
 def _frontmatter(path: Path) -> dict:
     _, frontmatter, _ = path.read_text(encoding="utf-8").split("---", 2)
     return yaml.safe_load(frontmatter)
+
+
+def _write_minimal_pdf(path: Path) -> None:
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>",
+    ]
+    body = b"%PDF-1.4\n"
+    offsets = [0]
+    for number, value in enumerate(objects, 1):
+        offsets.append(len(body))
+        body += f"{number} 0 obj\n".encode() + value + b"\nendobj\n"
+    xref = len(body)
+    body += f"xref\n0 {len(objects) + 1}\n".encode()
+    body += b"0000000000 65535 f \n"
+    body += b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets[1:])
+    body += (
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF\n"
+    ).encode()
+    path.write_bytes(body)
+
+
+def _load_drawio_pair_module():
+    path = AGENT_KIT / "skills/drawio-diagrams/scripts/drawio_pair.py"
+    spec = importlib.util.spec_from_file_location("corum_test_drawio_pair", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _write_drawio_pair(svg: Path) -> None:
+    svg.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        "<metadata>Short</metadata><text>Short</text>"
+        "<text>Short suffix</text></svg>",
+        encoding="utf-8",
+    )
+    Path(f"{svg}.xml").write_text(
+        '<mxfile><diagram><mxGraphModel><root>'
+        '<mxCell id="0"/><mxCell id="1" parent="0"/>'
+        '<mxCell id="2" parent="1" value="Short"/>'
+        '<mxCell id="3" parent="1" value="Short suffix"/>'
+        "</root></mxGraphModel></diagram></mxfile>",
+        encoding="utf-8",
+    )
 
 
 def test_agent_kit_contains_only_declared_skills():
@@ -77,6 +128,7 @@ def test_agent_kit_has_generic_templates_without_legacy_dependencies():
 def test_linter_reports_index_drift_from_the_v1_vault_layout(tmp_path):
     course = tmp_path / "courses" / "DEMO"
     (course / "state").mkdir(parents=True)
+    (course / "raw" / "lectures").mkdir(parents=True)
     (course / "wiki" / "concepts").mkdir(parents=True)
     (course / "state" / "wiki.json").write_text(
         '{"schema": 1, "ingested": {}}', encoding="utf-8"
@@ -84,6 +136,9 @@ def test_linter_reports_index_drift_from_the_v1_vault_layout(tmp_path):
     (course / "wiki" / "index.md").write_text("# Index\n", encoding="utf-8")
     (course / "wiki" / "concepts" / "Routing.md").write_text(
         "# Routing\n\n## Route lookup\n%% L1 p1 %%\n", encoding="utf-8"
+    )
+    (course / "raw" / "lectures" / "topic.md").write_text(
+        "Captured topic", encoding="utf-8"
     )
 
     completed = subprocess.run(
@@ -150,3 +205,178 @@ def test_linter_rejects_a_pending_source_outside_the_course(tmp_path):
 
     assert completed.returncode == 1
     assert "outside course raw directory" in completed.stdout
+
+
+@pytest.mark.parametrize(
+    ("relative", "contents", "message"),
+    [
+        ("missing.md", None, "could not read source"),
+        ("corrupt.pdf", b"not a PDF", "could not inspect PDF"),
+    ],
+)
+def test_linter_rejects_missing_or_corrupt_pending_sources(
+    tmp_path, relative, contents, message
+):
+    course = tmp_path / "courses" / "DEMO"
+    (course / "state").mkdir(parents=True)
+    (course / "raw").mkdir()
+    (course / "wiki").mkdir()
+    (course / "state/wiki.json").write_text(
+        '{"schema": 1, "ingested": {}}', encoding="utf-8"
+    )
+    (course / "wiki/index.md").write_text("# Index\n", encoding="utf-8")
+    if contents is not None:
+        (course / "raw" / relative).write_bytes(contents)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(AGENT_KIT / "skills/linting-wiki/scripts/lint-wiki.py"),
+            "DEMO",
+            "--pending",
+            f"L1={relative}",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert message in completed.stdout
+
+
+def test_linter_reports_citations_beyond_the_pdf_page_count(tmp_path):
+    course = tmp_path / "courses" / "DEMO"
+    (course / "state").mkdir(parents=True)
+    (course / "raw").mkdir()
+    (course / "wiki" / "concepts").mkdir(parents=True)
+    (course / "state/wiki.json").write_text(
+        '{"schema": 1, "ingested": {}}', encoding="utf-8"
+    )
+    (course / "wiki/index.md").write_text("# Index\n", encoding="utf-8")
+    (course / "wiki/concepts/Topic.md").write_text(
+        "# Topic\n\n%% L1 p1-999 %%\n", encoding="utf-8"
+    )
+    _write_minimal_pdf(course / "raw/topic.pdf")
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(AGENT_KIT / "skills/linting-wiki/scripts/lint-wiki.py"),
+            "DEMO",
+            "--pending",
+            "L1=topic.pdf",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert "out of range p2-999" in completed.stdout
+
+
+def test_linter_previews_null_provenance_without_mutating_state(tmp_path):
+    course = tmp_path / "courses" / "DEMO"
+    (course / "state").mkdir(parents=True)
+    (course / "raw/notes").mkdir(parents=True)
+    (course / "wiki").mkdir()
+    state = '{"schema": 1, "ingested": {}}'
+    (course / "state/wiki.json").write_text(state, encoding="utf-8")
+    (course / "wiki/index.md").write_text("# Index\n", encoding="utf-8")
+    (course / "raw/notes/duplicate.md").write_text("duplicate", encoding="utf-8")
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(AGENT_KIT / "skills/linting-wiki/scripts/lint-wiki.py"),
+            "DEMO",
+            "--pending-null",
+            "notes/duplicate.md",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout.strip() == "DEMO clean"
+    assert (course / "state/wiki.json").read_text(encoding="utf-8") == state
+
+
+def test_linter_rejects_empty_provenance_labels_in_state_and_preview(tmp_path):
+    course = tmp_path / "courses" / "DEMO"
+    (course / "state").mkdir(parents=True)
+    (course / "raw/notes").mkdir(parents=True)
+    (course / "wiki").mkdir()
+    (course / "wiki/index.md").write_text("# Index\n", encoding="utf-8")
+    (course / "raw/notes/topic.md").write_text("topic", encoding="utf-8")
+    script = str(AGENT_KIT / "skills/linting-wiki/scripts/lint-wiki.py")
+
+    (course / "state/wiki.json").write_text(
+        '{"schema": 1, "ingested": {"notes/topic.md": ""}}', encoding="utf-8"
+    )
+    stored = subprocess.run(
+        [sys.executable, script, "DEMO"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    (course / "state/wiki.json").write_text(
+        '{"schema": 1, "ingested": {}}', encoding="utf-8"
+    )
+    pending = subprocess.run(
+        [sys.executable, script, "DEMO", "--pending", " =notes/topic.md"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert stored.returncode == 1
+    assert "non-empty provenance label" in stored.stdout
+    assert pending.returncode == 1
+    assert "pending source must be LABEL=RELATIVE_PATH" in pending.stdout
+
+
+def test_drawio_replace_changes_only_exact_label_nodes(tmp_path):
+    module = _load_drawio_pair_module()
+    svg = tmp_path / "diagram.svg"
+    _write_drawio_pair(svg)
+
+    source_hits, svg_hits = module.DrawioPair(svg).replace("Short", "Long")
+
+    assert (source_hits, svg_hits) == (1, 1)
+    assert "Short suffix" in svg.read_text(encoding="utf-8")
+    assert "<ns0:metadata>Short</ns0:metadata>" in svg.read_text(encoding="utf-8")
+    assert "Short suffix" in Path(f"{svg}.xml").read_text(encoding="utf-8")
+    assert "Long suffix" not in svg.read_text(encoding="utf-8")
+    assert "Long suffix" not in Path(f"{svg}.xml").read_text(encoding="utf-8")
+    module.DrawioPair(svg).validate(strict=True)
+
+
+def test_drawio_replace_failure_preserves_both_original_files(tmp_path, monkeypatch):
+    module = _load_drawio_pair_module()
+    svg = tmp_path / "diagram.svg"
+    _write_drawio_pair(svg)
+    source = Path(f"{svg}.xml")
+    original_svg = svg.read_bytes()
+    original_source = source.read_bytes()
+    real_replace = os.replace
+
+    def fail_svg_commit(staged, target):
+        if Path(target) == svg:
+            raise OSError("SVG commit failed")
+        real_replace(staged, target)
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(os, "replace", fail_svg_commit)
+        with pytest.raises(OSError, match="SVG commit failed"):
+            module.DrawioPair(svg).replace("Short", "Long")
+
+    assert svg.read_bytes() == original_svg
+    assert source.read_bytes() == original_source

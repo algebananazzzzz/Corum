@@ -35,7 +35,7 @@ The manifest's `effective_features` is authoritative for this run.
 
 | Feature state | Required behavior |
 | --- | --- |
-| Jira enabled | Permit local Jira scoping and later exact-plan application |
+| Jira enabled | Permit missing-cache reconciliation, local scoping, and later exact-plan application |
 | Jira disabled | No Jira file, configuration, credential, client, or network assumptions |
 | Wiki enabled | Permit local wiki scoping and later authoring/finalization |
 | Wiki disabled | No wiki state, page, template, authoring, or lint assumptions |
@@ -44,6 +44,22 @@ Disabled features produce no plan table and no placeholder work. Their missing f
 are expected. Canvas remains independent.
 
 ## 3. Scope read-only
+
+When Jira is enabled and `courses/{{COURSE}}/state/jira.json` is absent, first write
+this exact empty plan to a temporary file, substituting only the manifest course and
+configured course epic, and apply it:
+
+```json
+{"schema":1,"course":"{{COURSE}}","epic":"{{EPIC_KEY}}","actions":[]}
+```
+
+```console
+corum jira apply {{COURSE}} < {{EMPTY_JIRA_PLAN_FILE}}
+```
+
+This is deterministic read-only reconciliation of the configured epic into the
+local cache, not an approval item. Stop if it fails. Do not run it when Jira is
+disabled or when the cache already exists, and do not add actions to this plan.
 
 Use `scope-course` with only the course and selected current manifest. It owns local
 discovery and comparison. It must not call Jira or edit any file.
@@ -82,9 +98,11 @@ Ask exactly one combined question:
 > Apply {{JIRA_ACTION_COUNT}} Jira change(s), author {{DISTINCT_WIKI_PAGE_COUNT}}
 > wiki page(s), and finalize {{DISTINCT_SOURCE_COUNT}} source(s)?
 
-Wait for an affirmative answer. Do not call Jira, edit wiki/index/state/changelog,
-or request any feature-specific credential before approval. A negative answer ends
-the run without mutations. Do not ask another approval question later.
+Wait for an affirmative answer. Do not call Jira mutation methods, edit wiki/index/
+state/changelog, or request a feature-specific credential for mutation before
+approval. The earlier enabled-only cache bootstrap may use Jira credentials for its
+read-only remote query and local cache preparation. A negative answer ends the run
+without mutations. Do not ask another approval question later.
 
 ## 5. Apply the approved plan
 
@@ -115,11 +133,14 @@ After successful page work:
 2. Add approved deliberate skipped ranges to the index.
 3. Verify every planned page exists and every source-backed section has the exact
    provenance marker supplied by the scope.
-4. Run pre-finalization lint with every planned source as an in-memory preview:
+4. Run pre-finalization lint with every planned source as an in-memory preview. Use
+   `--pending` for a nonempty label and `--pending-null` for a justified null:
 
    ```console
    python skills/linting-wiki/scripts/lint-wiki.py {{COURSE}} \
      --pending '{{LABEL}}={{SOURCE_PATH}}'
+   python skills/linting-wiki/scripts/lint-wiki.py {{COURSE}} \
+     --pending-null '{{SOURCE_PATH}}'
    ```
 
 5. Correct defects introduced by this run. A page, index, provenance, or lint
@@ -153,6 +174,7 @@ keys, errors, and retry eligibility.
 | About to | Stop and do this |
 | --- | --- |
 | Read disabled-feature files or credentials | Omit the feature entirely |
+| Bootstrap with a nonempty Jira plan | Use only the exact empty plan |
 | Treat an unread source as omission or approval work | Report unknown capture state |
 | Enrich a Jira action with display-only fields | Keep evidence outside the strict plan |
 | Finalize before page, index, provenance, and lint succeed | Preserve prior wiki state |

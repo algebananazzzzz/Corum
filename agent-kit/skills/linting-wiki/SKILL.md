@@ -38,8 +38,16 @@ Before finalization, preview each planned source in memory without changing stat
 python skills/linting-wiki/scripts/lint-wiki.py {{COURSE}} --pending '{{LABEL}}={{SOURCE_PATH}}'
 ```
 
-Repeat `--pending` for multiple sources. This makes provenance and skipped ranges
-checkable before `state/wiki.json` advances.
+For a deliberately null provenance value, preview its readable source explicitly:
+
+```console
+python skills/linting-wiki/scripts/lint-wiki.py {{COURSE}} --pending-null '{{SOURCE_PATH}}'
+```
+
+Repeat either option for multiple sources. The command verifies every source can be
+read, every PDF can be inspected, and every cited PDF page exists. This makes
+provenance and skipped ranges checkable before `state/wiki.json` advances. Empty or
+whitespace-only labels are invalid; use `--pending-null` for an intentional null.
 
 ## Judgment checks
 

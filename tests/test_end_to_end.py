@@ -71,6 +71,7 @@ def test_initialized_canvas_only_course_has_no_optional_state(tmp_path):
 def test_wiki_state_schema_owns_only_source_finalization():
     schema = json.loads((ROOT / "schemas/wiki-state.schema.json").read_text())
     validate({"schema": 1, "ingested": {"lectures/topic.pdf": "L1"}}, schema)
+    validate({"schema": 1, "ingested": {"notes/duplicate.md": None}}, schema)
 
     with pytest.raises(ValidationError):
         validate(
@@ -81,3 +82,5 @@ def test_wiki_state_schema_owns_only_source_finalization():
             },
             schema,
         )
+    with pytest.raises(ValidationError):
+        validate({"schema": 1, "ingested": {"notes/topic.md": ""}}, schema)

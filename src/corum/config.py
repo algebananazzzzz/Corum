@@ -128,12 +128,18 @@ def _load_yaml(path: Path) -> dict:
     return value
 
 
-def load_workspace(root: Path) -> WorkspaceConfig:
-    return WorkspaceConfig.model_validate(_load_yaml(root / "corum.yaml"))
+def load_workspace(root: Path, *, validate_jira: bool = True) -> WorkspaceConfig:
+    raw = _load_yaml(root / "corum.yaml")
+    if not validate_jira:
+        raw = {**raw, "jira": None}
+    return WorkspaceConfig.model_validate(raw)
 
 
-def load_course(root: Path, code: str) -> CourseConfig:
-    return CourseConfig.model_validate(_load_yaml(root / "courses" / code / "course.yaml"))
+def load_course(root: Path, code: str, *, validate_jira: bool = True) -> CourseConfig:
+    raw = _load_yaml(root / "courses" / code / "course.yaml")
+    if not validate_jira:
+        raw = {**raw, "jira": None}
+    return CourseConfig.model_validate(raw)
 
 
 def resolve_features(workspace: WorkspaceConfig, course: CourseConfig) -> Features:
