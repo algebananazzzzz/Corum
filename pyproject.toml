@@ -12,6 +12,12 @@ dependencies = [
     "PyYAML>=6",
 ]
 
+[project.optional-dependencies]
+test = [
+    "jsonschema>=4",
+    "pytest>=8",
+]
+
 [project.scripts]
 corum = "corum.cli:main"
 
