@@ -197,8 +197,10 @@ def main(argv: list[str] | None = None) -> int:
                 asyncio.run(apply_plan(vault, course, plan, client=None, dry_run=True))
                 print(json.dumps(plan.model_dump(mode="json", exclude_unset=True), indent=2))
             else:
-                if workspace.jira is None:
-                    raise ValueError(f"enabled Jira configuration is incomplete for {course.code}")
+                if workspace.jira is None or workspace.jira.cloud_id is None:
+                    raise ValueError(
+                        "Jira OAuth configuration is incomplete; run corum jira login in this vault"
+                    )
                 async def run_jira_apply():
                     async with open_rovo_session(interactive=False) as session:
                         client = JiraClient(session, workspace.jira.cloud_id)

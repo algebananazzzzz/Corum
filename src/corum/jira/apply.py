@@ -17,7 +17,6 @@ from corum.state import (
     write_latest_run,
 )
 from corum.validation import (
-    require_https_origin,
     require_identifier,
     require_iso_date,
     require_issue_key,
@@ -151,14 +150,21 @@ class ReconciliationRequired(ValueError):
     """A prior uncertain Jira write must be reconciled before more actions."""
 
 
-def _validate_plan(vault: Path, course: CourseConfig, plan: JiraPlan):
+def _validate_plan(
+    vault: Path,
+    course: CourseConfig,
+    plan: JiraPlan,
+    *,
+    require_cloud_id: bool,
+):
     workspace = load_workspace(vault)
     if not resolve_features(workspace, course).jira:
         raise JiraDisabled(f"Jira is disabled for {course.code}")
     if workspace.jira is None or course.jira is None:
         raise InvalidPlan(f"enabled Jira configuration is incomplete for {course.code}")
+    if require_cloud_id and workspace.jira.cloud_id is None:
+        raise InvalidPlan("Jira OAuth configuration is incomplete; run corum jira login in this vault")
     try:
-        require_https_origin(str(workspace.jira.site))
         require_project_key(workspace.jira.project)
         require_issue_key(course.jira.epic, "configured Jira epic key")
     except ValueError as error:
@@ -430,7 +436,7 @@ async def apply_plan(
     dry_run: bool = False,
 ) -> ApplyResult:
     """Apply a fully validated plan in order and cache each resulting issue."""
-    jira = _validate_plan(vault, course, plan)
+    jira = _validate_plan(vault, course, plan, require_cloud_id=not dry_run)
     if dry_run:
         return ApplyResult(
             course=course.code,

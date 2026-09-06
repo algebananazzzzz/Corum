@@ -1,23 +1,18 @@
-"""Small first-party client for the Jira Cloud REST API."""
+"""Rovo MCP adapter for the Jira operations used by Corum plans."""
 
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
-from urllib.parse import quote
-
-import httpx
 
 from corum.validation import (
-    require_https_origin,
     require_issue_key,
+    require_nonblank,
     require_project_key,
     require_transition_id,
 )
 
-
-_INLINE_MARKUP = re.compile(r"\[([^\]]+)]\((https?://[^)]+)\)|\*\*([^*]+)\*\*")
+from .rovo import RovoError, RovoSession
 
 
 class JiraMutationError(RuntimeError):
@@ -28,55 +23,27 @@ class JiraMutationError(RuntimeError):
         self.write_state = write_state
 
 
-def _inline_adf(value: str) -> list[dict[str, Any]]:
-    nodes: list[dict[str, Any]] = []
-    offset = 0
-    for match in _INLINE_MARKUP.finditer(value):
-        if match.start() > offset:
-            nodes.append({"type": "text", "text": value[offset : match.start()]})
-        if match.group(3) is not None:
-            nodes.append(
-                {"type": "text", "text": match.group(3), "marks": [{"type": "strong"}]}
-            )
-        else:
-            nodes.append(
-                {
-                    "type": "text",
-                    "text": match.group(1),
-                    "marks": [{"type": "link", "attrs": {"href": match.group(2)}}],
-                }
-            )
-        offset = match.end()
-    if offset < len(value):
-        nodes.append({"type": "text", "text": value[offset:]})
-    return nodes or [{"type": "text", "text": ""}]
+def _data(value: object, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise RovoError(f"Atlassian returned invalid {label}")
+    nested = value.get("data")
+    if nested is not None:
+        if not isinstance(nested, dict):
+            raise RovoError(f"Atlassian returned invalid {label}")
+        return nested
+    return value
 
 
-def _description_to_adf(value: str) -> dict[str, Any]:
-    return {
-        "type": "doc",
-        "version": 1,
-        "content": [
-            {"type": "paragraph", "content": _inline_adf(line)}
-            for line in value.splitlines() or [""]
-        ],
-    }
-
-
-def _jira_fields(fields: dict[str, Any]) -> dict[str, Any]:
+def _edit_fields(fields: dict[str, Any]) -> dict[str, Any]:
     mapped: dict[str, Any] = {}
     for name, value in fields.items():
-        if name == "project":
-            mapped[name] = {"key": require_project_key(value)}
-        elif name == "type":
+        if name == "type":
             mapped["issuetype"] = {"name": value}
         elif name == "parent":
             mapped[name] = None if value is None else {"key": require_issue_key(value)}
         elif name == "due":
             mapped["duedate"] = value
-        elif name == "description":
-            mapped[name] = None if value is None else _description_to_adf(value)
-        elif name in {"summary", "labels"}:
+        elif name in {"summary", "description", "labels"}:
             mapped[name] = value
         else:
             raise ValueError(f"unsupported Jira field: {name}")
@@ -84,97 +51,116 @@ def _jira_fields(fields: dict[str, Any]) -> dict[str, Any]:
 
 
 class JiraClient:
-    """Apply the narrow set of Jira operations required by Corum plans."""
+    """Apply the narrow Jira operation set through one authenticated Rovo session."""
 
-    def __init__(
-        self,
-        site: str,
-        email: str,
-        token: str,
-        *,
-        transport: httpx.AsyncBaseTransport | None = None,
-    ) -> None:
-        self._base_url = f"{require_https_origin(site)}/rest/api/3/"
-        self._auth = httpx.BasicAuth(email, token)
-        self._transport = transport
-
-    @staticmethod
-    def _issue_endpoint(key: str) -> str:
-        segment = quote(require_issue_key(key), safe="")
-        return f"issue/{segment}"
-
-    def _new_client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            base_url=self._base_url,
-            auth=self._auth,
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-            timeout=httpx.Timeout(30.0, connect=10.0),
-            transport=self._transport,
-        )
+    def __init__(self, session: RovoSession, cloud_id: str) -> None:
+        self._session = session
+        self._cloud_id = require_nonblank(cloud_id, "Jira cloud ID")
 
     async def create_issue(self, fields: dict[str, Any]) -> str:
-        async with self._new_client() as client:
-            response = await client.post("issue", json={"fields": _jira_fields(fields)})
-            response.raise_for_status()
-            try:
-                payload = response.json()
-                key = payload.get("key") if isinstance(payload, dict) else None
-                return require_issue_key(key, "created Jira issue key")
-            except (ValueError, json.JSONDecodeError) as error:
-                raise JiraMutationError(
-                    "successful Jira create response is missing a valid issue key",
-                    write_state="applied",
-                ) from error
+        arguments: dict[str, object] = {
+            "cloudId": self._cloud_id,
+            "projectKey": require_project_key(fields["project"]),
+            "summary": fields["summary"],
+            "issueType": fields["type"],
+        }
+        for name in ("description", "labels", "parent"):
+            value = fields.get(name)
+            if value is not None:
+                arguments[name] = value
+        if fields.get("due") is not None:
+            arguments["additional_fields"] = {"duedate": fields["due"]}
+        try:
+            result = _data(
+                await self._session.call_json("createJiraIssue", arguments),
+                "created Jira issue",
+            )
+        except RovoError as error:
+            raise JiraMutationError(
+                "Jira create outcome is unknown",
+                write_state="unknown",
+            ) from error
+        issue = result.get("issue")
+        key = result.get("key")
+        if key is None and isinstance(issue, dict):
+            key = issue.get("key")
+        try:
+            return require_issue_key(key, "created Jira issue key")
+        except ValueError as error:
+            raise JiraMutationError(
+                "successful Jira create response is missing a valid issue key",
+                write_state="applied",
+            ) from error
 
     async def update_fields(self, key: str, fields: dict[str, Any]) -> None:
-        async with self._new_client() as client:
-            response = await client.put(
-                self._issue_endpoint(key),
-                json={"fields": _jira_fields(fields)},
-            )
-            response.raise_for_status()
+        arguments: dict[str, object] = {
+            "cloudId": self._cloud_id,
+            "issueIdOrKey": require_issue_key(key),
+            "fields": _edit_fields(fields),
+        }
+        if "description" in fields:
+            arguments["contentFormat"] = "markdown"
+        try:
+            await self._session.call_json("editJiraIssue", arguments)
+        except RovoError as error:
+            raise JiraMutationError(
+                "Jira update outcome is unknown",
+                write_state="unknown",
+            ) from error
 
     async def transition_issue(self, key: str, transition: str) -> None:
-        transition_id = require_transition_id(transition)
-        async with self._new_client() as client:
-            response = await client.post(
-                f"{self._issue_endpoint(key)}/transitions",
-                json={"transition": {"id": transition_id}},
+        try:
+            await self._session.call_json(
+                "transitionJiraIssue",
+                {
+                    "cloudId": self._cloud_id,
+                    "issueIdOrKey": require_issue_key(key),
+                    "transitionId": require_transition_id(transition),
+                },
             )
-            response.raise_for_status()
+        except RovoError as error:
+            raise JiraMutationError(
+                "Jira transition outcome is unknown",
+                write_state="unknown",
+            ) from error
 
     async def fetch_issue(self, key: str) -> dict[str, Any]:
-        async with self._new_client() as client:
-            response = await client.get(
-                self._issue_endpoint(key),
-                params={"fields": "issuetype,summary,status,duedate,labels,description,updated"},
-            )
-            response.raise_for_status()
-            return response.json()
+        return _data(
+            await self._session.call_json(
+                "getJiraIssue",
+                {
+                    "cloudId": self._cloud_id,
+                    "issueIdOrKey": require_issue_key(key),
+                    "view": "full",
+                    "responseContentFormat": "markdown",
+                },
+            ),
+            "Jira issue",
+        )
 
     async def epic_children(self, epic: str) -> list[dict[str, Any]]:
         epic_key = require_issue_key(epic, "Jira epic issue key")
-        body: dict[str, Any] = {
-            "jql": f"parent = {json.dumps(epic_key)}",
-            "maxResults": 100,
-            "fields": [
-                "issuetype",
-                "summary",
-                "status",
-                "duedate",
-                "labels",
-                "description",
-                "updated",
-            ],
-        }
         issues: list[dict[str, Any]] = []
-        async with self._new_client() as client:
-            while True:
-                response = await client.post("search/jql", json=body)
-                response.raise_for_status()
-                page = response.json()
-                issues.extend(page.get("issues", []))
-                token = page.get("nextPageToken")
-                if not token:
-                    return issues
-                body["nextPageToken"] = token
+        next_page: str | None = None
+        while True:
+            arguments: dict[str, object] = {
+                "cloudId": self._cloud_id,
+                "jql": f"parent = {json.dumps(epic_key)}",
+                "maxResults": 100,
+                "view": "full",
+                "responseContentFormat": "markdown",
+            }
+            if next_page is not None:
+                arguments["nextPageToken"] = next_page
+            page = _data(
+                await self._session.call_json("searchJiraIssuesUsingJql", arguments),
+                "Jira search result",
+            )
+            values = page.get("issues")
+            if not isinstance(values, list) or not all(isinstance(item, dict) for item in values):
+                raise RovoError("Atlassian returned invalid Jira search results")
+            issues.extend(values)
+            token = page.get("nextPageToken")
+            if page.get("isLast") is True or not isinstance(token, str) or not token:
+                return issues
+            next_page = token
