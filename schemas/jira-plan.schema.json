@@ -3,9 +3,9 @@
   "title": "Corum exact Jira application plan",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "course", "epic", "actions"],
+  "required": ["version", "course", "epic", "actions"],
   "properties": {
-    "schema": {"const": 1},
+    "version": {"const": 2},
     "course": {"type": "string", "pattern": "^\\S+$"},
     "epic": {"$ref": "#/$defs/issueKey"},
     "actions": {

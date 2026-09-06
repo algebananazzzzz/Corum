@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,11 @@ import (
 	"github.com/algebananazzzzz/Corum/internal/jira"
 	"github.com/algebananazzzzz/Corum/internal/ui"
 	"github.com/algebananazzzzz/Corum/internal/vault"
+)
+
+var (
+	openJiraSession = jira.Open
+	makeJiraClient  = jira.NewJiraClient
 )
 
 // Run executes the intentionally small Task 1 command surface.
@@ -59,6 +65,13 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 		fmt.Fprintf(out, "doctor: %d courses\n", len(courses))
 		return 0
+	}
+	if len(args) == 3 && args[0] == "jira" && args[1] == "apply" && args[2] == "--help" {
+		fmt.Fprintln(out, "usage: corum jira apply COURSE [--dry-run]")
+		return 0
+	}
+	if code, handled := runJiraApply(ctx, args, in, out, errOut); handled {
+		return code
 	}
 	if len(args) == 2 && args[0] == "jira" && args[1] == "logout" {
 		removed, err := jira.ClearAuth()
@@ -121,8 +134,91 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, label)
 		return 0
 	}
-	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor PATH | corum version | corum jira login [PATH]|status|logout")
+	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor PATH | corum version | corum jira login [PATH]|status|logout | corum jira apply COURSE [--dry-run]")
 	return 2
+}
+
+func runJiraApply(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) (int, bool) {
+	if len(args) != 3 && len(args) != 4 {
+		return 0, false
+	}
+	if args[0] != "jira" || args[1] != "apply" {
+		return 0, false
+	}
+	dryRun := len(args) == 4 && args[3] == "--dry-run"
+	if len(args) == 4 && !dryRun {
+		return 0, false
+	}
+	if in == nil {
+		fmt.Fprintln(errOut, "could not read Jira plan")
+		return 1, true
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintln(errOut, "could not locate vault")
+		return 1, true
+	}
+	workspace, err := config.LoadWorkspace(root)
+	if err != nil {
+		fmt.Fprintln(errOut, "could not load workspace configuration")
+		return 1, true
+	}
+	course, err := config.LoadCourse(root, args[2])
+	if err != nil {
+		fmt.Fprintln(errOut, "could not load course configuration")
+		return 1, true
+	}
+	plan, err := jira.DecodePlan(in)
+	if err != nil {
+		fmt.Fprintln(errOut, "invalid Jira plan")
+		return 1, true
+	}
+	if err := jira.ValidatePlan(workspace, course, plan, !dryRun); err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1, true
+	}
+	encoder := json.NewEncoder(out)
+	encoder.SetIndent("", "  ")
+	if dryRun {
+		if _, err := jira.Apply(ctx, root, workspace, course, plan, nil, true); err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1, true
+		}
+		if err := encoder.Encode(plan); err != nil {
+			fmt.Fprintln(errOut, "could not write Jira plan")
+			return 1, true
+		}
+		return 0, true
+	}
+	session, err := openJiraSession(ctx, jira.OpenOptions{Interactive: false, Out: errOut})
+	if err != nil {
+		if errors.Is(err, jira.LoginRequired) {
+			fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum jira login")
+		} else {
+			fmt.Fprintln(errOut, "could not connect to Atlassian")
+		}
+		return 1, true
+	}
+	defer session.Close()
+	client, err := makeJiraClient(session, workspace.Jira.CloudID)
+	if err != nil {
+		fmt.Fprintln(errOut, "invalid Jira configuration")
+		return 1, true
+	}
+	result, applyErr := jira.Apply(ctx, root, workspace, course, plan, client, false)
+	if result.Course != "" {
+		if err := encoder.Encode(result); err != nil {
+			fmt.Fprintln(errOut, "could not write Jira result")
+			return 1, true
+		}
+	}
+	if applyErr != nil || result.Status == "partial" || result.Status == "failed" {
+		if result.Course == "" {
+			fmt.Fprintln(errOut, applyErr)
+		}
+		return 1, true
+	}
+	return 0, true
 }
 
 func interactiveInitRoot(args []string) (string, bool) {

@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -52,5 +54,36 @@ func TestRunInteractiveInitExplainsNonTTYFallback(t *testing.T) {
 	}
 	if errOut.String() != "interactive init requires a terminal; use corum init --defaults PATH\n" {
 		t.Fatalf("stderr = %q", errOut.String())
+	}
+}
+
+func TestRunJiraApplyDryRunEchoesPlanWithoutOAuth(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "courses", "CS3103"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workspace := "version: 2\nworkspace:\n  timezone: Asia/Singapore\n  term: AY2026/27 Semester 1\njira:\n  cloud_id: cloud-1\n  project: STUDY\n  transitions:\n    this_week: \"2\"\ncalendar:\n  timetable: Timetable.md\n  term: Term_Calendar.md\n"
+	course := "version: 2\ncode: CS3103\njira:\n  epic: STUDY-1\n"
+	if err := os.WriteFile(filepath.Join(root, "corum.yaml"), []byte(workspace), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "courses", "CS3103", "course.yaml"), []byte(course), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	input := bytes.NewBufferString(`{"version":2,"course":"CS3103","epic":"STUDY-1","actions":[]}`)
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), []string{"jira", "apply", "CS3103", "--dry-run"}, input, &out, &errOut); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	var echoed map[string]any
+	if err := json.Unmarshal(out.Bytes(), &echoed); err != nil {
+		t.Fatal(err)
+	}
+	if echoed["version"] != float64(2) || len(echoed["actions"].([]any)) != 0 {
+		t.Fatalf("output=%v", echoed)
+	}
+	if _, err := os.Stat(filepath.Join(root, "courses", "CS3103", "state")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dry-run state=%v", err)
 	}
 }

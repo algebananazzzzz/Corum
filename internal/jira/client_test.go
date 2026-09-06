@@ -1,0 +1,161 @@
+package jira
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+type callRecord struct {
+	name string
+	args map[string]any
+}
+
+type fakeJSONCaller struct {
+	responses map[string][]any
+	errors    map[string]error
+	calls     []callRecord
+}
+
+func (f *fakeJSONCaller) CallJSON(_ context.Context, name string, args map[string]any, target any) error {
+	f.calls = append(f.calls, callRecord{name: name, args: args})
+	if err := f.errors[name]; err != nil {
+		return err
+	}
+	values := f.responses[name]
+	if len(values) == 0 {
+		return errors.New("missing fake response")
+	}
+	f.responses[name] = values[1:]
+	encoded, err := json.Marshal(values[0])
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(encoded, target)
+}
+
+func remoteIssue(key string) map[string]any {
+	return map[string]any{
+		"key": key,
+		"fields": map[string]any{
+			"issuetype":   map[string]any{"name": "Task"},
+			"summary":     "Summary " + key,
+			"status":      map[string]any{"name": "To Do"},
+			"duedate":     nil,
+			"labels":      []any{},
+			"description": nil,
+			"updated":     "2026-09-06T00:00:00+08:00",
+		},
+	}
+}
+
+func TestJiraClientMapsExactRovoArgumentsAndPagination(t *testing.T) {
+	ctx := context.Background()
+	caller := &fakeJSONCaller{responses: map[string][]any{
+		"createJiraIssue":          {map[string]any{"data": map[string]any{"key": "STUDY-2"}}},
+		"editJiraIssue":            {map[string]any{"data": map[string]any{}}},
+		"transitionJiraIssue":      {map[string]any{"data": map[string]any{}}},
+		"getJiraIssue":             {map[string]any{"data": remoteIssue("STUDY-2")}},
+		"searchJiraIssuesUsingJql": {map[string]any{"data": map[string]any{"issues": []any{remoteIssue("STUDY-2")}, "nextPageToken": "page-2", "isLast": false}}, map[string]any{"data": map[string]any{"issues": []any{remoteIssue("STUDY-3")}, "isLast": true}}},
+	}}
+	client, err := newJiraClient(caller, "cloud-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := client.CreateIssue(ctx, map[string]any{"project": "STUDY", "type": "Task", "parent": "STUDY-1", "summary": "Task", "description": "**Deadline:** Friday", "due": "2026-09-11", "labels": []string{"assessment"}})
+	if err != nil || key != "STUDY-2" {
+		t.Fatalf("CreateIssue = %q, %v", key, err)
+	}
+	if err := client.UpdateFields(ctx, "STUDY-2", map[string]any{"type": "Milestone", "parent": "STUDY-1", "summary": "Updated", "description": nil, "due": nil, "labels": []string{}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.TransitionIssue(ctx, "STUDY-2", "2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.FetchIssue(ctx, "STUDY-2"); err != nil {
+		t.Fatal(err)
+	}
+	children, err := client.EpicChildren(ctx, "STUDY-1")
+	if err != nil || len(children) != 2 {
+		t.Fatalf("EpicChildren = %v, %v", children, err)
+	}
+
+	want := []callRecord{
+		{"createJiraIssue", map[string]any{"cloudId": "cloud-1", "projectKey": "STUDY", "summary": "Task", "issueType": "Task", "description": "**Deadline:** Friday", "labels": []string{"assessment"}, "parent": "STUDY-1", "additional_fields": map[string]any{"duedate": "2026-09-11"}}},
+		{"editJiraIssue", map[string]any{"cloudId": "cloud-1", "issueIdOrKey": "STUDY-2", "fields": map[string]any{"issuetype": map[string]any{"name": "Milestone"}, "parent": map[string]any{"key": "STUDY-1"}, "summary": "Updated", "description": nil, "duedate": nil, "labels": []string{}}, "contentFormat": "markdown"}},
+		{"transitionJiraIssue", map[string]any{"cloudId": "cloud-1", "issueIdOrKey": "STUDY-2", "transitionId": "2"}},
+		{"getJiraIssue", map[string]any{"cloudId": "cloud-1", "issueIdOrKey": "STUDY-2", "view": "full", "responseContentFormat": "markdown"}},
+		{"searchJiraIssuesUsingJql", map[string]any{"cloudId": "cloud-1", "jql": `parent = "STUDY-1"`, "maxResults": 100, "view": "full", "responseContentFormat": "markdown"}},
+		{"searchJiraIssuesUsingJql", map[string]any{"cloudId": "cloud-1", "jql": `parent = "STUDY-1"`, "maxResults": 100, "view": "full", "responseContentFormat": "markdown", "nextPageToken": "page-2"}},
+	}
+	if !reflect.DeepEqual(caller.calls, want) {
+		t.Fatalf("calls = %#v\nwant %#v", caller.calls, want)
+	}
+}
+
+func TestJiraClientOmitsCreateOptionals(t *testing.T) {
+	caller := &fakeJSONCaller{responses: map[string][]any{"createJiraIssue": {map[string]any{"data": map[string]any{"issue": map[string]any{"key": "STUDY-2"}}}}}}
+	client, _ := newJiraClient(caller, "cloud-1")
+	if _, err := client.CreateIssue(context.Background(), map[string]any{"project": "STUDY", "type": "Task", "parent": "STUDY-1", "summary": "Task"}); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"cloudId": "cloud-1", "projectKey": "STUDY", "summary": "Task", "issueType": "Task", "parent": "STUDY-1"}
+	if !reflect.DeepEqual(caller.calls[0].args, want) {
+		t.Fatalf("args = %#v", caller.calls[0].args)
+	}
+}
+
+func TestJiraClientMalformedCreateKeyIsApplied(t *testing.T) {
+	caller := &fakeJSONCaller{responses: map[string][]any{"createJiraIssue": {map[string]any{"data": map[string]any{"id": "10001"}}}}}
+	client, _ := newJiraClient(caller, "cloud-1")
+	_, err := client.CreateIssue(context.Background(), map[string]any{"project": "STUDY", "type": "Task", "parent": "STUDY-1", "summary": "Task"})
+	var mutation *MutationError
+	if !errors.As(err, &mutation) || mutation.State != WriteApplied {
+		t.Fatalf("error = %#v", err)
+	}
+}
+
+func TestJiraClientToolFailureIsUnknownAndRedacted(t *testing.T) {
+	caller := &fakeJSONCaller{errors: map[string]error{"createJiraIssue": errors.New("raw payload secret")}}
+	client, _ := newJiraClient(caller, "cloud-1")
+	_, err := client.CreateIssue(context.Background(), map[string]any{"project": "STUDY", "type": "Task", "parent": "STUDY-1", "summary": "Task"})
+	var mutation *MutationError
+	if !errors.As(err, &mutation) || mutation.State != WriteUnknown || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("error = %#v", err)
+	}
+}
+
+func TestJiraClientRejectsIdentifiersBeforeRemoteAccess(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		call func(*JiraClient) error
+	}{
+		{"create", func(c *JiraClient) error {
+			_, err := c.CreateIssue(context.Background(), map[string]any{"project": "STUDY", "type": "Task", "parent": "../BAD", "summary": "Task"})
+			return err
+		}},
+		{"update", func(c *JiraClient) error {
+			return c.UpdateFields(context.Background(), "../BAD", map[string]any{"summary": "Changed"})
+		}},
+		{"transition", func(c *JiraClient) error { return c.TransitionIssue(context.Background(), "STUDY-2", "") }},
+		{"fetch", func(c *JiraClient) error { _, err := c.FetchIssue(context.Background(), "../BAD"); return err }},
+		{"children", func(c *JiraClient) error {
+			_, err := c.EpicChildren(context.Background(), `BAD" OR project IS NOT EMPTY`)
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caller := &fakeJSONCaller{}
+			client, _ := newJiraClient(caller, "cloud-1")
+			if err := tc.call(client); err == nil {
+				t.Fatal("expected validation error")
+			}
+			if len(caller.calls) != 0 {
+				t.Fatalf("remote calls = %#v", caller.calls)
+			}
+		})
+	}
+}
