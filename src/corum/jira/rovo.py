@@ -13,13 +13,14 @@ from mcp import ClientSession, types
 from mcp.client.auth import OAuthClientProvider
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.auth import OAuthClientMetadata
-from pydantic import AnyUrl, BaseModel, HttpUrl, ValidationError
+from pydantic import AliasChoices, AnyUrl, BaseModel, Field, HttpUrl, ValidationError
 
 from .auth import AuthCacheError, FileTokenStorage
 from .oauth_callback import LoopbackOAuthCallback, OAuthLoginError
 
 
 ROVO_MCP_URL = "https://mcp.atlassian.com/v2/mcp"
+ROVO_MCP_TRANSPORT_URL = f"{ROVO_MCP_URL}?tools=all"
 
 
 class RovoError(RuntimeError):
@@ -31,9 +32,10 @@ class LoginRequired(RovoError):
 
 
 class AtlassianResource(BaseModel):
-    id: str
-    url: HttpUrl
-    name: str
+    id: str = Field(validation_alias=AliasChoices("id", "cloudId"))
+    url: HttpUrl | None = None
+    name: str | None = None
+    products: list[dict[str, object]] = Field(default_factory=list)
 
 
 class JiraProject(BaseModel):
@@ -96,7 +98,8 @@ class RovoSession:
         if len(text_blocks) != len(result.content) or not text_blocks:
             raise RovoError(f"Atlassian tool returned an unsupported response: {name}")
         try:
-            return json.loads("".join(text_blocks))
+            value, _ = json.JSONDecoder().raw_decode("".join(text_blocks).lstrip())
+            return value
         except json.JSONDecodeError as error:
             raise RovoError(f"Atlassian tool returned invalid JSON: {name}") from error
 
@@ -115,11 +118,20 @@ class RovoSession:
             resources = [AtlassianResource.model_validate(value) for value in values]
         except ValidationError as error:
             raise RovoError("Atlassian returned invalid site information") from error
-        return sorted(resources, key=lambda item: (item.name.casefold(), item.id))
+        resources = [
+            resource
+            for resource in resources
+            if not resource.products
+            or any(product.get("id") == "jira" for product in resource.products)
+        ]
+        return sorted(resources, key=lambda item: ((item.name or "").casefold(), item.id))
 
     async def projects(self, cloud_id: str) -> list[JiraProject]:
         values = _unwrap_list(
-            await self.call_json("listJiraProjects", {"cloudId": cloud_id}),
+            await self.call_json(
+                "listJiraProjects",
+                {"cloudId": cloud_id, "maxResults": 100},
+            ),
             ("projects", "values", "results"),
         )
         try:
@@ -169,7 +181,10 @@ async def open_rovo_session(
     )
     try:
         async with httpx2.AsyncClient(auth=auth, follow_redirects=True) as client:
-            async with streamable_http_client(ROVO_MCP_URL, http_client=client) as streams:
+            async with streamable_http_client(
+                ROVO_MCP_TRANSPORT_URL,
+                http_client=client,
+            ) as streams:
                 async with ClientSession(streams[0], streams[1]) as session:
                     await session.initialize()
                     yield RovoSession(session)

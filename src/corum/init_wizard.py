@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 
@@ -51,7 +51,10 @@ async def select_jira(session: RovoSession, prompts: Prompts) -> JiraSelection:
     resource, projects = prompts.select(
         "Atlassian site",
         [
-            (f"{resource.name} ({resource.url})", (resource, projects))
+            (
+                f"{resource.name or 'Jira site'} ({resource.url or resource.id})",
+                (resource, projects),
+            )
             for resource, projects in choices
         ],
     )
@@ -61,7 +64,7 @@ async def select_jira(session: RovoSession, prompts: Prompts) -> JiraSelection:
     )
     return JiraSelection(
         cloud_id=resource.id,
-        site=str(resource.url),
+        site=str(resource.url) if resource.url is not None else None,
         project=project.key,
     )
 

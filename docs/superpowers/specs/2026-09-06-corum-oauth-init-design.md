@@ -141,8 +141,15 @@ jira:
     this_week: "2"
 ```
 
-`cloud_id` identifies the selected Rovo MCP resource. `site` remains for human
-readability and validation. The project key continues to scope all Jira work.
+`cloud_id` identifies the selected Rovo MCP resource. `site` remains optional
+human-readable metadata because the current Rovo v2 compact resource response
+may provide only `cloudId` and product access. The project key continues to
+scope all Jira work.
+
+The MCP OAuth resource remains `https://mcp.atlassian.com/v2/mcp`. The
+Streamable HTTP connection requests `?tools=all` so discoverable operations
+such as `listJiraProjects` are exposed as typed tools; this does not change the
+OAuth resource or add another provider.
 
 The workspace schema remains version 1 and gains an optional `cloud_id` field
 for compatibility. A Jira-enabled command encountering an older configuration

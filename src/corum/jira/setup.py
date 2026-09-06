@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import tempfile
 
-from pydantic import HttpUrl
 import yaml
 
 from corum.config import FeatureSwitch, JiraWorkspace, WorkspaceConfig
@@ -18,7 +17,7 @@ from .rovo import AtlassianResource, JiraProject, RovoError, RovoSession
 @dataclass(frozen=True)
 class JiraSelection:
     cloud_id: str
-    site: str
+    site: str | None
     project: str
 
 
@@ -45,7 +44,7 @@ def configured_workspace(
     )
     jira = JiraWorkspace(
         cloud_id=selection.cloud_id,
-        site=HttpUrl(selection.site),
+        site=selection.site,
         project=selection.project,
         transitions=transitions,
     )

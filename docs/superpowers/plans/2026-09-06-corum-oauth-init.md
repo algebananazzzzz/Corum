@@ -19,7 +19,7 @@
 - Preserve the existing `JiraPlan`, `ApplyResult`, dry-run behavior, exact-plan approval boundary, sequential writes, ownership checks, cache reconciliation, and partial-write recovery behavior.
 - `corum init --defaults` must be deterministic and must create a Jira-disabled vault without opening a browser.
 - Automated tests mock browser, OAuth, and MCP boundaries. The only live activity is the explicit read-only compatibility checkpoint and final user-assisted acceptance.
-- Keep schema version `1`; `jira.cloud_id` is optional for loading older vaults but mandatory before a real OAuth Jira operation.
+- Keep schema version `1`; `jira.cloud_id` is optional for loading older vaults but mandatory before a real OAuth Jira operation. `jira.site` is optional because the live compact resource response may expose only `cloudId`.
 - Make each task's listed commit before moving to the next task. Do not combine unrelated cleanup.
 
 ---
@@ -46,7 +46,7 @@
 ```python
 class JiraWorkspace(_StrictModel):
     cloud_id: str | None = None
-    site: HttpUrl
+    site: HttpUrl | None = None
     project: str
     transitions: dict[str, str] = Field(default_factory=dict)
 
@@ -258,7 +258,7 @@ arguments: dict[str, object]) -> object`, `async user_info() -> dict[str,
 object]`, `async resources() -> list[AtlassianResource]`, and `async
 projects(cloud_id: str) -> list[JiraProject]`.
 
-`call_json` must fail on `CallToolResult.isError`, concatenate only text content blocks, decode exactly one JSON value, and raise a redacted `RovoError` for missing tools, non-text results, invalid JSON, or an unexpected shape. It must never include raw MCP payloads in the error.
+`call_json` must fail on `CallToolResult.isError`, concatenate only text content blocks, decode the first JSON value (Rovo appends a human-readable discovery footer), and raise a redacted `RovoError` for missing tools, non-text results, invalid JSON, or an unexpected shape. It must never include raw MCP payloads in the error.
 
 Normalize the currently documented shapes while accepting the common outer wrappers (`data`, `results`, `values`, `projects`) only inside this module. Sort resources by `(name.casefold(), id)` and projects by `(name.casefold(), key)` for stable prompts.
 
@@ -290,7 +290,7 @@ async def open_rovo_session(
     )
     try:
         async with httpx.AsyncClient(auth=auth, follow_redirects=True) as client:
-            async with streamable_http_client(ROVO_MCP_URL, http_client=client) as streams:
+            async with streamable_http_client(f"{ROVO_MCP_URL}?tools=all", http_client=client) as streams:
                 async with ClientSession(streams[0], streams[1]) as session:
                     await session.initialize()
                     yield RovoSession(session)
@@ -449,7 +449,7 @@ outer result wrapper names
 pagination cursor fields
 ```
 
-Confirm `atlassianUserInfo`, `getAccessibleAtlassianResources`, `listJiraProjects`, `getJiraIssue`, `searchJiraIssuesUsingJql`, `createJiraIssue`, `editJiraIssue`, and `transitionJiraIssue` are exposed. Call only the first three plus a bounded read-only issue search such as `project = <selected key> ORDER BY updated DESC` with `maxResults: 1`. Do not create, edit, or transition anything.
+Confirm `atlassianUserInfo`, `getAccessibleAtlassianResources`, `listJiraProjects`, `getJiraIssue`, `searchJiraIssuesUsingJql`, `createJiraIssue`, `editJiraIssue`, and `transitionJiraIssue` are exposed through `?tools=all`. Call only the first three plus a bounded read-only issue search such as `project = <selected key> ORDER BY updated DESC` with `maxResults: 1`. Do not create, edit, or transition anything.
 
 - [ ] If the live schemas differ from Task 5's mapping, update Task 5 locally with the observed names before coding. If any required mutation tool is absent, stop and report the blocker; do not restore API-token authentication.
 
@@ -483,7 +483,7 @@ list[dict[str, Any]]`.
 await session.call_json("createJiraIssue", {
     "cloudId": cloud_id,
     "projectKey": fields["project"],
-    "issueTypeName": fields["type"],
+    "issueType": fields["type"],
     "summary": fields["summary"],
     "description": fields.get("description"),
     "parent": fields.get("parent"),

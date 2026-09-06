@@ -118,7 +118,8 @@ async def _jira_status(vault: Path) -> None:
     if workspace_path.is_file():
         workspace = load_workspace(vault.resolve())
         if workspace.jira is not None:
-            print(f"Workspace Jira: {workspace.jira.site} ({workspace.jira.project})")
+            site = str(workspace.jira.site) if workspace.jira.site else workspace.jira.cloud_id
+            print(f"Workspace Jira: {site} ({workspace.jira.project})")
 
 
 def _jira_logout() -> None:

@@ -71,7 +71,7 @@ class WorkspaceFeatures(_StrictModel):
 
 class JiraWorkspace(_StrictModel):
     cloud_id: str | None = None
-    site: HttpUrl
+    site: HttpUrl | None = None
     project: str
     transitions: dict[str, str] = Field(default_factory=dict)
 
@@ -84,8 +84,12 @@ class JiraWorkspace(_StrictModel):
 
     @field_validator("site")
     @classmethod
-    def site_is_https_origin(cls, value: HttpUrl, info: ValidationInfo) -> HttpUrl:
-        if not (info.context or {}).get("skip_jira_semantics"):
+    def site_is_https_origin(
+        cls,
+        value: HttpUrl | None,
+        info: ValidationInfo,
+    ) -> HttpUrl | None:
+        if value is not None and not (info.context or {}).get("skip_jira_semantics"):
             require_https_origin(str(value))
         return value
 
