@@ -37,11 +37,13 @@ Choose an empty path; initialization refuses to overwrite a nonempty target.
 
 ```console
 corum init ~/Corum
+corum auth ~/Corum
 corum doctor ~/Corum
 ```
 
-`corum init` is an interactive terminal wizard. For automation or a minimal
-Canvas-first setup, use the headless defaults:
+`corum init` is an interactive terminal wizard that is purely local and
+deterministic. For automation or a minimal Canvas-first setup, use the headless
+defaults:
 
 ```console
 corum init --defaults ~/Corum
@@ -59,28 +61,33 @@ pages, state, calendars, or credentials.
 
 ## Authentication
 
-Canvas capture reads its token only when an enabled, non-dry-run Canvas operation
-needs it:
+`corum init` is purely local: it writes configuration and the toolkit, and
+registers the vault. Authentication is a separate interactive step:
 
 ```console
-export CORUM_CANVAS_TOKEN='...'
+corum auth ~/Corum        # authenticate every enabled service
+corum auth canvas ~/Corum # Canvas token only
+corum auth jira ~/Corum   # Jira browser OAuth only
+corum jira status [path]
+corum jira logout [path]
 ```
 
-Jira uses Atlassian browser OAuth only. There is no email/API-token mode, Rovo CLI
-dependency, keyring integration, or local protocol server.
+The Canvas flow stores your API token in the vault, validates it against the
+configured origin, and prints the courses the token can access (with the
+numeric `id` you put in `course.yaml`). For automation you can keep exporting
+`CORUM_CANVAS_TOKEN` instead; it takes precedence over the stored token.
 
-```console
-corum jira login ~/Corum
-corum jira status
-corum jira logout
-```
+Jira uses Atlassian browser OAuth only. There is no email/API-token mode, Rovo
+CLI dependency, keyring integration, or local protocol server. `corum auth
+jira` opens Atlassian in the default browser, lets the user select an
+accessible site and project, and writes only the non-secret `jira` block to
+`corum.yaml`.
 
-Login opens Atlassian in the default browser and lets the user select an
-accessible Jira project. OAuth material stays outside all vaults in the platform
-user configuration directory. On Linux this is normally
-`~/.config/corum/auth.json`; on macOS it is normally beneath
-`~/Library/Application Support/corum/`. POSIX cache directories use mode `0700`
-and the file uses `0600`. Do not copy, inspect, or commit that cache.
+Credentials are project-local by default: `<vault>/.config/corum/` holds
+`canvas.json` and `auth.json` with `0700`/`0600` modes and a gitignore guard,
+so they travel with the vault and are never committed. Commands run without a
+vault context fall back to the platform user configuration directory (on Linux
+normally `~/.config/corum/`). Do not copy, inspect, or commit credential files.
 
 Disabled Jira paths and `corum jira apply ... --dry-run` do not open OAuth or make
 Jira calls.

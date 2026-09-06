@@ -83,10 +83,13 @@ wiki use the same presence rule. A disabled service causes zero reads, writes,
 validation, credential checks, client construction, or network assumptions for
 that service. Its files may be absent without error.
 
-Secrets never belong in YAML, Markdown, state, logs, or agent prompts. Canvas uses
-`CORUM_CANVAS_TOKEN` only for a real enabled capture. Jira is browser-OAuth only;
-never request an email/API token, inspect the private OAuth cache, or add another
-credential path.
+Secrets never belong in YAML, Markdown, state, logs, or agent prompts.
+`corum auth` stores credentials project-locally under `<vault>/.config/corum/`
+(`canvas.json` for the Canvas token, `auth.json` for the Jira browser-OAuth
+cache), both private, gitignored, and created only when a service is enabled.
+`CORUM_CANVAS_TOKEN` still takes precedence for automation. Never read, print,
+copy, or inspect a stored credential, request an email/API token for Jira, or
+add another credential path.
 
 ## Wiki content and ingestion
 

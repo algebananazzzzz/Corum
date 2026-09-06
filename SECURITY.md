@@ -31,14 +31,23 @@ automatic check is a warning and does not block the requested command.
 
 ## Credential boundary
 
-- Supply `CORUM_CANVAS_TOKEN` through the process environment only. It is read
-  only for enabled, non-dry-run Canvas capture.
+Credentials are stored project-local by default, in `<vault>/.config/corum/`,
+with `0700` directories, `0600` files, and a gitignore guard so they travel with
+the vault and are never committed.
+
+- `corum auth canvas` (or the combined `corum auth`) stores the Canvas API token
+  at `<vault>/.config/corum/canvas.json`. It is read only for enabled,
+  non-dry-run Canvas operations. For automation you can keep supplying
+  `CORUM_CANVAS_TOKEN` through the environment instead; it takes precedence over
+  the stored token.
 - Jira uses Atlassian browser OAuth only. Corum does not accept Jira email/API
-  tokens and does not store credentials in YAML, Markdown, state, or the vault.
-- The OAuth cache is private user data outside every vault. Protect the platform
-  user configuration directory and `corum/auth.json`; on POSIX systems Corum
-  requires the directory to be `0700` and the file to be `0600` before reading.
-- Do not copy, inspect, log, or commit the OAuth cache. Run `corum jira logout`
+  tokens and never stores credentials in YAML, Markdown, or state. `corum auth
+  jira` writes the OAuth record to `<vault>/.config/corum/auth.json`.
+- Commands run without a vault context fall back to the platform user
+  configuration directory (normally `~/.config/corum/` on Linux). On POSIX
+  systems Corum requires the credential directory to be `0700` and the files to
+  be `0600` before reading.
+- Do not copy, inspect, log, or commit credential files. Run `corum jira logout`
   and revoke Atlassian access after suspected exposure.
 
 Disabled Jira and Jira dry-runs must not read the OAuth cache, open a browser,

@@ -36,10 +36,12 @@ Corum v2 exposes:
 ```text
 corum init [path]
 corum doctor [path]
+corum auth [path]
+corum auth jira [path]
+corum auth canvas [path]
 corum sync [course...] [--all] [--dry-run] [--json]
-corum jira login [path]
 corum jira status [path]
-corum jira logout
+corum jira logout [path]
 corum jira apply COURSE [--dry-run]
 corum update
 corum version
@@ -48,6 +50,27 @@ corum version
 Interactive commands require a terminal. Deterministic, noninteractive paths
 remain available for automation. Commands must emit concise user errors without
 credentials, OAuth callback parameters, raw remote payloads, or stack traces.
+
+### Authentication flow
+
+`corum init` is purely local and deterministic: it writes `corum.yaml`, the
+toolkit, and registers the vault, and performs no network, browser, or
+credential work.
+
+`corum auth` authenticates every service enabled in the vault. The Canvas
+flow stores the API token (prompting once when none is stored), validates it
+against the configured origin, and prints the accessible courses with their
+numeric IDs for `course.yaml` authoring. The Jira flow runs a fresh browser
+OAuth against the configured vault, lets the user pick site and project, and
+updates only the non-secret `jira` block in `corum.yaml`. `corum auth jira`
+and `corum auth canvas` run the individual flows.
+
+Credentials are project-local by default: `<vault>/.config/corum/` holds
+`canvas.json` and `auth.json` with `0700`/`0600` modes and a gitignore guard.
+The platform user configuration directory (`~/.config/corum` or equivalent)
+is used only when a command runs without a vault context. The
+`CORUM_CANVAS_TOKEN` environment variable still takes precedence for
+automation.
 
 ## Repository and Package Structure
 
@@ -107,10 +130,12 @@ their course/wiki content.
 
 ## Vault Initialization and Toolkit Ownership
 
-`corum init` uses Huh to collect the vault path, time zone, term, Canvas origin,
-wiki choice, and optional Jira connection. The final summary contains no
-credentials. Nothing is written before confirmation, and initialization refuses
-a nonempty target.
+`corum init` uses Huh to collect the vault path, time zone, term, Canvas
+origin, and wiki choice. It is purely local and deterministic: no network,
+browser, OAuth, or credential work happens during initialization, and no Jira
+step is offered. The final summary contains no credentials. Nothing is written
+before confirmation, and initialization refuses a nonempty target. Jira is
+configured later by `corum auth` after a `jira` block exists in `corum.yaml`.
 
 The binary embeds the canonical toolkit. Initialization writes:
 
@@ -183,7 +208,9 @@ No automatic retry may duplicate a potentially applied mutation.
 
 ## Canvas and Wiki Boundaries
 
-Canvas remains a direct HTTPS client authenticated with `CORUM_CANVAS_TOKEN`.
+Canvas remains a direct HTTPS client authenticated with the project-local
+credential store (environment variable first, then `<vault>/.config/corum/canvas.json`,
+then the global fallback).
 The Go port preserves origin restrictions, pagination, source selection, safe
 path placement, verifier-bearing URL stripping, conversion behavior, dry-run,
 atomic state, and partial-failure reporting. HTML-to-Markdown and PDF extraction

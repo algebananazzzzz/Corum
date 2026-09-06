@@ -68,7 +68,7 @@ func RunProcess(ctx context.Context, argv []string, in io.Reader, out, errOut io
 func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
 	_ = in
 	if len(args) == 1 && args[0] == "--help" {
-		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum sync COURSE...|--all [--dry-run] [--json] | corum jira login [PATH] | corum jira status [PATH] | corum jira logout | corum jira apply COURSE [--dry-run]")
+		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum auth [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira status [PATH] | corum jira logout [PATH] | corum jira apply COURSE [--dry-run]")
 		return 0
 	}
 	if len(args) == 1 && args[0] == "update" {
@@ -129,6 +129,9 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, "vault initialized")
 		return 0
 	}
+	if code, handled := runAuth(ctx, args, in, out, errOut); handled {
+		return code
+	}
 	if len(args) == 1 || len(args) == 2 {
 		if args[0] == "doctor" {
 			path := "."
@@ -154,8 +157,17 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if code, handled := runCanvasSync(ctx, args, out, errOut); handled {
 		return code
 	}
-	if len(args) == 2 && args[0] == "jira" && args[1] == "logout" {
-		removed, err := jira.ClearAuth()
+	if (len(args) == 2 || len(args) == 3) && args[0] == "jira" && args[1] == "logout" {
+		path := ""
+		if len(args) == 3 {
+			root, err := openVault(args[2])
+			if err != nil {
+				fmt.Fprintln(errOut, "vault validation failed")
+				return 1
+			}
+			path = root
+		}
+		removed, err := jira.ClearAuthFor(path)
 		if err != nil {
 			fmt.Fprintln(errOut, "could not clear Jira authentication")
 			return 1
@@ -167,48 +179,22 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 		return 0
 	}
-	if len(args) == 3 && args[0] == "jira" && args[1] == "login" && args[2] == "--help" {
-		fmt.Fprintln(out, "usage: corum jira login [PATH]")
-		return 0
-	}
-	if (len(args) == 2 || len(args) == 3) && args[0] == "jira" && args[1] == "login" {
-		path := "."
-		if len(args) == 3 {
-			path = args[2]
-		}
-		root, err := openVault(path)
-		if err != nil {
-			fmt.Fprintln(errOut, "vault validation failed")
-			return 1
-		}
-		if !isTerminal(in) {
-			fmt.Fprintln(errOut, ui.NonTTYGuidance("jira login"))
-			return 2
-		}
-		if err := ui.RunJiraLogin(ctx, root, ui.DefaultLoginDependencies(in, out)); err != nil {
-			if errors.Is(err, ui.ErrCancelled) {
-				fmt.Fprintln(errOut, "Jira setup cancelled")
-			} else {
-				fmt.Fprintln(errOut, "could not configure Jira")
-			}
-			return 1
-		}
-		fmt.Fprintln(out, "Jira configured")
-		return 0
-	}
 	if (len(args) == 2 || len(args) == 3) && args[0] == "jira" && args[1] == "status" {
 		// An explicit path validates and re-registers that vault; the bare
 		// form remains a global OAuth session check.
+		root := ""
 		if len(args) == 3 {
-			if _, err := openVault(args[2]); err != nil {
+			var err error
+			root, err = openVault(args[2])
+			if err != nil {
 				fmt.Fprintln(errOut, "vault validation failed")
 				return 1
 			}
 		}
-		session, err := jira.Open(ctx, jira.OpenOptions{Interactive: false, Out: errOut})
+		session, err := jira.Open(ctx, jira.OpenOptions{Interactive: false, CachePath: jiraCacheFor(root), Out: errOut})
 		if err != nil {
 			if err == jira.LoginRequired {
-				fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum jira login")
+				fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum auth jira")
 			} else {
 				fmt.Fprintln(errOut, "could not connect to Atlassian")
 			}
@@ -231,8 +217,96 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, label)
 		return 0
 	}
-	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum sync COURSE...|--all [--dry-run] [--json] | corum jira login [PATH] | corum jira status [PATH] | corum jira logout | corum jira apply COURSE [--dry-run]")
+	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum auth [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira status [PATH] | corum jira logout [PATH] | corum jira apply COURSE [--dry-run]")
 	return 2
+}
+
+// jiraCacheFor resolves the project-local cache path for a validated vault
+// root (or the global fallback when empty).
+func jiraCacheFor(root string) string {
+	if root == "" {
+		path, _ := jira.AuthCachePath()
+		return path
+	}
+	path, _ := jira.AuthCachePathFor(root)
+	return path
+}
+
+// runAuth handles corum auth [PATH] and the special corum auth jira/canvas
+// flows.
+func runAuth(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) (int, bool) {
+	if len(args) < 1 || args[0] != "auth" {
+		return 0, false
+	}
+	if len(args) == 2 && args[1] == "--help" {
+		fmt.Fprintln(out, "usage: corum auth [PATH] | corum auth jira [PATH] | corum auth canvas [PATH]")
+		return 0, true
+	}
+	path := "."
+	target := "all"
+	if len(args) == 2 {
+		path = args[1]
+	} else if len(args) == 3 {
+		switch args[1] {
+		case "jira", "canvas":
+			target = args[1]
+			path = args[2]
+		default:
+			return 0, false
+		}
+	} else if len(args) > 3 {
+		return 0, false
+	}
+	root, err := openVault(path)
+	if err != nil {
+		fmt.Fprintln(errOut, "vault validation failed")
+		return 1, true
+	}
+	if !isTerminal(in) {
+		fmt.Fprintln(errOut, "interactive authentication requires a terminal")
+		return 2, true
+	}
+	fail := func() (int, bool) {
+		fmt.Fprintln(errOut, "authentication failed")
+		return 1, true
+	}
+	switch target {
+	case "canvas":
+		deps := ui.DefaultCanvasAuthDependencies(in, out, root)
+		if err := ui.RunCanvasAuth(ctx, deps); err != nil {
+			if errors.Is(err, ui.ErrCancelled) {
+				fmt.Fprintln(errOut, "Canvas authentication cancelled")
+			} else {
+				fmt.Fprintln(errOut, err)
+			}
+			return fail()
+		}
+		fmt.Fprintln(out, "Canvas authenticated")
+		return 0, true
+	case "jira":
+		deps := ui.DefaultJiraAuthDependencies(in, out, root)
+		if err := ui.RunJiraAuth(ctx, root, deps); err != nil {
+			if errors.Is(err, ui.ErrCancelled) {
+				fmt.Fprintln(errOut, "Jira authentication cancelled")
+			} else {
+				fmt.Fprintln(errOut, "could not configure Jira")
+			}
+			return fail()
+		}
+		fmt.Fprintln(out, "Jira configured")
+		return 0, true
+	default:
+		deps := ui.DefaultAuthDependencies(in, out, root, corum.Assets, buildinfo.Version)
+		if err := ui.RunAuth(ctx, root, deps); err != nil {
+			if errors.Is(err, ui.ErrCancelled) {
+				fmt.Fprintln(errOut, "authentication cancelled")
+			} else {
+				fmt.Fprintln(errOut, err)
+			}
+			return fail()
+		}
+		return 0, true
+	}
 }
 
 func withV(version string) string {
@@ -308,7 +382,7 @@ func runCanvasSync(ctx context.Context, args []string, out, errOut io.Writer) (i
 	for _, course := range courses {
 		if !dryRun && config.Effective(workspace, course).Canvas {
 			if client == nil {
-				constructed, constructErr := canvas.NewClientFromEnvironment(workspace.Canvas.URL)
+				constructed, constructErr := canvas.NewClientFromEnvironment(workspace.Canvas.URL, root)
 				if constructErr != nil {
 					fmt.Fprintln(errOut, constructErr)
 					if flushErr := flushSyncResults(jsonOutput, out, workspace, courses, results); flushErr != nil {
@@ -432,10 +506,10 @@ func runJiraApply(ctx context.Context, args []string, in io.Reader, out, errOut 
 		}
 		return 0, true
 	}
-	session, err := openJiraSession(ctx, jira.OpenOptions{Interactive: false, Out: errOut})
+	session, err := openJiraSession(ctx, jira.OpenOptions{Interactive: false, CachePath: jiraCacheFor(root), Out: errOut})
 	if err != nil {
 		if errors.Is(err, jira.LoginRequired) {
-			fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum jira login")
+			fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum auth jira")
 		} else {
 			fmt.Fprintln(errOut, "could not connect to Atlassian")
 		}

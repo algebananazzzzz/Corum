@@ -26,8 +26,18 @@ type authRecord struct {
 	Token        *oauth2.Token `json:"token"`
 }
 
-// AuthCachePath is deliberately outside a vault so credentials never travel
-// with workspace files.
+// AuthCachePathFor returns the project-local cache path under a validated
+// vault, or the platform user configuration fallback when no vault is given.
+// The vault-local form is the default: credentials travel with the vault they
+// authenticate, and the directory is gitignored.
+func AuthCachePathFor(root string) (string, error) {
+	if root == "" {
+		return AuthCachePath()
+	}
+	return filepath.Join(root, ".config", "corum", "auth.json"), nil
+}
+
+// AuthCachePath is the global fallback used only without a vault context.
 func AuthCachePath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -45,6 +55,15 @@ func ClearAuth() (bool, error) {
 	return clearAuth(path)
 }
 
+// ClearAuthFor removes the cache for the given vault (or global fallback).
+func ClearAuthFor(root string) (bool, error) {
+	path, err := AuthCachePathFor(root)
+	if err != nil {
+		return false, err
+	}
+	return clearAuth(path)
+}
+
 // AuthSnapshot preserves the raw, private cache around an interactive vault
 // configuration transaction. It is intentionally opaque to callers.
 type AuthSnapshot struct {
@@ -53,8 +72,9 @@ type AuthSnapshot struct {
 	exists bool
 }
 
-func SnapshotAuth() (AuthSnapshot, error) {
-	path, err := AuthCachePath()
+// SnapshotAuthFor preserves the raw cache for a vault (or global fallback).
+func SnapshotAuthFor(root string) (AuthSnapshot, error) {
+	path, err := AuthCachePathFor(root)
 	if err != nil {
 		return AuthSnapshot{}, err
 	}
@@ -120,6 +140,22 @@ func (s AuthSnapshot) Restore() error {
 	return os.Rename(temporary, s.path)
 }
 
+// ensureCredentialGuard adds a gitignore so a vault-local credential
+// directory can never be committed. The global fallback directory is skipped.
+func ensureCredentialGuard(dir string) error {
+	if global, err := AuthCachePath(); err == nil && dir == filepath.Dir(global) {
+		return nil
+	}
+	guard := filepath.Join(dir, ".gitignore")
+	if _, err := os.Stat(guard); err == nil {
+		return nil
+	}
+	if err := os.WriteFile(guard, []byte("*\n! .gitignore\n"), 0o600); err != nil {
+		return fmt.Errorf("write credential guard: %w", err)
+	}
+	return nil
+}
+
 func clearAuth(path string) (bool, error) {
 	err := os.Remove(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -180,6 +216,9 @@ func saveAuthCache(path string, record authRecord) (err error) {
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return fmt.Errorf("secure Jira authentication cache directory: %w", err)
+	}
+	if err := ensureCredentialGuard(dir); err != nil {
+		return err
 	}
 	encoded, err := json.Marshal(record)
 	if err != nil {

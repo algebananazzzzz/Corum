@@ -124,12 +124,29 @@ func TestRunDoctorOptionalPathDefaultsToWorkingDirectory(t *testing.T) {
 	}
 }
 
-func TestRunJiraLoginRejectsInvalidVaultBeforeTTY(t *testing.T) {
+func TestRunAuthJiraRejectsInvalidVaultBeforeTTY(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := Run(context.Background(), []string{"jira", "login", "/nonexistent/corum-vault"}, nil, &out, &errOut); code != 1 {
-		t.Fatalf("jira login code = %d, stderr = %q", code, errOut.String())
+	if code := Run(context.Background(), []string{"auth", "jira", "/nonexistent/corum-vault"}, nil, &out, &errOut); code != 1 {
+		t.Fatalf("auth jira code = %d, stderr = %q", code, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "vault validation failed") {
+		t.Fatalf("stderr = %q", errOut.String())
+	}
+}
+
+func TestRunAuthRequiresTerminalWithoutVault(t *testing.T) {
+	// A valid vault path is required; a non-terminal stdin must be refused
+	// before any prompt with a deterministic message.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	root := filepath.Join(t.TempDir(), "vault")
+	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("init code = %d", code)
+	}
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), []string{"auth", root}, nil, &out, &errOut); code != 2 {
+		t.Fatalf("auth code = %d, stderr = %q", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "terminal") {
 		t.Fatalf("stderr = %q", errOut.String())
 	}
 }

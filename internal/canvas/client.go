@@ -61,9 +61,42 @@ func NewClient(origin, token string) (*Client, error) {
 	return &Client{origin: u, token: token, http: &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
-// NewClientFromEnvironment reads the token only when a real Canvas sync starts.
-func NewClientFromEnvironment(origin string) (*Client, error) {
-	return NewClient(origin, os.Getenv("CORUM_CANVAS_TOKEN"))
+// NewClientFromEnvironment resolves the effective token (environment first,
+// then project-local, then the global fallback) when a real Canvas operation
+// starts.
+func NewClientFromEnvironment(origin, root string) (*Client, error) {
+	token, err := LoadCredential(root)
+	if err != nil {
+		return nil, err
+	}
+	return NewClient(origin, token)
+}
+
+// CourseInfo is one Canvas course entry for the auth course list.
+type CourseInfo struct {
+	ID         string `json:"id"`
+	CourseCode string `json:"course_code"`
+	Name       string `json:"name"`
+	Current    bool   `json:"current"`
+	Conclusion string `json:"conclusion_date"`
+}
+
+// Courses lists the courses the authenticated token can access.
+func (c *Client) Courses(ctx context.Context) ([]CourseInfo, error) {
+	raw, err := c.GetAll(ctx, "/api/v1/courses", url.Values{})
+	if err != nil {
+		return nil, err
+	}
+	records := make([]CourseInfo, 0, len(raw))
+	for _, record := range raw {
+		records = append(records, CourseInfo{
+			ID:         id(record),
+			Name:       str(record, "name"),
+			CourseCode: str(record, "course_code"),
+			Current:    record["is_enrolled"] == true || record["current"] == true,
+		})
+	}
+	return records, nil
 }
 
 func parseOrigin(value string) (*url.URL, error) {

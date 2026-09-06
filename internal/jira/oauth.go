@@ -23,7 +23,7 @@ const rovoMCPURL = "https://mcp.atlassian.com/v2/mcp"
 const rovoHTTPTimeout = 5 * time.Minute
 
 // LoginRequired identifies requests that would otherwise need browser OAuth.
-var LoginRequired = errors.New("Jira session is missing or revoked; run corum jira login")
+var LoginRequired = errors.New("Jira session is missing or revoked; run corum auth jira")
 
 // OpenOptions permits the CLI and tests to choose interaction without exposing
 // the internal OAuth record.

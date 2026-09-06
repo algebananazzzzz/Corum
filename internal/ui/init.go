@@ -12,14 +12,15 @@ import (
 	"github.com/algebananazzzzz/Corum/internal/vault"
 )
 
+// InitDependencies drives the purely local, deterministic vault wizard. It
+// never opens a browser or stores credentials; authentication is a separate
+// step (corum auth).
 type InitDependencies struct {
 	Prompts        Prompter
 	Assets         fs.FS
 	ToolkitVersion string
 	Output         io.Writer
 	Initialize     func(string, config.Workspace, fs.FS, string) error
-	OpenJira       func(context.Context) (JiraSession, error)
-	SnapshotAuth   func() (func() error, error)
 }
 
 var initializeVault = vault.Initialize
@@ -31,20 +32,6 @@ func DefaultInitDependencies(in io.Reader, out io.Writer, assets fs.FS, toolkitV
 		ToolkitVersion: toolkitVersion,
 		Output:         out,
 		Initialize:     initializeVault,
-		OpenJira: func(ctx context.Context) (JiraSession, error) {
-			session, err := jira.Open(ctx, jira.OpenOptions{Interactive: true, Out: out})
-			if err != nil {
-				return nil, err
-			}
-			return rovoSelectionSession{session}, nil
-		},
-		SnapshotAuth: func() (func() error, error) {
-			snapshot, err := jira.SnapshotAuth()
-			if err != nil {
-				return nil, err
-			}
-			return snapshot.Restore, nil
-		},
 	}
 }
 
@@ -74,10 +61,6 @@ func RunInit(ctx context.Context, proposedRoot string, deps InitDependencies) (e
 	if err != nil {
 		return promptError(err)
 	}
-	jiraEnabled, err := deps.Prompts.Confirm("Connect Jira?", false)
-	if err != nil {
-		return promptError(err)
-	}
 	workspace := config.Workspace{
 		Version:   2,
 		Workspace: config.WorkspaceDetails{Timezone: timezone, Term: term},
@@ -86,40 +69,6 @@ func RunInit(ctx context.Context, proposedRoot string, deps InitDependencies) (e
 	}
 	if wikiEnabled {
 		workspace.Wiki = &config.WikiWorkspace{}
-	}
-	var restore func() error
-	keepAuth := false
-	defer func() {
-		if restore != nil && !keepAuth {
-			restoreErr := restore()
-			if err != nil && restoreErr != nil {
-				err = errors.Join(err, fmt.Errorf("restore previous Jira authentication: %w", restoreErr))
-			} else if err == nil {
-				err = restoreErr
-			}
-		}
-	}()
-	if jiraEnabled {
-		if deps.SnapshotAuth == nil || deps.OpenJira == nil {
-			return fmt.Errorf("Jira setup is unavailable")
-		}
-		restore, err = deps.SnapshotAuth()
-		if err != nil {
-			return err
-		}
-		session, openErr := deps.OpenJira(ctx)
-		if openErr != nil {
-			if errors.Is(openErr, ErrCancelled) {
-				return ErrCancelled
-			}
-			return openErr
-		}
-		defer session.Close()
-		selection, selectErr := selectJira(ctx, session, deps.Prompts)
-		if selectErr != nil {
-			return promptError(selectErr)
-		}
-		workspace.Jira = &selection
 	}
 	if err := config.ValidateWorkspace(workspace); err != nil {
 		return err
@@ -134,21 +83,18 @@ func RunInit(ctx context.Context, proposedRoot string, deps InitDependencies) (e
 	if !confirmed {
 		return ErrCancelled
 	}
-	if err := deps.Initialize(root, workspace, deps.Assets, deps.ToolkitVersion); err != nil {
-		return err
-	}
-	keepAuth = true
-	return nil
+	return deps.Initialize(root, workspace, deps.Assets, deps.ToolkitVersion)
 }
 
 func initSummary(workspace config.Workspace) string {
-	if workspace.Jira != nil {
-		return "Configuration ready: Canvas configured; Jira configured; wiki configured as selected."
+	if workspace.Wiki != nil {
+		return "Configuration ready: Canvas configured; Jira disabled; wiki enabled. Run corum auth to authenticate."
 	}
-	return "Configuration ready: Canvas configured; Jira disabled; wiki configured as selected."
+	return "Configuration ready: Canvas configured; Jira disabled; wiki disabled. Run corum auth to authenticate."
 }
 
-type LoginDependencies struct {
+// JiraAuthDependencies drives the interactive Jira authentication flow.
+type JiraAuthDependencies struct {
 	Prompts      Prompter
 	Output       io.Writer
 	OpenJira     func(context.Context) (JiraSession, error)
@@ -156,28 +102,40 @@ type LoginDependencies struct {
 	Write        func(string, config.Workspace) error
 }
 
-func DefaultLoginDependencies(in io.Reader, out io.Writer) LoginDependencies {
+func DefaultJiraAuthDependencies(in io.Reader, out io.Writer, root string) JiraAuthDependencies {
 	init := DefaultInitDependencies(in, out, nil, "")
-	return LoginDependencies{
+	return JiraAuthDependencies{
 		Prompts: init.Prompts,
 		Output:  out,
 		OpenJira: func(ctx context.Context) (JiraSession, error) {
-			session, err := jira.Open(ctx, jira.OpenOptions{Interactive: true, ForceReauth: true, Out: out})
+			session, err := jira.Open(ctx, jira.OpenOptions{Interactive: true, ForceReauth: true, CachePath: jiraProjectCachePath(root), Out: out})
 			if err != nil {
 				return nil, err
 			}
 			return rovoSelectionSession{session}, nil
 		},
-		SnapshotAuth: init.SnapshotAuth,
-		Write:        vault.WriteWorkspace,
+		SnapshotAuth: func() (func() error, error) {
+			snapshot, err := jira.SnapshotAuthFor(root)
+			if err != nil {
+				return nil, err
+			}
+			return snapshot.Restore, nil
+		},
+		Write: vault.WriteWorkspace,
 	}
 }
 
-// RunJiraLogin authenticates and selects a Jira project, then changes only
-// corum.yaml after confirmation. The preceding cache is restored on failure.
-func RunJiraLogin(ctx context.Context, root string, deps LoginDependencies) (err error) {
+func jiraProjectCachePath(root string) string {
+	path, _ := jira.AuthCachePathFor(root)
+	return path
+}
+
+// RunJiraAuth authenticates (always fresh) and selects a Jira project, then
+// changes only corum.yaml after confirmation. The preceding cache is restored
+// on failure.
+func RunJiraAuth(ctx context.Context, root string, deps JiraAuthDependencies) (err error) {
 	if deps.Prompts == nil || deps.OpenJira == nil || deps.SnapshotAuth == nil || deps.Write == nil {
-		return fmt.Errorf("interactive Jira login is unavailable")
+		return fmt.Errorf("interactive Jira authentication is unavailable")
 	}
 	workspace, err := config.LoadWorkspace(root)
 	if err != nil {
@@ -212,7 +170,7 @@ func RunJiraLogin(ctx context.Context, root string, deps LoginDependencies) (err
 		return err
 	}
 	if deps.Output != nil {
-		fmt.Fprintln(deps.Output, initSummary(workspace))
+		fmt.Fprintln(deps.Output, "Jira configured for project "+selection.Project+" (auth stored in .config/corum).")
 	}
 	confirmed, err := deps.Prompts.Confirm("Save Jira configuration?", true)
 	if err != nil {

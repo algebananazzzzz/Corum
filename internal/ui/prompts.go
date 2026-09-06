@@ -19,6 +19,7 @@ type Choice struct{ Label string }
 // Prompter is deliberately small so orchestration tests do not render a terminal.
 type Prompter interface {
 	Input(label, defaultValue string) (string, error)
+	Password(label, defaultValue string) (string, error)
 	Confirm(label string, defaultValue bool) (bool, error)
 	Select(label string, choices []Choice) (int, error)
 }
@@ -37,6 +38,15 @@ func NewHuhPrompter(in io.Reader, out io.Writer) HuhPrompter {
 func (p HuhPrompter) Input(label, defaultValue string) (string, error) {
 	value := defaultValue
 	form := p.form(huh.NewInput().Title(label).Value(&value))
+	if err := form.Run(); err != nil {
+		return "", promptError(err)
+	}
+	return value, nil
+}
+
+func (p HuhPrompter) Password(label, defaultValue string) (string, error) {
+	value := defaultValue
+	form := p.form(huh.NewInput().Title(label).Value(&value).EchoMode(huh.EchoModePassword))
 	if err := form.Run(); err != nil {
 		return "", promptError(err)
 	}
