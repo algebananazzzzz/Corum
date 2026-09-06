@@ -65,3 +65,37 @@ func validateWorkspaceForInit(value config.Workspace) error {
 	}
 	return nil
 }
+
+// WriteWorkspace atomically replaces only corum.yaml after validating v2 data.
+func WriteWorkspace(root string, workspace config.Workspace) error {
+	if err := config.ValidateWorkspace(workspace); err != nil {
+		return fmt.Errorf("validate workspace: %w", err)
+	}
+	data, err := yaml.Marshal(workspace)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(root, "corum.yaml")
+	file, err := os.CreateTemp(filepath.Dir(path), ".corum-*.yaml")
+	if err != nil {
+		return err
+	}
+	temporary := file.Name()
+	defer os.Remove(temporary)
+	if err := file.Chmod(0o644); err != nil {
+		file.Close()
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporary, path)
+}

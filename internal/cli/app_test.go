@@ -44,3 +44,13 @@ func TestRunInitDefaultsAndDoctor(t *testing.T) {
 		t.Fatalf("doctor output = %q", out.String())
 	}
 }
+
+func TestRunInteractiveInitExplainsNonTTYFallback(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), []string{"init", "vault"}, &bytes.Buffer{}, &out, &errOut); code != 2 {
+		t.Fatalf("Run code = %d, stderr = %s", code, errOut.String())
+	}
+	if errOut.String() != "interactive init requires a terminal; use corum init --defaults PATH\n" {
+		t.Fatalf("stderr = %q", errOut.String())
+	}
+}

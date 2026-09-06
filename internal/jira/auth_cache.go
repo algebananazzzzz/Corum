@@ -45,6 +45,81 @@ func ClearAuth() (bool, error) {
 	return clearAuth(path)
 }
 
+// AuthSnapshot preserves the raw, private cache around an interactive vault
+// configuration transaction. It is intentionally opaque to callers.
+type AuthSnapshot struct {
+	path   string
+	bytes  []byte
+	exists bool
+}
+
+func SnapshotAuth() (AuthSnapshot, error) {
+	path, err := AuthCachePath()
+	if err != nil {
+		return AuthSnapshot{}, err
+	}
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return AuthSnapshot{path: path}, nil
+	}
+	if err != nil {
+		return AuthSnapshot{}, err
+	}
+	dir, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		return AuthSnapshot{}, err
+	}
+	if err := checkPrivateDirectory(dir); err != nil {
+		return AuthSnapshot{}, err
+	}
+	if err := checkPrivateFile(info); err != nil {
+		return AuthSnapshot{}, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return AuthSnapshot{}, err
+	}
+	return AuthSnapshot{path: path, bytes: append([]byte(nil), data...), exists: true}, nil
+}
+
+func (s AuthSnapshot) Restore() error {
+	if !s.exists {
+		if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(dir, ".auth-restore-*.json")
+	if err != nil {
+		return err
+	}
+	temporary := file.Name()
+	defer os.Remove(temporary)
+	if err := file.Chmod(0o600); err != nil {
+		file.Close()
+		return err
+	}
+	if _, err := file.Write(s.bytes); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporary, s.path)
+}
+
 func clearAuth(path string) (bool, error) {
 	err := os.Remove(path)
 	if errors.Is(err, os.ErrNotExist) {

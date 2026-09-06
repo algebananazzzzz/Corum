@@ -2,13 +2,16 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	corum "github.com/algebananazzzzz/Corum"
 	"github.com/algebananazzzzz/Corum/internal/buildinfo"
 	"github.com/algebananazzzzz/Corum/internal/config"
 	"github.com/algebananazzzzz/Corum/internal/jira"
+	"github.com/algebananazzzzz/Corum/internal/ui"
 	"github.com/algebananazzzzz/Corum/internal/vault"
 )
 
@@ -19,9 +22,30 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, buildinfo.Version)
 		return 0
 	}
+	if (len(args) == 2 && args[0] == "init" && args[1] == "--help") || (len(args) == 3 && args[0] == "init" && args[1] == "--help") {
+		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH")
+		return 0
+	}
 	if root, ok := defaultInitRoot(args); ok {
 		if err := vault.Initialize(root, defaultWorkspace(), corum.Assets, buildinfo.Version); err != nil {
 			fmt.Fprintln(errOut, "could not initialize vault")
+			return 1
+		}
+		fmt.Fprintln(out, "vault initialized")
+		return 0
+	}
+	if root, ok := interactiveInitRoot(args); ok {
+		if !isTerminal(in) {
+			fmt.Fprintln(errOut, ui.NonTTYGuidance("init"))
+			return 2
+		}
+		deps := ui.DefaultInitDependencies(in, out, corum.Assets, buildinfo.Version)
+		if err := ui.RunInit(ctx, root, deps); err != nil {
+			if errors.Is(err, ui.ErrCancelled) {
+				fmt.Fprintln(errOut, "setup cancelled")
+			} else {
+				fmt.Fprintln(errOut, "could not initialize vault")
+			}
 			return 1
 		}
 		fmt.Fprintln(out, "vault initialized")
@@ -47,6 +71,26 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		} else {
 			fmt.Fprintln(out, "Jira is already logged out")
 		}
+		return 0
+	}
+	if len(args) == 3 && args[0] == "jira" && args[1] == "login" && args[2] == "--help" {
+		fmt.Fprintln(out, "usage: corum jira login [PATH]")
+		return 0
+	}
+	if len(args) == 3 && args[0] == "jira" && args[1] == "login" {
+		if !isTerminal(in) {
+			fmt.Fprintln(errOut, ui.NonTTYGuidance("jira login"))
+			return 2
+		}
+		if err := ui.RunJiraLogin(ctx, args[2], ui.DefaultLoginDependencies(in, out)); err != nil {
+			if errors.Is(err, ui.ErrCancelled) {
+				fmt.Fprintln(errOut, "Jira setup cancelled")
+			} else {
+				fmt.Fprintln(errOut, "could not configure Jira")
+			}
+			return 1
+		}
+		fmt.Fprintln(out, "Jira configured")
 		return 0
 	}
 	if len(args) == 2 && args[0] == "jira" && (args[1] == "login" || args[1] == "status") {
@@ -77,8 +121,27 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, label)
 		return 0
 	}
-	fmt.Fprintln(errOut, "usage: corum init --defaults PATH | corum doctor PATH | corum version | corum jira login|status|logout")
+	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor PATH | corum version | corum jira login [PATH]|status|logout")
 	return 2
+}
+
+func interactiveInitRoot(args []string) (string, bool) {
+	if len(args) == 1 && args[0] == "init" {
+		return "corum-vault", true
+	}
+	if len(args) == 2 && args[0] == "init" && args[1] != "--defaults" {
+		return args[1], true
+	}
+	return "", false
+}
+
+func isTerminal(in io.Reader) bool {
+	file, ok := in.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func defaultInitRoot(args []string) (string, bool) {
