@@ -15,8 +15,7 @@ DEFAULT_WORKSPACE = {
     "schema": 1,
     "workspace": {"timezone": "Asia/Singapore", "term": "AY2026/27 Semester 1"},
     "canvas": {"host": "https://canvas.example.edu"},
-    "features": {"jira": {"enabled": True}, "wiki": {"enabled": True}},
-    "jira": {"site": "https://example.atlassian.net", "project": "STUDY"},
+    "features": {"jira": {"enabled": False}, "wiki": {"enabled": True}},
     "calendar": {"timetable": "Timetable.md", "term": "Term_Calendar.md"},
 }
 
@@ -32,14 +31,24 @@ def _agent_kit() -> Path:
     raise RuntimeError("installed Corum agent kit is missing")
 
 
-def initialize(root: Path) -> Path:
+def initialize(
+    root: Path,
+    workspace: WorkspaceConfig | dict | None = None,
+) -> Path:
     root = root.resolve()
     if root.exists() and (not root.is_dir() or any(root.iterdir())):
         raise ValueError(f"refusing to initialize non-empty target: {root}")
+    value = WorkspaceConfig.model_validate(workspace or DEFAULT_WORKSPACE)
     agent_kit = _agent_kit()
     root.mkdir(parents=True, exist_ok=True)
     (root / "courses").mkdir()
-    (root / "corum.yaml").write_text(yaml.safe_dump(DEFAULT_WORKSPACE, sort_keys=False))
+    (root / "corum.yaml").write_text(
+        yaml.safe_dump(
+            value.model_dump(mode="json", exclude_none=True),
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
     (root / "AGENTS.md").write_text(
         (agent_kit / "AGENTS.base.md").read_text(encoding="utf-8"),
         encoding="utf-8",

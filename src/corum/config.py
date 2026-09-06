@@ -14,6 +14,7 @@ from .validation import (
     require_https_origin,
     require_identifier,
     require_issue_key,
+    require_nonblank,
     require_project_key,
     require_transition_id,
 )
@@ -69,9 +70,17 @@ class WorkspaceFeatures(_StrictModel):
 
 
 class JiraWorkspace(_StrictModel):
+    cloud_id: str | None = None
     site: HttpUrl
     project: str
     transitions: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("cloud_id")
+    @classmethod
+    def cloud_id_is_nonblank(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return require_nonblank(value, "Jira cloud ID")
 
     @field_validator("site")
     @classmethod
