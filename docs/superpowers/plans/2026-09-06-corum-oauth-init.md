@@ -182,7 +182,7 @@ Before every POSIX read or overwrite, reject a file not owned by `os.getuid()` o
 class LoopbackOAuthCallback:
     def __init__(
         self,
-        timeout: float = 120.0,
+        timeout: float = 300.0,
         browser_open: Callable[[str], bool] = webbrowser.open,
     ) -> None:
         self.timeout = timeout
@@ -270,7 +270,7 @@ async def open_rovo_session(
     storage: FileTokenStorage | None = None,
     *,
     browser_open: Callable[[str], bool] = webbrowser.open,
-    timeout: float = 120.0,
+    timeout: float = 300.0,
     interactive: bool = True,
 ) -> AsyncIterator[RovoSession]:
     callback = LoopbackOAuthCallback(timeout=timeout, browser_open=browser_open)

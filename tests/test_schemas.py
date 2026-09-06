@@ -9,7 +9,6 @@ from jsonschema import Draft202012Validator, FormatChecker, ValidationError, val
 
 from corum.config import load_course, load_workspace
 
-
 SCHEMAS = Path(__file__).parents[1] / "schemas"
 
 
@@ -17,7 +16,7 @@ def schema(name: str) -> dict:
     return json.loads((SCHEMAS / name).read_text())
 
 
-def test_workspace_schema_rejects_jira_without_site_and_project():
+def test_workspace_schema_rejects_jira_without_project():
     workspace = {
         "schema": 1,
         "workspace": {"timezone": "Asia/Singapore", "term": "AY2026/27 Semester 1"},
@@ -69,6 +68,18 @@ def test_workspace_schema_rejects_unsafe_jira_boundaries(jira):
     )
 
     assert list(validator.iter_errors(workspace))
+
+
+def test_workspace_schema_accepts_cloud_id_without_site_url():
+    workspace = {
+        "schema": 1,
+        "workspace": {"timezone": "Asia/Singapore", "term": "Term"},
+        "canvas": {"host": "https://canvas.example.edu"},
+        "calendar": {"timetable": "Timetable.md", "term": "Term_Calendar.md"},
+        "jira": {"cloud_id": "cloud-1", "project": "TODO"},
+    }
+
+    validate(workspace, schema("corum.schema.json"))
 
 
 def test_course_schema_rejects_invalid_epic_key():

@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Literal
-import warnings
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    ValidationInfo,
+    field_validator,
+)
 
 from .validation import (
     require_https_origin,
@@ -18,7 +25,6 @@ from .validation import (
     require_project_key,
     require_transition_id,
 )
-
 
 warnings.filterwarnings(
     "ignore",
@@ -50,7 +56,9 @@ class WorkspaceDetails(_StrictModel):
         try:
             ZoneInfo(value)
         except (ZoneInfoNotFoundError, ValueError) as error:
-            raise ValueError(f"workspace timezone is not a valid IANA timezone: {value!r}") from error
+            raise ValueError(
+                f"workspace timezone is not a valid IANA timezone: {value!r}"
+            ) from error
         return value
 
 
@@ -96,7 +104,11 @@ class JiraWorkspace(_StrictModel):
     @field_validator("project")
     @classmethod
     def project_has_jira_key_syntax(cls, value: str, info: ValidationInfo) -> str:
-        return value if (info.context or {}).get("skip_jira_semantics") else require_project_key(value)
+        return (
+            value
+            if (info.context or {}).get("skip_jira_semantics")
+            else require_project_key(value)
+        )
 
     @field_validator("transitions")
     @classmethod
@@ -127,7 +139,9 @@ class WorkspaceConfig(_StrictModel):
 
 class CanvasCourse(_StrictModel):
     id: int = Field(gt=0)
-    sources: list[Literal["announcements", "assignments", "files", "pages", "modules", "syllabus"]]
+    sources: list[
+        Literal["announcements", "assignments", "files", "pages", "modules", "syllabus"]
+    ]
     folders: dict[str, str] = Field(default_factory=dict)
 
 
@@ -178,7 +192,9 @@ _CREDENTIAL_KEY_PARTS = {
 def _reject_credential_keys(value: object, path: str = "configuration") -> None:
     if isinstance(value, dict):
         for key, child in value.items():
-            normalized = "".join(character for character in str(key).casefold() if character.isalnum())
+            normalized = "".join(
+                character for character in str(key).casefold() if character.isalnum()
+            )
             segments = [
                 part
                 for part in str(key).casefold().replace("-", "_").split("_")
@@ -189,7 +205,9 @@ def _reject_credential_keys(value: object, path: str = "configuration") -> None:
                 first + second for first, second in zip(segments, segments[1:])
             )
             if normalized in _CREDENTIAL_KEY_PARTS or key_parts & _CREDENTIAL_KEY_PARTS:
-                raise ValueError(f"credential-like key is forbidden in YAML at {path}.{key}")
+                raise ValueError(
+                    f"credential-like key is forbidden in YAML at {path}.{key}"
+                )
             _reject_credential_keys(child, f"{path}.{key}")
     elif isinstance(value, list):
         for index, child in enumerate(value):

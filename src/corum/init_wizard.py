@@ -6,8 +6,8 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 
-from pydantic import ValidationError
 import yaml
+from pydantic import ValidationError
 
 from .config import (
     CalendarFiles,
@@ -21,7 +21,6 @@ from .jira.rovo import RovoSession, open_rovo_session
 from .jira.setup import JiraSelection, available_jira_choices, configured_workspace
 from .prompts import PromptCancelled, Prompts
 from .workspace import initialize
-
 
 RovoSessionFactory = Callable[..., AbstractAsyncContextManager[RovoSession]]
 
@@ -48,7 +47,7 @@ def _empty_target(value: str) -> bool | str:
 
 async def select_jira(session: RovoSession, prompts: Prompts) -> JiraSelection:
     choices = await available_jira_choices(session)
-    resource, projects = prompts.select(
+    resource, projects = await prompts.select(
         "Atlassian site",
         [
             (
@@ -58,7 +57,7 @@ async def select_jira(session: RovoSession, prompts: Prompts) -> JiraSelection:
             for resource, projects in choices
         ],
     )
-    project = prompts.select(
+    project = await prompts.select(
         "Jira project",
         [(f"{project.name} ({project.key})", project) for project in projects],
     )
@@ -75,7 +74,7 @@ async def run_init_wizard(
     *,
     session_factory: RovoSessionFactory = open_rovo_session,
 ) -> Path:
-    root_text = prompts.text(
+    root_text = await prompts.text(
         "Vault path",
         default=str(proposed_root),
         validate=_empty_target,
@@ -85,21 +84,21 @@ async def run_init_wizard(
     if target_check is not True:
         raise ValueError(target_check)
 
-    timezone = prompts.text(
+    timezone = await prompts.text(
         "Workspace timezone",
         default="Asia/Singapore",
         validate=lambda value: _validation_message(
             lambda: WorkspaceDetails(timezone=value, term="")
         ),
     )
-    term = prompts.text("Academic term", default="AY2026/27 Semester 1")
-    canvas_host = prompts.text(
+    term = await prompts.text("Academic term", default="AY2026/27 Semester 1")
+    canvas_host = await prompts.text(
         "Canvas URL",
         default="https://canvas.example.edu",
         validate=lambda value: _validation_message(lambda: CanvasWorkspace(host=value)),
     )
-    wiki_enabled = prompts.confirm("Enable wiki authoring?", default=True)
-    jira_enabled = prompts.confirm("Connect Jira?", default=False)
+    wiki_enabled = await prompts.confirm("Enable wiki authoring?", default=True)
+    jira_enabled = await prompts.confirm("Connect Jira?", default=False)
 
     workspace = WorkspaceConfig(
         schema=1,
@@ -110,14 +109,22 @@ async def run_init_wizard(
             wiki=FeatureSwitch(enabled=wiki_enabled),
         ),
         jira=None,
-        calendar=CalendarFiles(timetable=Path("Timetable.md"), term=Path("Term_Calendar.md")),
+        calendar=CalendarFiles(
+            timetable=Path("Timetable.md"), term=Path("Term_Calendar.md")
+        ),
     )
     if jira_enabled:
         async with session_factory() as session:
-            workspace = configured_workspace(workspace, await select_jira(session, prompts))
+            workspace = configured_workspace(
+                workspace, await select_jira(session, prompts)
+            )
 
     print("\nConfiguration preview:")
-    print(yaml.safe_dump(workspace.model_dump(mode="json", exclude_none=True), sort_keys=False))
-    if not prompts.confirm("Create this vault?", default=True):
+    print(
+        yaml.safe_dump(
+            workspace.model_dump(mode="json", exclude_none=True), sort_keys=False
+        )
+    )
+    if not await prompts.confirm("Create this vault?", default=True):
         raise PromptCancelled("setup cancelled")
     return initialize(root, workspace)

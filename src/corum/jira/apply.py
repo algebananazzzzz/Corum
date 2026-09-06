@@ -6,7 +6,14 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 from corum.config import CourseConfig, load_workspace, resolve_features
 from corum.run import AppliedItem, RunManifest, StageFailure, StageResult
@@ -28,7 +35,6 @@ from corum.validation import (
 
 from . import cache
 from .client import JiraClient, JiraMutationError
-
 
 Identifier = Annotated[str, AfterValidator(require_identifier)]
 IssueKey = Annotated[str, AfterValidator(require_issue_key)]
@@ -63,7 +69,9 @@ class UpdateFields(_StrictModel):
     def reject_non_clearable_nulls(cls, value):
         if isinstance(value, dict):
             null_fields = sorted(
-                field for field in ("type", "parent", "summary") if field in value and value[field] is None
+                field
+                for field in ("type", "parent", "summary")
+                if field in value and value[field] is None
             )
             if null_fields:
                 raise ValueError(f"update cannot clear: {', '.join(null_fields)}")
@@ -163,7 +171,9 @@ def _validate_plan(
     if workspace.jira is None or course.jira is None:
         raise InvalidPlan(f"enabled Jira configuration is incomplete for {course.code}")
     if require_cloud_id and workspace.jira.cloud_id is None:
-        raise InvalidPlan("Jira OAuth configuration is incomplete; run corum jira login in this vault")
+        raise InvalidPlan(
+            "Jira OAuth configuration is incomplete; run corum jira login in this vault"
+        )
     try:
         require_project_key(workspace.jira.project)
         require_issue_key(course.jira.epic, "configured Jira epic key")
@@ -181,7 +191,9 @@ def _validate_plan(
         parent = None
         if isinstance(action, CreateAction):
             parent = action.issue.parent
-        elif isinstance(action, UpdateAction) and "parent" in action.set.model_fields_set:
+        elif (
+            isinstance(action, UpdateAction) and "parent" in action.set.model_fields_set
+        ):
             parent = action.set.parent
         if parent is not None and parent != plan.epic:
             raise InvalidPlan(
@@ -347,7 +359,9 @@ def _stage_result(result: ApplyResult) -> StageResult:
     )
 
 
-def _record_result(vault: Path, course: CourseConfig, result: ApplyResult) -> ApplyResult:
+def _record_result(
+    vault: Path, course: CourseConfig, result: ApplyResult
+) -> ApplyResult:
     course_dir = vault / "courses" / course.code
     stage = _stage_result(result)
     updated = update_latest_run_stage(

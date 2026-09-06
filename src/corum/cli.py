@@ -5,12 +5,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
+import yaml
 from httpx import HTTPError
 from pydantic import ValidationError
-import yaml
 
 from .canvas.sync import sync_course
 from .config import load_workspace, resolve_features
@@ -72,7 +72,7 @@ def _account_label(profile: dict[str, object]) -> str:
 async def _jira_login(vault: Path, prompts: Prompts) -> None:
     cache = auth_cache_path()
     original = snapshot_auth(cache)
-    if original is not None and not prompts.confirm(
+    if original is not None and not await prompts.confirm(
         "Replace the current Atlassian login?",
         default=False,
     ):
@@ -93,11 +93,14 @@ async def _jira_login(vault: Path, prompts: Prompts) -> None:
                 print("\nWorkspace Jira preview:")
                 print(
                     yaml.safe_dump(
-                        {key: value.model_dump(mode="json", exclude_none=True) for key, value in preview.items()},
+                        {
+                            key: value.model_dump(mode="json", exclude_none=True)
+                            for key, value in preview.items()
+                        },
                         sort_keys=False,
                     )
                 )
-                if not prompts.confirm("Update this workspace?", default=True):
+                if not await prompts.confirm("Update this workspace?", default=True):
                     raise ValueError("login cancelled")
                 write_workspace_atomic(workspace_path, updated)
             print(f"Logged in as {_account_label(profile)}")
@@ -118,7 +121,11 @@ async def _jira_status(vault: Path) -> None:
     if workspace_path.is_file():
         workspace = load_workspace(vault.resolve())
         if workspace.jira is not None:
-            site = str(workspace.jira.site) if workspace.jira.site else workspace.jira.cloud_id
+            site = (
+                str(workspace.jira.site)
+                if workspace.jira.site
+                else workspace.jira.cloud_id
+            )
             print(f"Workspace Jira: {site} ({workspace.jira.project})")
 
 
@@ -133,7 +140,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.defaults:
                 print(initialize(args.path))
             elif not (sys.stdin.isatty() and sys.stdout.isatty()):
-                raise ValueError("interactive initialization requires a terminal; use --defaults")
+                raise ValueError(
+                    "interactive initialization requires a terminal; use --defaults"
+                )
             else:
                 print(asyncio.run(run_init_wizard(args.path, TerminalPrompts())))
         elif args.command == "doctor":
@@ -144,14 +153,16 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("choose course codes or --all, not both")
             if not args.all and not args.course:
                 raise ValueError("provide at least one course code or --all")
-            vault = Path(".").resolve()
+            vault = Path.cwd()
             _, available = (
                 validate_vault(vault)
                 if args.all
                 else validate_selected_courses(vault, args.course)
             )
             by_code = {course.code.upper(): course for course in available}
-            wanted = sorted(by_code) if args.all else [code.upper() for code in args.course]
+            wanted = (
+                sorted(by_code) if args.all else [code.upper() for code in args.course]
+            )
             missing = [code for code in wanted if code not in by_code]
             if missing:
                 raise ValueError(f"no course configuration for: {', '.join(missing)}")
@@ -163,7 +174,10 @@ def main(argv: list[str] | None = None) -> int:
                     json.dumps(
                         {
                             "dry_run": args.dry_run,
-                            "courses": [manifest.model_dump(mode="json") for manifest in manifests],
+                            "courses": [
+                                manifest.model_dump(mode="json")
+                                for manifest in manifests
+                            ],
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -183,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "jira" and args.jira_command == "logout":
             _jira_logout()
         elif args.command == "jira" and args.jira_command == "apply":
-            vault = Path(".").resolve()
+            vault = Path.cwd()
             workspace, courses = validate_vault(vault)
             by_code = {course.code.upper(): course for course in courses}
             code = args.course.upper()
@@ -195,12 +209,17 @@ def main(argv: list[str] | None = None) -> int:
             plan = JiraPlan.model_validate_json(sys.stdin.read())
             if args.dry_run:
                 asyncio.run(apply_plan(vault, course, plan, client=None, dry_run=True))
-                print(json.dumps(plan.model_dump(mode="json", exclude_unset=True), indent=2))
+                print(
+                    json.dumps(
+                        plan.model_dump(mode="json", exclude_unset=True), indent=2
+                    )
+                )
             else:
                 if workspace.jira is None or workspace.jira.cloud_id is None:
                     raise ValueError(
                         "Jira OAuth configuration is incomplete; run corum jira login in this vault"
                     )
+
                 async def run_jira_apply():
                     async with open_rovo_session(interactive=False) as session:
                         client = JiraClient(session, workspace.jira.cloud_id)

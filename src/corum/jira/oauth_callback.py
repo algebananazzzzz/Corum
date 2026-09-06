@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+import webbrowser
+from collections.abc import Callable
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import threading
-from typing import Callable
 from urllib.parse import parse_qs, urlsplit
-import webbrowser
 
 from mcp.shared.auth import AuthorizationCodeResult
 
@@ -22,17 +22,19 @@ class LoopbackOAuthCallback:
 
     def __init__(
         self,
-        timeout: float = 120.0,
+        timeout: float = 300.0,
         browser_open: Callable[[str], bool] = webbrowser.open,
     ) -> None:
         self.timeout = timeout
         self._browser_open = browser_open
         self._loop = asyncio.get_running_loop()
-        self._result: asyncio.Future[AuthorizationCodeResult] = self._loop.create_future()
+        self._result: asyncio.Future[AuthorizationCodeResult] = (
+            self._loop.create_future()
+        )
         callback = self
 
         class Handler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+            def do_GET(self) -> None:
                 parsed = urlsplit(self.path)
                 if parsed.path != "/callback":
                     self._reply(HTTPStatus.NOT_FOUND, "Not found")
@@ -41,7 +43,9 @@ class LoopbackOAuthCallback:
                 error = query.get("error", [None])[0]
                 code = query.get("code", [None])[0]
                 if error or not code:
-                    callback._finish(error=OAuthLoginError("Atlassian authorization was denied"))
+                    callback._finish(
+                        error=OAuthLoginError("Atlassian authorization was denied")
+                    )
                     self._reply(
                         HTTPStatus.BAD_REQUEST,
                         "Corum could not complete authorization. You may close this tab.",
@@ -99,14 +103,18 @@ class LoopbackOAuthCallback:
         print(f"Open this URL to connect Atlassian:\n{authorization_url}")
         try:
             opened = self._browser_open(authorization_url)
-        except Exception:
+        except Exception:  # noqa: BLE001 - browser launchers raise platform-specific errors
             opened = False
         if not opened:
-            print("The browser did not open automatically; open the URL above manually.")
+            print(
+                "The browser did not open automatically; open the URL above manually."
+            )
 
     async def callback_handler(self) -> AuthorizationCodeResult:
         try:
-            return await asyncio.wait_for(asyncio.shield(self._result), timeout=self.timeout)
+            return await asyncio.wait_for(
+                asyncio.shield(self._result), timeout=self.timeout
+            )
         except TimeoutError as error:
             raise OAuthLoginError("Atlassian authorization timed out") from error
 

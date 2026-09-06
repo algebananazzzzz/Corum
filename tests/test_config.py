@@ -11,7 +11,9 @@ from corum.config import Features, load_course, load_workspace, resolve_features
 from corum.workspace import validate_vault
 
 
-def write_workspace(root: Path, *, features: dict | None = None, include_jira: bool = True):
+def write_workspace(
+    root: Path, *, features: dict | None = None, include_jira: bool = True
+):
     value = {
         "schema": 1,
         "workspace": {"timezone": "Asia/Singapore", "term": "AY2026/27 Semester 1"},
@@ -25,7 +27,9 @@ def write_workspace(root: Path, *, features: dict | None = None, include_jira: b
     (root / "corum.yaml").write_text(yaml.safe_dump(value))
 
 
-def write_course(root: Path, code: str, *, features: dict | None = None, include_jira: bool = True):
+def write_course(
+    root: Path, code: str, *, features: dict | None = None, include_jira: bool = True
+):
     folder = root / "courses" / code
     folder.mkdir(parents=True)
     value = {"schema": 1, "code": code, "canvas": {"id": 1, "sources": []}}
@@ -52,11 +56,16 @@ def test_course_can_disable_jira_without_jira_configuration(tmp_path):
         features={"jira": {"enabled": False}},
         include_jira=False,
     )
-    assert resolve_features(load_workspace(tmp_path), load_course(tmp_path, "CS3103")).jira is False
+    assert (
+        resolve_features(load_workspace(tmp_path), load_course(tmp_path, "CS3103")).jira
+        is False
+    )
 
 
 @pytest.mark.asyncio
-async def test_disabled_course_ignores_poisoned_dormant_jira_during_sync(tmp_path, monkeypatch):
+async def test_disabled_course_ignores_poisoned_dormant_jira_during_sync(
+    tmp_path, monkeypatch
+):
     write_workspace(tmp_path)
     workspace_value = yaml.safe_load((tmp_path / "corum.yaml").read_text())
     workspace_value["jira"] = {"site": "http://unsafe.example", "project": "../BAD"}
@@ -117,6 +126,19 @@ def test_jira_course_rejects_invalid_epic_key(tmp_path):
 
     with pytest.raises(ValidationError):
         load_course(tmp_path, "CS3103")
+
+
+def test_jira_workspace_accepts_cloud_id_without_site(tmp_path):
+    write_workspace(tmp_path, include_jira=False)
+    document = yaml.safe_load((tmp_path / "corum.yaml").read_text())
+    document["jira"] = {"cloud_id": "cloud-1", "project": "STUDY"}
+    (tmp_path / "corum.yaml").write_text(yaml.safe_dump(document))
+
+    jira = load_workspace(tmp_path).jira
+
+    assert jira is not None
+    assert jira.cloud_id == "cloud-1"
+    assert jira.site is None
 
 
 def test_workspace_rejects_non_iana_timezone(tmp_path):

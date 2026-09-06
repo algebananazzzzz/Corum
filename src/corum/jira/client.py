@@ -64,10 +64,12 @@ class JiraClient:
             "summary": fields["summary"],
             "issueType": fields["type"],
         }
-        for name in ("description", "labels", "parent"):
+        for name in ("description", "labels"):
             value = fields.get(name)
             if value is not None:
                 arguments[name] = value
+        if fields.get("parent") is not None:
+            arguments["parent"] = require_issue_key(fields["parent"])
         if fields.get("due") is not None:
             arguments["additional_fields"] = {"duedate": fields["due"]}
         try:
@@ -157,7 +159,9 @@ class JiraClient:
                 "Jira search result",
             )
             values = page.get("issues")
-            if not isinstance(values, list) or not all(isinstance(item, dict) for item in values):
+            if not isinstance(values, list) or not all(
+                isinstance(item, dict) for item in values
+            ):
                 raise RovoError("Atlassian returned invalid Jira search results")
             issues.extend(values)
             token = page.get("nextPageToken")

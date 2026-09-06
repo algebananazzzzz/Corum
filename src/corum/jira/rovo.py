@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import webbrowser
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-import json
-from typing import Any
-import webbrowser
 
 import httpx2
 from mcp import ClientSession, types
@@ -17,7 +17,6 @@ from pydantic import AliasChoices, AnyUrl, BaseModel, Field, HttpUrl, Validation
 
 from .auth import AuthCacheError, FileTokenStorage
 from .oauth_callback import LoopbackOAuthCallback, OAuthLoginError
-
 
 ROVO_MCP_URL = "https://mcp.atlassian.com/v2/mcp"
 ROVO_MCP_TRANSPORT_URL = f"{ROVO_MCP_URL}?tools=all"
@@ -43,6 +42,18 @@ class JiraProject(BaseModel):
     name: str
 
 
+def _known_auth_error(error: Exception) -> Exception | None:
+    if isinstance(error, (AuthCacheError, LoginRequired, OAuthLoginError)):
+        return error
+    if isinstance(error, BaseExceptionGroup):
+        for nested in error.exceptions:
+            if isinstance(nested, Exception):
+                known = _known_auth_error(nested)
+                if known is not None:
+                    return known
+    return None
+
+
 def _unwrap_list(value: object, keys: tuple[str, ...]) -> list[object]:
     current = value
     for _ in range(3):
@@ -50,7 +61,9 @@ def _unwrap_list(value: object, keys: tuple[str, ...]) -> list[object]:
             return current
         if not isinstance(current, dict):
             break
-        nested = next((current[key] for key in keys if isinstance(current.get(key), list)), None)
+        nested = next(
+            (current[key] for key in keys if isinstance(current.get(key), list)), None
+        )
         if nested is not None:
             return nested
         current = current.get("data")
@@ -94,7 +107,11 @@ class RovoSession:
             raise RovoError(f"Atlassian tool failed: {name}")
         if result.structured_content is not None:
             return result.structured_content
-        text_blocks = [block.text for block in result.content if isinstance(block, types.TextContent)]
+        text_blocks = [
+            block.text
+            for block in result.content
+            if isinstance(block, types.TextContent)
+        ]
         if len(text_blocks) != len(result.content) or not text_blocks:
             raise RovoError(f"Atlassian tool returned an unsupported response: {name}")
         try:
@@ -107,6 +124,11 @@ class RovoSession:
         value = await self.call_json("atlassianUserInfo", {})
         if not isinstance(value, dict):
             raise RovoError("Atlassian returned invalid account information")
+        nested = value.get("data")
+        if nested is not None:
+            if not isinstance(nested, dict):
+                raise RovoError("Atlassian returned invalid account information")
+            return nested
         return value
 
     async def resources(self) -> list[AtlassianResource]:
@@ -124,20 +146,33 @@ class RovoSession:
             if not resource.products
             or any(product.get("id") == "jira" for product in resource.products)
         ]
-        return sorted(resources, key=lambda item: ((item.name or "").casefold(), item.id))
+        return sorted(
+            resources, key=lambda item: ((item.name or "").casefold(), item.id)
+        )
 
     async def projects(self, cloud_id: str) -> list[JiraProject]:
-        values = _unwrap_list(
-            await self.call_json(
-                "listJiraProjects",
-                {"cloudId": cloud_id, "maxResults": 100},
-            ),
-            ("projects", "values", "results"),
-        )
-        try:
-            projects = [JiraProject.model_validate(value) for value in values]
-        except ValidationError as error:
-            raise RovoError("Atlassian returned invalid project information") from error
+        projects: list[JiraProject] = []
+        start_at = 0
+        while True:
+            arguments: dict[str, object] = {"cloudId": cloud_id, "maxResults": 100}
+            if start_at:
+                arguments["startAt"] = start_at
+            response = await self.call_json("listJiraProjects", arguments)
+            values = _unwrap_list(response, ("projects", "values", "results"))
+            try:
+                projects.extend(JiraProject.model_validate(value) for value in values)
+            except ValidationError as error:
+                raise RovoError(
+                    "Atlassian returned invalid project information"
+                ) from error
+            page = response.get("data") if isinstance(response, dict) else None
+            if not isinstance(page, dict):
+                page = response if isinstance(response, dict) else {}
+            if page.get("isLast") is not False:
+                break
+            if not values:
+                raise RovoError("Atlassian returned invalid project pagination")
+            start_at = int(page.get("startAt", start_at)) + len(values)
         return sorted(projects, key=lambda item: (item.name.casefold(), item.key))
 
 
@@ -154,11 +189,12 @@ async def open_rovo_session(
     storage: FileTokenStorage | None = None,
     *,
     browser_open: Callable[[str], bool] = webbrowser.open,
-    timeout: float = 120.0,
+    timeout: float = 300.0,
     interactive: bool = True,
 ) -> AsyncIterator[RovoSession]:
     """Open one authenticated MCP session, optionally allowing browser login."""
 
+    selected_storage = storage or FileTokenStorage()
     callback = (
         LoopbackOAuthCallback(timeout=timeout, browser_open=browser_open)
         if interactive
@@ -175,23 +211,53 @@ async def open_rovo_session(
     auth = OAuthClientProvider(
         server_url=ROVO_MCP_URL,
         client_metadata=metadata,
-        storage=storage or FileTokenStorage(),
+        storage=selected_storage,
         redirect_handler=callback.redirect_handler if callback else _login_required,
-        callback_handler=callback.callback_handler if callback else _callback_unavailable,
+        callback_handler=callback.callback_handler
+        if callback
+        else _callback_unavailable,
     )
+    get_server_metadata = getattr(selected_storage, "get_server_metadata", None)
+    if get_server_metadata is not None:
+        server_metadata = await get_server_metadata()
+        if server_metadata is not None:
+            auth.context.oauth_metadata = server_metadata
+            auth.context.auth_server_url = str(server_metadata.issuer)
+    oauth_logger = logging.getLogger("mcp.client.auth.oauth2")
+    previous_log_level = oauth_logger.level
+    oauth_logger.setLevel(logging.CRITICAL)
+    caller_error: Exception | None = None
     try:
-        async with httpx2.AsyncClient(auth=auth, follow_redirects=True) as client:
-            async with streamable_http_client(
+        async with (
+            httpx2.AsyncClient(auth=auth, follow_redirects=True) as client,
+            streamable_http_client(
                 ROVO_MCP_TRANSPORT_URL,
                 http_client=client,
-            ) as streams:
-                async with ClientSession(streams[0], streams[1]) as session:
-                    await session.initialize()
-                    yield RovoSession(session)
+            ) as streams,
+            ClientSession(streams[0], streams[1]) as session,
+        ):
+            await session.initialize()
+            set_server_metadata = getattr(selected_storage, "set_server_metadata", None)
+            if (
+                set_server_metadata is not None
+                and auth.context.oauth_metadata is not None
+            ):
+                await set_server_metadata(auth.context.oauth_metadata)
+            try:
+                yield RovoSession(session)
+            except Exception as error:
+                caller_error = error
+                raise
     except (AuthCacheError, LoginRequired, OAuthLoginError):
         raise
     except Exception as error:
+        if caller_error is not None:
+            raise caller_error
+        known = _known_auth_error(error)
+        if known is not None:
+            raise known
         raise RovoError("Could not connect to Atlassian") from error
     finally:
+        oauth_logger.setLevel(previous_log_level)
         if callback is not None:
             await callback.aclose()

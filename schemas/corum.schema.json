@@ -40,9 +40,9 @@
       "additionalProperties": false,
       "required": ["project"],
       "properties": {
-        "cloud_id": {"type": "string", "minLength": 1},
+        "cloud_id": {"type": ["string", "null"], "pattern": ".*\\S.*"},
         "site": {
-          "type": "string",
+          "type": ["string", "null"],
           "format": "uri",
           "pattern": "^https://[^/?#@]+/?$"
         },

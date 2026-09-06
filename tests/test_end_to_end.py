@@ -3,12 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 from jsonschema import ValidationError, validate
-import pytest
 
 from corum.workspace import initialize, validate_vault
-
 
 ROOT = Path(__file__).parents[1]
 
@@ -62,7 +61,7 @@ def test_initialized_canvas_only_course_has_no_optional_state(tmp_path):
 
     workspace, courses = validate_vault(vault)
     course = vault / "courses" / "DEMO"
-    assert workspace.features.jira.enabled is True
+    assert workspace.features.jira.enabled is False
     assert len(courses) == 1
     assert not (course / "state/jira.json").exists()
     assert not (course / "state/wiki.json").exists()

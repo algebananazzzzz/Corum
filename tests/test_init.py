@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from corum.config import load_workspace
 from corum.workspace import initialize
@@ -21,3 +22,12 @@ def test_initialize_refuses_nonempty_target(tmp_path):
 
     with pytest.raises(ValueError, match="non-empty"):
         initialize(vault)
+
+
+def test_initialize_validates_explicit_workspace_before_writing(tmp_path):
+    vault = tmp_path / "vault"
+
+    with pytest.raises(ValidationError):
+        initialize(vault, {})
+
+    assert not vault.exists()

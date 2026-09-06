@@ -35,23 +35,38 @@ cd /path/to/private-vault
 corum doctor
 ```
 
+`corum init` is an interactive terminal wizard. For automation or a minimal
+Canvas-first vault, use `corum init --defaults /path/to/private-vault`; defaults
+never open a browser and leave Jira disabled.
+
 The vault receives `corum.yaml`, `AGENTS.md`, `skills/`, `templates/`, and an empty
 `courses/` directory. These agent assets are included in the installed wheel; vault
 initialization does not need the source checkout.
 
-## Environment variables
+## Authentication
 
-Secrets enter only through the process environment and are never accepted in YAML:
+Canvas keeps its existing environment-variable authentication:
 
 | Variable | Needed when |
 | --- | --- |
 | `CORUM_CANVAS_TOKEN` | Performing Canvas capture |
-| `CORUM_JIRA_EMAIL` | Applying an enabled Jira plan |
-| `CORUM_JIRA_API_TOKEN` | Applying an enabled Jira plan |
 
-Disabled Jira performs no Jira credential check or client construction. Wiki
-authoring uses local files and the active agent environment; no wiki credential is
-defined by Corum v1.
+Jira uses Atlassian browser OAuth only—there is no Jira email or API-token setup.
+Jira Cloud's Free plan is sufficient for a small personal or friends workspace;
+Atlassian currently documents a limit of 10 users. Run:
+
+```console
+corum jira login /path/to/private-vault
+corum jira status /path/to/private-vault
+corum jira logout
+```
+
+Login opens Atlassian in the default browser and lets you select an accessible Jira
+project. OAuth material is stored outside the vault in the platform user
+configuration directory (`~/.config/corum/auth.json` on Linux unless
+`XDG_CONFIG_HOME` is set). On POSIX systems Corum enforces directory mode `0700` and
+file mode `0600`. Do not copy or commit that cache. Disabled Jira and Jira dry-runs
+do not open a session or browser.
 
 ## Workspace configuration
 
@@ -70,6 +85,7 @@ features:
   wiki:
     enabled: true
 jira:
+  cloud_id: 01234567-89ab-cdef-0123-456789abcdef
   site: https://jira.example.invalid
   project: STUDY
   transitions:
@@ -79,10 +95,13 @@ calendar:
   term: Term_Calendar.md
 ```
 
-Jira is enabled by default. If disabled for the whole vault, the workspace `jira`
-mapping may be omitted. `workspace.timezone` must be an IANA zone name and controls
-Canvas date conversion and run IDs. Canvas and Jira hosts must be credential-free
-HTTPS origins (no path, query, fragment, or embedded user information).
+Jira is disabled in newly generated defaults. Browser login enables it and writes
+the selected non-secret `cloud_id` and project. `site` is optional display metadata
+because Rovo may expose only the stable cloud ID. Existing version-1 vaults without
+`cloud_id` still load, but must run `corum jira login` before a real Jira operation.
+`workspace.timezone` must be an IANA zone name and controls Canvas date conversion
+and run IDs. Canvas and optional Jira hosts must be credential-free HTTPS origins
+(no path, query, fragment, or embedded user information).
 
 ## Course configuration
 
@@ -180,16 +199,20 @@ retry evidence. An uncertain or partial write blocks nonempty plans until an exa
 empty-plan reconciliation succeeds; fresh scoping and approval against the refreshed
 cache are then required so the old plan cannot be duplicated automatically.
 
-## No protocol-server dependency
+## Local-first Jira connection
 
-Corum uses first-party HTTP clients for Canvas and Jira. It installs and runs without
-any Model Context Protocol server, project server configuration, or external server
-submodule. Normal tests use controlled transports and require no live credentials.
+Canvas uses Corum's first-party HTTP client. Jira operations use Atlassian's hosted
+Rovo MCP v2 endpoint so the official MCP SDK can perform browser OAuth, refresh the
+session, and invoke Jira tools. Corum does not require the Rovo CLI, a local protocol
+server, project server configuration, keyring, or an external server submodule.
+Normal tests use controlled doubles and require no live credentials.
 
 ## Scope
 
 Corum v1 has no hosted service, scheduler, database, LMS other than Canvas, tracker
-other than Jira, automatic Git operation, or migration command. Existing vaults
-require a separately reviewed manual migration.
+other than Jira, automatic Git operation, sandbox, container orchestration, or
+multi-user account service. Each person runs the CLI under their own operating-system
+account and authorizes their own Atlassian account. Sandboxing is deferred until a
+future hosted or untrusted-workload use case requires it.
 
 See [SECURITY.md](SECURITY.md) for secret handling and vulnerability reporting.
