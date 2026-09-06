@@ -203,6 +203,30 @@ func TestSyncToolkitsSkipsMissingVault(t *testing.T) {
 	}
 }
 
+func TestSyncToolkitsRetriesOnlyVaultsWithOldMarkers(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	parent := t.TempDir()
+	current := filepath.Join(parent, "current")
+	stale := filepath.Join(parent, "stale")
+	if err := Initialize(current, testWorkspace(), testAssets("new"), "new"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Initialize(stale, testWorkspace(), testAssets("old"), "old"); err != nil {
+		t.Fatal(err)
+	}
+	currentAgents := filepath.Join(current, "AGENTS.md")
+	if err := os.WriteFile(currentAgents, []byte("current sentinel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	results := SyncToolkits(testAssets("new"), "new")
+	if len(results) != 2 || results[0].Err != nil || results[1].Err != nil {
+		t.Fatalf("SyncToolkits() = %#v", results)
+	}
+	assertFileContent(t, currentAgents, "current sentinel")
+	assertFileContent(t, filepath.Join(stale, "AGENTS.md"), "new agents")
+	assertToolkitVersion(t, stale, "new")
+}
+
 func TestToolkitFailureRollsBackOwnedFiles(t *testing.T) {
 	for _, failAt := range []int{2, 8} {
 		t.Run("rename", func(t *testing.T) {

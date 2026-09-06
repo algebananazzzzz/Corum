@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 
 	corum "github.com/algebananazzzzz/Corum"
@@ -14,17 +15,71 @@ import (
 	"github.com/algebananazzzzz/Corum/internal/config"
 	"github.com/algebananazzzzz/Corum/internal/jira"
 	"github.com/algebananazzzzz/Corum/internal/ui"
+	"github.com/algebananazzzzz/Corum/internal/update"
 	"github.com/algebananazzzzz/Corum/internal/vault"
 )
 
 var (
-	openJiraSession = jira.Open
-	makeJiraClient  = jira.NewJiraClient
+	openJiraSession                                          = jira.Open
+	makeJiraClient                                           = jira.NewJiraClient
+	maybeUpdate                                              = update.Maybe
+	syncVaultToolkits func(fs.FS, string) []vault.SyncResult = vault.SyncToolkits
 )
+
+// RunProcess performs invocation-time update and toolkit work before dispatching
+// the requested command. argv must include the executable name.
+func RunProcess(ctx context.Context, argv []string, in io.Reader, out, errOut io.Writer) int {
+	if len(argv) == 0 {
+		argv = []string{"corum"}
+	}
+	args := argv[1:]
+	explicitUpdate := len(args) == 1 && args[0] == "update"
+	if !explicitUpdate && os.Getenv(update.ReexecEnv) != "1" {
+		outcome, err := maybeUpdate(ctx, update.Options{
+			Version: buildinfo.Version,
+			Args:    argv,
+			Env:     os.Environ(),
+		})
+		if err != nil {
+			fmt.Fprintf(errOut, "warning: automatic update check failed: %v\n", err)
+		} else if outcome.Warning != "" {
+			fmt.Fprintf(errOut, "warning: %s\n", outcome.Warning)
+		}
+	}
+	if buildinfo.Version != "dev" {
+		for _, result := range syncVaultToolkits(corum.Assets, buildinfo.Version) {
+			if result.Err == nil {
+				continue
+			}
+			if result.Root == "" {
+				fmt.Fprintf(errOut, "warning: toolkit update failed: %v\n", result.Err)
+			} else {
+				fmt.Fprintf(errOut, "warning: toolkit update failed for %s: %v\n", result.Root, result.Err)
+			}
+		}
+	}
+	return Run(ctx, args, in, out, errOut)
+}
 
 // Run executes the intentionally small Task 1 command surface.
 func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
 	_ = in
+	if len(args) == 1 && args[0] == "update" {
+		outcome, err := update.Run(ctx, update.Options{Version: buildinfo.Version})
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		switch {
+		case outcome.Updated:
+			fmt.Fprintf(out, "corum updated to %s\n", withV(outcome.Latest))
+		case outcome.Skipped != "":
+			fmt.Fprintln(out, outcome.Skipped)
+		default:
+			fmt.Fprintf(out, "corum %s is up to date\n", withV(buildinfo.Version))
+		}
+		return 0
+	}
 	if len(args) == 1 && args[0] == "version" {
 		fmt.Fprintln(out, buildinfo.Version)
 		return 0
@@ -138,8 +193,15 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, label)
 		return 0
 	}
-	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor PATH | corum version | corum sync COURSE...|--all [--dry-run] [--json] | corum jira login [PATH]|status|logout | corum jira apply COURSE [--dry-run]")
+	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor PATH | corum version | corum update | corum sync COURSE...|--all [--dry-run] [--json] | corum jira login [PATH]|status|logout | corum jira apply COURSE [--dry-run]")
 	return 2
+}
+
+func withV(version string) string {
+	if len(version) > 0 && version[0] == 'v' {
+		return version
+	}
+	return "v" + version
 }
 
 func runCanvasSync(ctx context.Context, args []string, out, errOut io.Writer) (int, bool) {

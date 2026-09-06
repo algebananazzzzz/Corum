@@ -1,0 +1,31 @@
+version: 2
+
+project_name: corum
+
+builds:
+  - main: ./cmd/corum
+    binary: corum
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/algebananazzzzz/Corum/internal/buildinfo.Version={{ .Version }}
+
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  filters:
+    exclude:
+      - "^docs"
+      - "^chore"

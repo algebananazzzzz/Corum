@@ -5,9 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/algebananazzzzz/Corum/internal/buildinfo"
+	"github.com/algebananazzzzz/Corum/internal/update"
+	"github.com/algebananazzzzz/Corum/internal/vault"
 )
 
 func TestRunVersionPrintsBuildVersion(t *testing.T) {
@@ -24,6 +30,51 @@ func TestRunRejectsUnknownCommand(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := Run(context.Background(), []string{"unknown"}, nil, &out, &errOut); code != 2 {
 		t.Fatalf("Run code = %d", code)
+	}
+}
+
+func TestRunUpdateRejectsDevelopmentBuild(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), []string{"update"}, nil, &out, &errOut); code != 1 {
+		t.Fatalf("Run code = %d, stdout = %q, stderr = %q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "development build cannot self-update") {
+		t.Fatalf("stderr = %q", errOut.String())
+	}
+}
+
+func TestRunProcessReexecSyncsBeforeDispatchAndReportsPartialErrors(t *testing.T) {
+	oldVersion := buildinfo.Version
+	oldMaybe := maybeUpdate
+	oldSync := syncVaultToolkits
+	t.Cleanup(func() {
+		buildinfo.Version = oldVersion
+		maybeUpdate = oldMaybe
+		syncVaultToolkits = oldSync
+	})
+	buildinfo.Version = "v2.0.0"
+	t.Setenv(update.ReexecEnv, "1")
+	maybeUpdate = func(context.Context, update.Options) (update.Outcome, error) {
+		t.Fatal("re-executed process attempted another update")
+		return update.Outcome{}, nil
+	}
+	var out, errOut bytes.Buffer
+	syncCalls := 0
+	syncVaultToolkits = func(fs.FS, string) []vault.SyncResult {
+		syncCalls++
+		if out.Len() != 0 {
+			t.Fatal("command dispatched before toolkit sync")
+		}
+		return []vault.SyncResult{{Root: "/good"}, {Root: "/bad", Err: errors.New("injected toolkit failure")}}
+	}
+	if code := RunProcess(context.Background(), []string{"corum", "version"}, nil, &out, &errOut); code != 0 {
+		t.Fatalf("RunProcess code = %d, stderr = %q", code, errOut.String())
+	}
+	if syncCalls != 1 || out.String() != "v2.0.0\n" {
+		t.Fatalf("sync calls = %d, stdout = %q", syncCalls, out.String())
+	}
+	if !strings.Contains(errOut.String(), "/bad") || !strings.Contains(errOut.String(), "injected toolkit failure") {
+		t.Fatalf("stderr = %q", errOut.String())
 	}
 }
 

@@ -47,10 +47,19 @@ func SyncToolkits(assets fs.FS, version string) []SyncResult {
 			results = append(results, SyncResult{Root: root, Err: err})
 			continue
 		}
+		if toolkitIsCurrent(root, version) {
+			results = append(results, SyncResult{Root: root})
+			continue
+		}
 		err := syncToolkit(root, assets, version, os.Rename)
 		results = append(results, SyncResult{Root: root, Err: err})
 	}
 	return results
+}
+
+func toolkitIsCurrent(root, version string) bool {
+	data, err := os.ReadFile(filepath.Join(root, ".corum", "toolkit-version"))
+	return err == nil && string(data) == version+"\n"
 }
 
 func syncToolkit(root string, assets fs.FS, version string, rename func(string, string) error) error {
