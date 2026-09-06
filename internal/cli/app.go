@@ -10,6 +10,7 @@ import (
 
 	corum "github.com/algebananazzzzz/Corum"
 	"github.com/algebananazzzzz/Corum/internal/buildinfo"
+	"github.com/algebananazzzzz/Corum/internal/canvas"
 	"github.com/algebananazzzzz/Corum/internal/config"
 	"github.com/algebananazzzzz/Corum/internal/jira"
 	"github.com/algebananazzzzz/Corum/internal/ui"
@@ -73,6 +74,9 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if code, handled := runJiraApply(ctx, args, in, out, errOut); handled {
 		return code
 	}
+	if code, handled := runCanvasSync(ctx, args, out, errOut); handled {
+		return code
+	}
 	if len(args) == 2 && args[0] == "jira" && args[1] == "logout" {
 		removed, err := jira.ClearAuth()
 		if err != nil {
@@ -134,8 +138,106 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, label)
 		return 0
 	}
-	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor PATH | corum version | corum jira login [PATH]|status|logout | corum jira apply COURSE [--dry-run]")
+	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor PATH | corum version | corum sync COURSE...|--all [--dry-run] [--json] | corum jira login [PATH]|status|logout | corum jira apply COURSE [--dry-run]")
 	return 2
+}
+
+func runCanvasSync(ctx context.Context, args []string, out, errOut io.Writer) (int, bool) {
+	if len(args) == 2 && args[0] == "sync" && args[1] == "--help" {
+		fmt.Fprintln(out, "usage: corum sync COURSE...|--all [--dry-run] [--json]")
+		return 0, true
+	}
+	if len(args) < 2 || args[0] != "sync" {
+		return 0, false
+	}
+	dryRun, jsonOutput, all := false, false, false
+	codes := []string{}
+	for _, arg := range args[1:] {
+		switch arg {
+		case "--dry-run":
+			dryRun = true
+		case "--json":
+			jsonOutput = true
+		case "--all":
+			all = true
+		default:
+			if len(arg) > 0 && arg[0] == '-' {
+				return 0, false
+			}
+			codes = append(codes, arg)
+		}
+	}
+	if all == (len(codes) > 0) {
+		return 0, false
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintln(errOut, "could not locate vault")
+		return 1, true
+	}
+	workspace, err := config.LoadWorkspace(root)
+	if err != nil {
+		fmt.Fprintln(errOut, "could not load workspace configuration")
+		return 1, true
+	}
+	var courses []config.Course
+	if all {
+		_, courses, err = vault.Validate(root)
+		if err != nil {
+			fmt.Fprintln(errOut, "vault validation failed")
+			return 1, true
+		}
+	} else {
+		seen := map[string]bool{}
+		for _, code := range codes {
+			if seen[code] {
+				continue
+			}
+			seen[code] = true
+			course, loadErr := config.LoadCourse(root, code)
+			if loadErr != nil {
+				fmt.Fprintln(errOut, "could not load course configuration")
+				return 1, true
+			}
+			courses = append(courses, course)
+		}
+	}
+	results := make([]canvas.StageResult, 0, len(courses))
+	var client canvas.SourceClient
+	for _, course := range courses {
+		if !dryRun && config.Effective(workspace, course).Canvas {
+			if client == nil {
+				constructed, constructErr := canvas.NewClientFromEnvironment(workspace.Canvas.URL)
+				if constructErr != nil {
+					fmt.Fprintln(errOut, constructErr)
+					return 1, true
+				}
+				client = constructed
+			}
+		}
+		result, syncErr := canvas.Sync(ctx, root, workspace, course, client, dryRun)
+		results = append(results, result)
+		if syncErr != nil {
+			fmt.Fprintln(errOut, syncErr)
+			return 1, true
+		}
+	}
+	if jsonOutput {
+		if err := json.NewEncoder(out).Encode(results); err != nil {
+			fmt.Fprintln(errOut, "could not write sync result")
+			return 1, true
+		}
+	} else {
+		for _, result := range results {
+			fmt.Fprintf(out, "%s: %s\n", result.Course, result.Status)
+		}
+	}
+	for _, result := range results {
+		if result.Status == "failed" || result.Status == "partial" {
+			return 1, true
+		}
+	}
+	return 0, true
 }
 
 func runJiraApply(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) (int, bool) {

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Corum Canvas capture state",
+  "title": "Corum Canvas capture state (v2)",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "synced_at", "sources"],
