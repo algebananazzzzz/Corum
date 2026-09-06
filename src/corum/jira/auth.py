@@ -122,3 +122,34 @@ def clear_auth(path: Path | None = None) -> bool:
     _check_private(selected)
     selected.unlink()
     return True
+
+
+def snapshot_auth(path: Path | None = None) -> bytes | None:
+    """Read cache bytes for an in-process login rollback without exposing them."""
+
+    selected = _selected_path(path)
+    if not selected.exists():
+        return None
+    _check_private(selected)
+    try:
+        return selected.read_bytes()
+    except OSError as error:
+        raise AuthCacheError(f"OAuth cache is unreadable: {selected}") from error
+
+
+def restore_auth(snapshot: bytes | None, path: Path | None = None) -> None:
+    """Restore a cache snapshot after a cancelled replacement login."""
+
+    selected = _selected_path(path)
+    if snapshot is None:
+        if selected.exists():
+            _check_private(selected)
+            selected.unlink()
+        return
+    try:
+        value = json.loads(snapshot)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise AuthCacheError(f"OAuth cache backup is invalid: {selected}") from error
+    if not isinstance(value, dict) or value.get("schema") != 1:
+        raise AuthCacheError(f"OAuth cache backup has an unsupported format: {selected}")
+    _write_private_json(selected, value)
