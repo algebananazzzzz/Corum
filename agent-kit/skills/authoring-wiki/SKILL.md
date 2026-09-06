@@ -50,7 +50,7 @@ or a necessary gap remains. Cite researched claims where they appear and state
 meaningful conflicts.
 
 An unread or failed Canvas source is unknown input. Do not infer, summarize, skip,
-approve, or finalize its contents. Report it for retry or manual review.
+approve, or mark its contents ingested. Report it for retry or manual review.
 
 Use native Markdown for simple facts, Mermaid for processes, `drawio-diagrams` for
 spatial technical diagrams, and an attributed external image only when it cannot be

@@ -3,6 +3,8 @@ set -eu
 
 REPO="algebananazzzzz/Corum"
 INSTALL_DIR="${CORUM_INSTALL_DIR:-$HOME/.local/bin}"
+API_BASE="${_CORUM_TEST_API_BASE:-https://api.github.com}"
+RELEASE_BASE="${_CORUM_TEST_RELEASE_BASE:-https://github.com/$REPO/releases/download}"
 
 os="$(uname -s)"
 case "$os" in
@@ -18,7 +20,7 @@ case "$arch" in
   *) echo "unsupported architecture: $arch" >&2; exit 1 ;;
 esac
 
-tag="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" |
+tag="$(curl -fsSL "$API_BASE/repos/$REPO/releases/latest" |
   grep -m1 '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
 if [ -z "$tag" ]; then
   echo "could not determine the latest release of $REPO" >&2
@@ -27,7 +29,7 @@ fi
 version="${tag#v}"
 
 archive="corum_${version}_${os}_${arch}.tar.gz"
-base="https://github.com/$REPO/releases/download/$tag"
+base="$RELEASE_BASE/$tag"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

@@ -1,115 +1,122 @@
 # Corum
 
-Corum is a content-free framework for maintaining private academic vaults. Its
-Python CLI captures Canvas sources and applies exact approved Jira plans;
-vault-installed agent skills own semantic scoping, one approval gate, and optional
-Obsidian wiki authoring.
+```console
+curl -fsSL https://raw.githubusercontent.com/algebananazzzzz/Corum/main/install.sh | sh
+corum init ~/Corum
+```
 
-Corum stores no course content, credentials, Canvas identifiers, or Jira records in
-this repository. A user's initialized vault is a separate private artifact.
+Corum is a local-first framework for maintaining private academic vaults. The
+single `corum` binary captures Canvas source material and applies exact approved
+Jira plans. The installed agent toolkit owns semantic scoping and all wiki prose.
+
+Corum stores no course content, credentials, Canvas identifiers, or Jira records
+in this repository. Each initialized vault is a separate private artifact.
 
 ## Install
 
-Corum requires Python 3.12 or newer. From a source checkout:
+The installer supports Linux and macOS on AMD64 and ARM64. It downloads the
+matching release archive and `checksums.txt`, verifies SHA-256, and installs the
+binary as `${CORUM_INSTALL_DIR:-$HOME/.local/bin}/corum`. It does not use root or
+edit shell profiles.
+
+Users need neither Python nor Go. To choose another destination:
 
 ```console
-python -m venv .venv
-.venv/bin/pip install .
-.venv/bin/corum --help
+curl -fsSL https://raw.githubusercontent.com/algebananazzzzz/Corum/main/install.sh |
+  env CORUM_INSTALL_DIR="$HOME/bin" sh
+corum version
 ```
 
-For development and tests, install the declared extra:
-
-```console
-.venv/bin/pip install -e '.[test]'
-.venv/bin/python -m pytest -q
-```
+Ensure the install directory is on `PATH`. Source contributors need the Go
+version declared in `go.mod`, but the released binary has no language-runtime
+prerequisite.
 
 ## Initialize a vault
 
-Choose an empty path. Initialization refuses to overwrite a non-empty target.
+Choose an empty path; initialization refuses to overwrite a nonempty target.
 
 ```console
-corum init /path/to/private-vault
-cd /path/to/private-vault
-corum doctor
+corum init ~/Corum
+corum doctor ~/Corum
 ```
 
 `corum init` is an interactive terminal wizard. For automation or a minimal
-Canvas-first vault, use `corum init --defaults /path/to/private-vault`; defaults
-never open a browser and leave Jira disabled.
+Canvas-first setup, use the headless defaults:
 
-The vault receives `corum.yaml`, `AGENTS.md`, `skills/`, `templates/`, and an empty
-`courses/` directory. These agent assets are included in the installed wheel; vault
-initialization does not need the source checkout.
+```console
+corum init --defaults ~/Corum
+```
+
+The vault receives `corum.yaml`, `AGENTS.md`, `skills/`, `templates/`, an empty
+`courses/` directory, and `.corum/toolkit-version`. `corum init` and successful
+`corum doctor` checks register the vault so a later binary update can roll out
+the current toolkit.
+
+Corum owns and may replace the complete `AGENTS.md`, `skills/`, and `templates/`
+paths plus `.corum/toolkit-version`. Keep personal instructions and files outside
+those paths. Corum never replaces `corum.yaml`, `courses/`, captured sources, wiki
+pages, state, calendars, or credentials.
 
 ## Authentication
 
-Canvas keeps its existing environment-variable authentication:
-
-| Variable | Needed when |
-| --- | --- |
-| `CORUM_CANVAS_TOKEN` | Performing Canvas capture |
-
-Jira uses Atlassian browser OAuth only—there is no Jira email or API-token setup.
-Jira Cloud's Free plan is sufficient for a small personal or friends workspace;
-Atlassian currently documents a limit of 10 users. Run:
+Canvas capture reads its token only when an enabled, non-dry-run Canvas operation
+needs it:
 
 ```console
-corum jira login /path/to/private-vault
-corum jira status /path/to/private-vault
+export CORUM_CANVAS_TOKEN='...'
+```
+
+Jira uses Atlassian browser OAuth only. There is no email/API-token mode, Rovo CLI
+dependency, keyring integration, or local protocol server.
+
+```console
+corum jira login ~/Corum
+corum jira status
 corum jira logout
 ```
 
-Login opens Atlassian in the default browser and lets you select an accessible Jira
-project. OAuth material is stored outside the vault in the platform user
-configuration directory (`~/.config/corum/auth.json` on Linux unless
-`XDG_CONFIG_HOME` is set). On POSIX systems Corum enforces directory mode `0700` and
-file mode `0600`. Do not copy or commit that cache. Disabled Jira and Jira dry-runs
-do not open a session or browser.
+Login opens Atlassian in the default browser and lets the user select an
+accessible Jira project. OAuth material stays outside all vaults in the platform
+user configuration directory. On Linux this is normally
+`~/.config/corum/auth.json`; on macOS it is normally beneath
+`~/Library/Application Support/corum/`. POSIX cache directories use mode `0700`
+and the file uses `0600`. Do not copy, inspect, or commit that cache.
 
-## Workspace configuration
+Disabled Jira paths and `corum jira apply ... --dry-run` do not open OAuth or make
+Jira calls.
 
-Edit `corum.yaml` with vault defaults. Example values are illustrative:
+## Clean v2 configuration
+
+Corum v2 accepts only `version: 2`. Service-block presence is the feature switch;
+the v1 `features` mapping and `schema: 1` vocabulary are unsupported.
 
 ```yaml
-schema: 1
+version: 2
 workspace:
-  timezone: Region/City
-  term: Academic term
+  timezone: Asia/Singapore
+  term: AY2026/27 Semester 1
 canvas:
-  host: https://canvas.example.invalid
-features:
-  jira:
-    enabled: true
-  wiki:
-    enabled: true
+  url: https://canvas.example.edu
 jira:
-  cloud_id: 01234567-89ab-cdef-0123-456789abcdef
-  site: https://jira.example.invalid
+  cloud_id: opaque-atlassian-cloud-id
   project: STUDY
   transitions:
     this_week: "2"
+wiki: {}
 calendar:
   timetable: Timetable.md
   term: Term_Calendar.md
 ```
 
-Jira is disabled in newly generated defaults. Browser login enables it and writes
-the selected non-secret `cloud_id` and project. `site` is optional display metadata
-because Rovo may expose only the stable cloud ID. Existing version-1 vaults without
-`cloud_id` still load, but must run `corum jira login` before a real Jira operation.
-`workspace.timezone` must be an IANA zone name and controls Canvas date conversion
-and run IDs. Canvas and optional Jira hosts must be credential-free HTTPS origins
-(no path, query, fragment, or embedded user information).
+Omit a service block to disable that service. Jira browser login writes only the
+selected non-secret `cloud_id` and project. URLs must be credential-free HTTPS
+origins, and `workspace.timezone` must be an IANA time zone.
 
-## Course configuration
-
-Create `courses/COURSE/course.yaml` with static course identity and watched Canvas
-sources:
+Create `courses/COURSE/course.yaml` with static course identity and the service
+blocks enabled for that course:
 
 ```yaml
-schema: 1
+version: 2
 code: COURSE
 canvas:
   id: 1
@@ -128,91 +135,83 @@ wiki:
   split_rules: default
 ```
 
-When Jira is enabled, the course epic is required. When wiki is disabled, the wiki
-mapping may be omitted.
+A service operates only when its block is present in both workspace and course
+configuration. Disabled services require no files, credentials, client setup, or
+network access.
 
-Override either feature per course:
+Version-1 vaults are rejected before mutation. Corum intentionally provides no
+in-place compatibility layer or migration command: initialize a new v2 vault and
+manually import only user-owned course and wiki content.
 
-```yaml
-features:
-  jira:
-    enabled: false
-  wiki:
-    enabled: true
-```
-
-Effective values resolve from built-in defaults, then workspace defaults, then
-course overrides. Every run manifest records the result. A disabled feature assumes
-none of its files, configuration, credentials, or network dependencies exist.
-
-## Mechanical Canvas sync
+## Canvas capture and agent sync
 
 Run deterministic capture from the vault root:
 
 ```console
+cd ~/Corum
 corum sync COURSE --json
 corum sync COURSE_A COURSE_B --dry-run --json
 corum sync --all
 ```
 
-Capture writes successful sources below `courses/COURSE/raw/`, advances only their
-entries in `state/canvas.json`, and writes `state/latest-run.json`; a missing Canvas
-state file is bootstrapped from the selected course's watched sources. Manifests
-include stable item IDs, exact raw paths, structured details, per-source status, and
-independent downstream stage results. A failed source remains retryable and is
-reported as unknown. This command does not invoke an LLM, write Jira, or author wiki
-prose.
+Capture writes successful sources below `courses/COURSE/raw/`, advances only
+their Canvas state, and records the current run. Failed sources remain retryable
+and are reported as unknown. The command does not invoke an LLM, write Jira, or
+author wiki prose.
 
-## Agent-facing sync
-
-Ask an agent that has opened the initialized vault to “sync COURSE.” `AGENTS.md`
-routes the request to `skills/sync-course/SKILL.md`. That workflow:
-
-1. runs mechanical capture and reads effective feature flags;
-2. scopes only enabled Jira/wiki outputs from local state;
-3. presents one combined approval question;
-4. applies the exact approved Jira plan and authors approved wiki pages;
-5. validates pages, index, provenance, and lint before finalizing sources; and
-6. reports completed, failed, disabled, and retryable work separately.
-
-The LLM is the only wiki author. Deterministic validators report objective defects
-but do not generate replacement prose. The packaged linter's `--finalize` mode
-validates an exact schema-1 payload and lint results before atomically updating wiki
-state and the current run stage. Agents never edit those machine-owned files
-directly. `state/wiki.json` stores only finalized source-to-provenance mappings,
-never page IDs or content hashes.
+For the full workflow, ask an agent opened in the vault to “sync COURSE.” The
+installed `sync-course` skill captures, scopes enabled Jira/wiki work, presents
+one combined approval question, applies the exact approved Jira plan, and asks the
+LLM to author and review approved wiki changes. Corum code never generates,
+rewrites, or finalizes wiki prose.
 
 ## Exact Jira application
 
-`corum jira apply` accepts a strict JSON plan on standard input:
+`corum jira apply` accepts a strict v2 JSON plan on standard input:
 
 ```console
 corum jira apply COURSE --dry-run < plan.json
 corum jira apply COURSE < approved-plan.json
 ```
 
-Create, update, and transition actions are a closed union. The command validates the
-whole plan and proves every update/transition target belongs to the configured epic
-before the first write. It applies sequentially, atomically updates the normalized
-Jira cache after each successful action, and returns structured applied/failure and
-retry evidence. An uncertain or partial write blocks nonempty plans until an exact
-empty-plan reconciliation succeeds; fresh scoping and approval against the refreshed
-cache are then required so the old plan cannot be duplicated automatically.
+Create, update, and transition actions form a closed union. Before the first
+write, Corum validates the complete plan and proves every update or transition
+target belongs to the configured epic. Writes are sequential, and partial or
+uncertain results block replay until read-only reconciliation, fresh scoping, and
+fresh approval make a new plan safe.
 
-## Local-first Jira connection
+Jira operations use Atlassian's hosted Rovo MCP v2 endpoint through the official
+MCP Go SDK. Normal tests use controlled local doubles and require no live
+credentials.
 
-Canvas uses Corum's first-party HTTP client. Jira operations use Atlassian's hosted
-Rovo MCP v2 endpoint so the official MCP SDK can perform browser OAuth, refresh the
-session, and invoke Jira tools. Corum does not require the Rovo CLI, a local protocol
-server, project server configuration, keyring, or an external server submodule.
-Normal tests use controlled doubles and require no live credentials.
+## Updates
 
-## Scope
+Release builds check for a newer version at most once every 24 hours when Corum is
+invoked. A failed attempt is cached for the same interval so offline use does not
+retry on every command. A verified update atomically replaces the binary,
+re-executes the original command once, and refreshes the owned toolkit paths in
+registered vaults.
 
-Corum v1 has no hosted service, scheduler, database, LMS other than Canvas, tracker
-other than Jira, automatic Git operation, sandbox, container orchestration, or
-multi-user account service. Each person runs the CLI under their own operating-system
-account and authorizes their own Atlassian account. Sandboxing is deferred until a
-future hosted or untrusted-workload use case requires it.
+Set `DISABLE_AUTO_UPDATES=1` to disable automatic checks:
 
-See [SECURITY.md](SECURITY.md) for secret handling and vulnerability reporting.
+```console
+DISABLE_AUTO_UPDATES=1 corum doctor ~/Corum
+```
+
+An explicit update always checks immediately and uses the same archive checksum
+verification:
+
+```console
+corum update
+```
+
+Automatic-update failures are warnings and do not prevent the requested command
+from running. See [SECURITY.md](SECURITY.md) for the binary, credential, data, and
+toolkit trust boundaries.
+
+## Product boundary
+
+Corum has no hosted service, scheduler, database, daemon, sandbox, container
+orchestration, keyring, Python bridge, Jira API-token fallback, or multi-user
+account service. Each person runs one local binary under their operating-system
+account and authorizes their own Atlassian account.

@@ -5,23 +5,22 @@ description: Use when a user asks to sync, catch up, or reconcile one course fro
 
 # Sync Course
 
-Capture, scope, ask once, apply only the approved plan, validate, and finalize from
-observed results. This is the only workflow approval point.
+Capture, scope, ask once, apply only the approved plan, and record observed
+results. This is the only workflow approval point.
 
 ## 0. Resume an interrupted Jira result safely
 
-Before starting a new Canvas capture, inspect an existing `state/latest-run.json`
-only for an enabled Jira stage whose `retry_safe` is false. This is an interrupted
-run, not new work. If `reconciliation_required` is true, refresh the configured epic
-with the exact empty Jira plan from step 3. Continue only when its JSON reports
+Before starting a new Canvas capture, inspect `state/latest-run.json` only for an
+enabled Jira stage whose `retry_safe` is false. This is an interrupted run, not
+new work. If `reconciliation_required` is true, refresh the configured epic with
+the exact empty v2 Jira plan from step 3. Continue only when its JSON reports
 `reconciled: true` and `reconciliation_required: false`.
 
-Keep that same manifest: do not capture again or replay its old nonempty plan. Run
-`scope-course` against the preserved manifest and refreshed Jira cache, ensuring its
-new plan excludes every already-applied result. Then continue with the normal single
-approval gate below. If authoritative reconciliation or fresh scoping cannot
-distinguish an uncertain create, stop for manual reconciliation; never guess a key
-or retry the create.
+Keep the same manifest: do not capture again or replay its old nonempty plan. Run
+`scope-course` against the preserved manifest and refreshed Jira cache, ensuring
+the new plan excludes every already-applied result. If authoritative
+reconciliation cannot distinguish an uncertain create, stop for manual
+reconciliation; never guess a key or retry the create.
 
 ## 1. Capture
 
@@ -31,67 +30,63 @@ From the vault root run:
 corum sync {{COURSE}} --json
 ```
 
-Parse stdout as JSON and select the requested course manifest. Stop on command
-failure, invalid JSON, configuration failure, or course mismatch. Do not repair a
-failed capture by guessing.
-
-Report successful Canvas changes with exact titles, paths, dates, and details from
-the manifest. Never print raw JSON or invent missing detail. Report every failure
-separately as **unknown capture state** with its source and error. An unread source
-is not clean, intentionally omitted, ready for approval, or eligible for
-finalization.
+Parse stdout as JSON and select the requested course result. Stop on command
+failure, invalid JSON, configuration failure, or course mismatch. Report
+successful Canvas changes with exact titles, paths, dates, and details from the
+result. Report every failure separately as **unknown capture state**. An unread
+source is not clean, intentionally omitted, ready for approval, or eligible for
+wiki ingestion.
 
 If there are no successful changes, report the capture status and failures, then
 stop. Do not inspect older pending sources during this run.
 
-## 2. Read effective features
+## 2. Read effective services
 
-The manifest's `effective_features` is authoritative for this run.
+The manifest's `effective_features` object reports the service-presence result for
+this run despite its historical field name.
 
-| Feature state | Required behavior |
+| Service state | Required behavior |
 | --- | --- |
 | Jira enabled | Permit missing-cache reconciliation, local scoping, and later exact-plan application |
 | Jira disabled | No Jira file, configuration, credential, client, or network assumptions |
-| Wiki enabled | Permit local wiki scoping and later authoring/finalization |
-| Wiki disabled | No wiki state, page, template, authoring, or lint assumptions |
+| Wiki enabled | Permit local wiki scoping, authoring, review, and ingestion records |
+| Wiki disabled | No wiki state, page, template, authoring, or review assumptions |
 
-Disabled features produce no plan table and no placeholder work. Their missing files
-are expected. Canvas remains independent.
+Disabled services produce no plan table and no placeholder work. Their missing
+files are expected. Canvas remains independent.
 
 ## 3. Scope read-only
 
-When Jira is enabled and `courses/{{COURSE}}/state/jira.json` is absent, first write
-this exact empty plan to a temporary file, substituting only the manifest course and
-configured course epic, and apply it:
+When Jira is enabled and `courses/{{COURSE}}/state/jira.json` is absent, write this
+exact empty plan to a temporary file, substituting only the course and epic, and
+apply it:
 
 ```json
-{"schema":1,"course":"{{COURSE}}","epic":"{{EPIC_KEY}}","actions":[]}
+{"version":2,"course":"{{COURSE}}","epic":"{{EPIC_KEY}}","actions":[]}
 ```
 
 ```console
 corum jira apply {{COURSE}} < {{EMPTY_JIRA_PLAN_FILE}}
 ```
 
-This is deterministic read-only reconciliation of the configured epic into the
-local cache, not an approval item. Stop if it fails. Do not run it when Jira is
-disabled or when the cache already exists, and do not add actions to this plan.
+This is read-only remote reconciliation into the local cache, not an approval
+item. Stop if it fails. Do not run it when Jira is disabled or when the cache
+already exists, and never add actions to this plan.
 
-Use `scope-course` with only the course and selected current manifest. It owns local
-discovery and comparison. It must not call Jira or edit any file.
-
-If the result has `status: error`, report its code and path-specific message and
-stop. Do not synthesize or bypass a plan. Confirm that returned enabled/disabled
-statuses match the manifest and that Canvas failures appear only under
-`unresolved_capture`.
+Use `scope-course` with only the course and selected current manifest. It owns
+local discovery and comparison. It must not call Jira or edit any file. If it
+returns `status: error`, report its code and path-specific message and stop.
+Confirm that returned enabled/disabled statuses match the manifest and that
+Canvas failures appear only under `unresolved_capture`.
 
 When Jira has actions, validate its exact plan before approval without credentials,
-network, or cache writes:
+network, or state writes:
 
 ```console
 corum jira apply {{COURSE}} --dry-run < {{JIRA_PLAN_FILE}}
 ```
 
-Stop if validation fails. The plan must use only the closed action union:
+The plan must contain `version: 2` and only the closed action union:
 
 - create: `action` plus `issue`;
 - update: `action`, `key`, and `set`;
@@ -99,25 +94,24 @@ Stop if validation fails. The plan must use only the closed action union:
 
 ## 4. Present one plan
 
-Show only enabled, non-empty plan sections. Jira rows identify create/update/
-transition, target, exact change, and source evidence. Wiki rows identify create or
-enrich, target page, requested coverage, and exact source ranges. Show known skipped
-ranges and source-finalization dependencies. Keep unknown captures in a separate
-warning, never in the approval counts.
+Show only enabled, nonempty plan sections. Jira rows identify the exact action,
+target, change, and source evidence. Wiki rows identify create or enrich, target
+page, requested coverage, and exact source ranges. Show known skipped ranges and
+source-ingestion dependencies. Keep unknown captures in a separate warning,
+never in approval counts.
 
-If there are no Jira actions, wiki page/index edits, or source finalizations, report
-that nothing needs applying and stop.
+If there are no Jira actions, wiki page/index edits, or sources to mark ingested,
+report that nothing needs applying and stop.
 
 Ask exactly one combined question:
 
 > Apply {{JIRA_ACTION_COUNT}} Jira change(s), author {{DISTINCT_WIKI_PAGE_COUNT}}
-> wiki page(s), and finalize {{DISTINCT_SOURCE_COUNT}} source(s)?
+> wiki page(s), and mark {{DISTINCT_SOURCE_COUNT}} source(s) ingested?
 
-Wait for an affirmative answer. Do not call Jira mutation methods, edit wiki/index/
-state/changelog, or request a feature-specific credential for mutation before
-approval. The earlier enabled-only cache bootstrap may use Jira credentials for its
-read-only remote query and local cache preparation. A negative answer ends the run
-without mutations. Do not ask another approval question later.
+Wait for an affirmative answer. Do not call Jira mutation methods, edit wiki,
+index, state, or changelog before approval. The earlier empty-plan bootstrap may
+use Jira OAuth only for its read-only query. A negative answer ends the run. Do
+not ask another approval question later.
 
 ## 5. Apply the approved plan
 
@@ -129,113 +123,70 @@ If enabled with approved actions, send the exact scoped `jira.plan` object to:
 corum jira apply {{COURSE}} < {{JIRA_PLAN_FILE}}
 ```
 
-Do not rescope, add fields, or manually edit `state/jira.json`. The command applies
-actions sequentially and owns cache and run-stage updates. Parse its JSON stdout
-even when it exits nonzero: `applied` is the durable evidence of completed remote
-writes, while `failures`, `write_state`, `retry_safe`, and
-`reconciliation_required` control recovery. Never repeat an action whose write is
-`applied` or `unknown`.
+Do not rescope, add fields, or manually edit `state/jira.json`. Parse JSON stdout
+even when the command exits nonzero. `applied`, `failures`, `write_state`,
+`retry_safe`, and `reconciliation_required` are durable recovery evidence. Never
+repeat an action whose write is `applied` or `unknown`.
 
-If reconciliation is required, stop Jira mutation for this workflow and continue
-only independent wiki work whose inputs remain valid. Before any later Jira retry,
-apply the exact empty plan to refresh the configured epic, then run `scope-course`
-again against the same current manifest and refreshed cache and present a fresh
-approval. Do not recapture first, reuse the old nonempty plan, or infer a missing
-create key from ordering, summary text, or a guessed issue.
-Reconciliation preserves the prior partial status and evidence, so its command may
-still exit 1; it succeeded only when the JSON says `reconciled: true` and
-`reconciliation_required: false`. Only the newly scoped exact plan is eligible for
-the later approval; `retry_safe: false` continues to forbid replaying the old plan.
+If reconciliation is required, stop Jira mutation and continue only independent
+wiki work whose inputs remain valid. Before any later Jira retry, apply the exact
+empty plan, scope again against the same manifest and refreshed cache, and present
+a fresh approval. Never replay the old plan.
 
 ### Wiki
 
-If enabled, consolidate actions by target page and use `authoring-wiki` for the
+If enabled, consolidate actions by target and use `authoring-wiki` for the
 specified tier. Give the author exact target, coverage, source paths, labels, and
-page ranges. Source paths are references to local material; do not paste their
-contents into an instruction. Each author changes only its assigned page and assets,
-not the index, state, or changelog. No further approval is requested.
+page ranges. Source paths are references to local material; do not paste source
+contents into an instruction. Each author changes only its assigned page and
+assets, not the index, state, or changelog. No further approval is requested.
 
-After attempting approved page work:
+After approved page work:
 
 1. Add each new page and one-line gloss to `courses/{{COURSE}}/wiki/index.md`;
    preserve existing rows when enriching.
 2. Add approved deliberate skipped ranges to the index.
 3. Verify every planned page exists and every source-backed section has the exact
    provenance marker supplied by the scope.
-4. Build one exact JSON finalization payload. Copy `run_id`, `course`, each source
-   `id`, and each source `path` directly from the current manifest; paths are
-   relative to the course `raw/` directory. Put only dependency-complete sources in
-   `sources`. Record observed page/index work in `applied`, and every failed action
-   in `failures` with its dependent `source_ids`, exact error, `write_state`, and
-   `retry_safe`. Never finalize a source named by a failure.
+4. Use `linting-wiki` for a read-only review of pages, links, index entries,
+   provenance, source coverage, bloat, and contradictions. Correct defects
+   introduced by this run. An affected source with any unresolved dependency or
+   review finding remains un-ingested.
+5. Update `courses/{{COURSE}}/state/wiki.json` with `version: 2` and an `ingested`
+   object. Preserve prior entries. For each dependency-complete source, set its
+   exact raw-relative `path` to its nonblank provenance label or justified JSON
+   `null`. Never store page IDs, hashes, remote versions, or prose.
+6. Update only the `wiki` stage in the current `state/latest-run.json`, preserving
+   every other field. Derive `status`, `applied`, `failures`, and `retry_safe` from
+   observed outcomes. Use `applied` only for completed create, enrich, index, skip,
+   or ingest work; failures name the exact target and error. Do not mark a source
+   ingested when one of its dependencies failed.
 
-   ```json
-   {
-     "schema": 1,
-     "run_id": "{{RUN_ID}}",
-     "course": "{{COURSE}}",
-     "sources": [
-       {"id": "{{CHANGE_ID}}", "path": "{{RAW_PATH}}", "provenance": "{{LABEL}}"}
-     ],
-     "applied": [
-       {"id": "wiki:create:0", "action": "create", "path": "wiki/concepts/{{TARGET}}.md", "source_ids": ["{{CHANGE_ID}}"]}
-     ],
-     "failures": []
-   }
-   ```
+There is no code-driven wiki finalizer. The LLM authors every wiki sentence,
+performs the review, and records only outcomes it directly observed.
 
-   Use JSON `null` for justified null provenance. Allowed applied actions are
-   `create`, `enrich`, `index`, and `skip`; a failure may additionally name
-   `finalize`. IDs must be stable within this run and result paths must remain below
-   the course wiki.
-5. Pass that payload to the packaged deterministic boundary; do not perform a
-   separate state edit:
-
-   ```console
-   python skills/linting-wiki/scripts/lint-wiki.py {{COURSE}} \
-     --finalize {{WIKI_FINALIZATION_PAYLOAD}}
-   ```
-
-   The command validates the payload against the schema and current manifest,
-   previews every source, runs lint, and atomically commits eligible source state
-   together with the rich wiki run-stage result. Exit 2 means lint findings and no
-   state was finalized; correct defects introduced by this run and retry the same
-   exact outcome payload. Exit 1 means validation or runtime failure; stop and
-   report it. Never bypass either exit or infer success from printed text.
-6. Never edit `state/wiki.json` or `state/latest-run.json` directly. The finalizer
-   creates wiki state only when at least one source successfully finalizes, preserves
-   prior entries, and never authors prose.
-
-The LLM authors every wiki sentence. Validators report objective defects only.
-
-## 6. Record observed results
-
-Read `courses/{{COURSE}}/state/latest-run.json` after the Jira command and wiki
-finalizer. Those deterministic boundaries record stage statuses only from actual
-outcomes: disabled remains `disabled`; no needed action is `up_to_date`; all applied
-is `applied`; mixed success is `partial`; no successful attempted action is
-`failed`. Never edit those stage records or mark failed work synchronized.
+## 6. Record and report observed results
 
 Add one newest-first entry to `courses/{{COURSE}}/Changelog.md` only when Jira or
 wiki work succeeded. Record the run ID, exact Jira keys/actions, wiki pages/actions,
-source labels, failures, and retry items. Raw capture and state-only changes need no
-changelog entry.
+source labels, failures, and retry items. Raw capture and state-only changes need
+no changelog entry.
 
 Finish with separate Completed, Failed, and Skipped results. Skipped includes each
-disabled feature and approved deliberate source omission. Failed includes unknown
-Canvas captures and any rejected or partially applied work. Preserve exact paths,
+disabled service and approved deliberate source omission. Failed includes unknown
+Canvas captures and rejected or partially applied work. Preserve exact paths,
 keys, errors, and retry eligibility.
 
 ## Red flags
 
 | About to | Stop and do this |
 | --- | --- |
-| Read disabled-feature files or credentials | Omit the feature entirely |
-| Bootstrap with a nonempty Jira plan | Use only the exact empty plan |
+| Read disabled-service files or credentials | Omit the service entirely |
+| Bootstrap with a nonempty Jira plan | Use only the exact empty v2 plan |
 | Treat an unread source as omission or approval work | Report unknown capture state |
 | Enrich a Jira action with display-only fields | Keep evidence outside the strict plan |
-| Finalize before page, index, provenance, and lint succeed | Preserve prior wiki state |
-| Retry a Jira action after an applied or unknown write | Empty-plan reconcile, rescope, then obtain fresh approval |
-| Invent wiki page IDs or hashes | Store only source provenance in `ingested` |
-| Edit either machine-owned wiki/run state file | Call `lint-wiki.py --finalize` |
+| Mark a source ingested before page, index, provenance, and review succeed | Preserve its prior wiki-state value |
+| Retry Jira after an applied or unknown write | Empty-plan reconcile, rescope, then obtain fresh approval |
+| Invent wiki page IDs or hashes | Store only raw path to provenance in `ingested` |
+| Change Canvas/Jira evidence while recording wiki results | Preserve all non-wiki manifest fields |
 | Ask for a second approval | Continue only within the one approved plan |

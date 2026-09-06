@@ -37,6 +37,7 @@ func RunProcess(ctx context.Context, argv []string, in io.Reader, out, errOut io
 	if !explicitUpdate && os.Getenv(update.ReexecEnv) != "1" {
 		outcome, err := maybeUpdate(ctx, update.Options{
 			Version: buildinfo.Version,
+			APIBase: os.Getenv("_CORUM_TEST_UPDATE_API_BASE"),
 			Args:    argv,
 			Env:     os.Environ(),
 		})
@@ -61,11 +62,18 @@ func RunProcess(ctx context.Context, argv []string, in io.Reader, out, errOut io
 	return Run(ctx, args, in, out, errOut)
 }
 
-// Run executes the intentionally small Task 1 command surface.
+// Run dispatches the complete local Corum command surface.
 func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
 	_ = in
+	if len(args) == 1 && args[0] == "--help" {
+		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor PATH | corum version | corum update | corum sync COURSE...|--all [--dry-run] [--json] | corum jira login [PATH]|status|logout | corum jira apply COURSE [--dry-run]")
+		return 0
+	}
 	if len(args) == 1 && args[0] == "update" {
-		outcome, err := update.Run(ctx, update.Options{Version: buildinfo.Version})
+		outcome, err := update.Run(ctx, update.Options{
+			Version: buildinfo.Version,
+			APIBase: os.Getenv("_CORUM_TEST_UPDATE_API_BASE"),
+		})
 		if err != nil {
 			fmt.Fprintln(errOut, err)
 			return 1

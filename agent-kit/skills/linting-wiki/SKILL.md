@@ -1,104 +1,83 @@
 ---
 name: linting-wiki
-description: Use when linting or auditing a course wiki for coverage, orphans, dangling links, index drift, bloat, or contradictions.
+description: Use when reviewing a course wiki for coverage, orphans, dangling links, index drift, bloat, or contradictions.
 ---
 
 # Linting Wiki
 
-Ordinary lint and preview modes read only `courses/{{COURSE}}/wiki/`, raw sources,
-and `courses/{{COURSE}}/state/wiki.json`. The explicit `--finalize` mode is the only
-writer: after schema, current-run, source, path, and lint validation, it atomically
-records wiki state and the wiki stage in `state/latest-run.json`. The LLM applies
-justified content fixes; the deterministic script never generates replacement prose.
+This skill is a read-only review workflow. It inspects
+`courses/{{COURSE}}/wiki/`, only the raw sources needed for the selected review,
+and `courses/{{COURSE}}/state/wiki.json` when present. It never writes wiki prose
+or state. The calling author or `sync-course` workflow applies justified fixes and
+records observed results.
 
 Read the [Markdown conventions](../authoring-wiki/references/markdown-conventions.md)
 before judgment checks.
 
-## Mechanical checks
+## Establish the review set
 
-From the vault root run:
+For a sync, review every page, asset, index row, source, and provenance marker
+created or changed by the approved plan. Also inspect directly linked pages when
+needed to detect dangling links or contradictions. Do not broaden into unrelated
+historical cleanup.
 
-```console
-python skills/linting-wiki/scripts/lint-wiki.py {{COURSE}}
-```
+For a whole-course audit, enumerate the wiki index and page tree first, then compare
+them in both directions. Treat unreadable sources and files as findings, never as
+clean inputs.
+
+## Objective checks
 
 | Check | Finds |
 | --- | --- |
-| Coverage | Pages of a finalized PDF source that no provenance or skipped marker cites |
-| Orphans | A concept no explainer links |
-| Dangling | A wiki link that resolves to no file |
-| Index drift | Disk page without an index row, or row without a page |
-| Tags | Raw HTML that breaks Obsidian rendering |
+| Coverage | A planned source range that no provenance or deliberate skipped marker cites |
+| Provenance | Missing, blank, malformed, out-of-range, or wrong-source markers |
+| Orphans | A concept no explainer or index entry links |
+| Dangling | A wiki link or embed that resolves to no file |
+| Index drift | A page without an index row, or an index row without a page |
+| Tags | Raw HTML that breaks the Markdown contract |
+| State | A `wiki.json` entry that is not `version: 2`, is not raw-relative, or names a source whose dependencies did not succeed |
 
-`sync-course` runs this after approved page and index edits. Any error introduced by
-the run must be corrected before affected sources are finalized. A coverage finding
-for an affected source means the authoring/finalization plan is incomplete.
+Read each affected source directly. For PDFs, confirm every cited page exists and
+each planned range is accounted for. A justified `null` ingestion value still
+requires a readable source and a reason why no provenance marker applies. Empty or
+whitespace-only labels are invalid.
 
-Before finalization, preview each planned source in memory without changing state:
-
-```console
-python skills/linting-wiki/scripts/lint-wiki.py {{COURSE}} --pending '{{LABEL}}={{SOURCE_PATH}}'
-```
-
-For a deliberately null provenance value, preview its readable source explicitly:
-
-```console
-python skills/linting-wiki/scripts/lint-wiki.py {{COURSE}} --pending-null '{{SOURCE_PATH}}'
-```
-
-Repeat either option for multiple sources. The command verifies every source can be
-read, every PDF can be inspected, and every cited PDF page exists. This makes
-provenance and skipped ranges checkable before `state/wiki.json` advances. Empty or
-whitespace-only labels are invalid; use `--pending-null` for an intentional null.
-
-## Exact finalization
-
-`sync-course` owns construction of the exact schema-1 finalization payload from the
-current run manifest and observed authoring results. Commit it only through:
-
-```console
-python skills/linting-wiki/scripts/lint-wiki.py {{COURSE}} \
-  --finalize {{WIKI_FINALIZATION_PAYLOAD}}
-```
-
-The payload contains exactly `schema`, `run_id`, `course`, `sources`, `applied`, and
-`failures`. Every source uses its manifest change `id`, exact raw-relative `path`,
-and provenance string or `null`; result records reference manifest IDs through
-`source_ids`. A failed dependency cannot also appear in `sources`. Applied paths
-must already exist below the course wiki. Do not edit either machine-owned state
-file yourself.
-
-Exit 0 means clean lint or a committed finalization. Exit 2 means objective findings
-and no finalization commit. Exit 1 means invalid input, mismatched current state, or
-a runtime failure. Treat both nonzero exits as failures; never infer success from
-partial stdout.
+Any objective finding introduced by the current run must be corrected before the
+affected source is added to `state/wiki.json`. Report older gaps without silently
+ingesting their raw material.
 
 ## Judgment checks
 
-Read flagged pages and pages linking them.
+Read flagged pages and the pages linking them.
 
-| Check | Finds | Fix |
+| Check | Finds | Response |
 | --- | --- | --- |
 | Bloat | Qualitative table over five rows, paragraph over three sentences, nested callout | Merge dimensions or use a lead-in and one block |
-| Contradiction | The same fact differs between concepts | Prefer the statement with direct provenance; report unresolved conflict |
+| Contradiction | The same fact differs between concepts | Prefer direct provenance; report unresolved conflict |
 | Heavy | Roughly over 200 lines or six content `##` sections | Split only by the configured concept-boundary rule |
 
-Fix objective and judgment defects introduced by the current run. Report older
-coverage gaps rather than silently ingesting raw material. A split includes the
-index and every link to the old page; otherwise leave it intact and report it.
+A split includes the index and every link to the old page; otherwise leave the page
+intact and report the issue. Do not generate replacement prose mechanically: the
+LLM must understand and rewrite the content.
 
-## Report
+## Return findings
+
+Return one table and an overall outcome. Use exact paths and source ranges.
 
 | Page | Check | Finding | Outcome |
 | --- | --- | --- | --- |
-| `courses/{{COURSE}}/wiki/concepts/{{Concept}}.md` | Coverage | `{{SOURCE}}` range uncited | Reported; source remains unfinalized |
+| `courses/{{COURSE}}/wiki/concepts/{{Concept}}.md` | Coverage | `{{SOURCE}}` range uncited | Must fix; source remains un-ingested |
+
+`clean` means no finding remains in the selected review set. `findings` means at
+least one issue remains. Never edit `state/wiki.json` or `latest-run.json` from this
+skill; the approved `sync-course` caller owns those narrow outcome records.
 
 ## Red flags
 
 | About to | Required response |
 | --- | --- |
-| Read `raw/` to fill an unrelated prior gap | Report it as a separate ingest |
+| Read `raw/` to fill an unrelated prior gap | Report it as a separate future ingest |
 | Split without reading `course.yaml` and the boundary reference | Read them first |
 | Leave links or index rows pointing to a removed page | Finish the split or revert it |
-| Finalize despite index, provenance, or lint failure | Preserve the prior wiki-state value |
-| Directly edit wiki or latest-run state | Use the schema-validating `--finalize` mode |
+| Mark a source ingested despite a dependency or review failure | Preserve its prior wiki-state value |
+| Write educational prose from a validator or script | Stop; use `authoring-wiki` |

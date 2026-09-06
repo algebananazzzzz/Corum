@@ -7,7 +7,7 @@ description: Use when a wiki page needs an editable packet layout, topology, spa
 
 Create a rendered SVG for Obsidian and an adjacent editable source from the same
 graph model. This skill owns diagram mechanics; the active authoring or sync skill
-still owns factual content and finalization.
+still owns factual content and source-ingestion decisions.
 
 ## Choose the format
 
@@ -31,12 +31,8 @@ still owns factual content and finalization.
   final graph model through the plugin or a Draw.io exporter.
 - Update source and SVG in one operation. Close a stale editor without saving before
   reopening an externally changed pair.
-- Use `scripts/drawio_pair.py replace` only for exact single-line labels. Use the
-  plugin for geometry, wrapping, or style changes. Replacement matches complete
-  visible label nodes, never substrings, and commits the validated SVG/sidecar pair
-  together with rollback on a write failure.
 - Read [Obsidian pair format](references/obsidian-format.md) for compressed sources,
-  programmatic creation, and plugin recognition.
+  safe editing, and plugin recognition.
 
 ## Draw the content
 
@@ -56,24 +52,13 @@ still owns factual content and finalization.
 2. Edit the owning concept before a derived reference.
 3. Preserve unrelated cells and user edits.
 4. Remove a replaced raster only after proving nothing else embeds it.
-5. Strictly validate every created or layout-edited pair:
+5. Verify both files exist, are parseable XML, and contain matching visible labels.
+   If an XML validator is available, use it on both files.
+6. Render and visually inspect the final SVG.
+7. Do not call the pair complete unless the SVG came from the final sidecar and the
+   source/render comparison passes. If no exporter exists, report that a plugin save
+   remains needed.
+8. Use `linting-wiki` after changing the owning page.
 
-   ```console
-   python skills/drawio-diagrams/scripts/drawio_pair.py validate --strict path/to/name.svg
-   ```
-
-6. Render and visually inspect the final SVG when an exporter is available.
-7. Do not call the pair complete unless the SVG came from the final sidecar and strict
-   validation passes. If no exporter exists, report that a plugin save remains needed.
-8. Run the course wiki lint after changing a page.
-
-## Helper commands
-
-```console
-python skills/drawio-diagrams/scripts/drawio_pair.py inspect path/to/name.svg
-python skills/drawio-diagrams/scripts/drawio_pair.py replace path/to/name.svg 'old' 'new'
-python skills/drawio-diagrams/scripts/drawio_pair.py validate --strict one.svg two.svg
-```
-
-Stop if the source and SVG do not contain the same label. Edit through the plugin
-instead of forcing drift.
+Stop if the source and SVG do not contain the same label. Edit through the plugin or
+another Draw.io-compatible editor instead of forcing drift with text substitution.
