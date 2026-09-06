@@ -18,6 +18,10 @@ import (
 
 const rovoMCPURL = "https://mcp.atlassian.com/v2/mcp"
 
+// rovoHTTPTimeout bounds every OAuth and MCP request so a stalled endpoint
+// cannot hang the process without a deadline.
+const rovoHTTPTimeout = 5 * time.Minute
+
 // LoginRequired identifies requests that would otherwise need browser OAuth.
 var LoginRequired = errors.New("Jira session is missing or revoked; run corum jira login")
 
@@ -27,6 +31,7 @@ type OpenOptions struct {
 	Endpoint    string
 	CachePath   string
 	Interactive bool
+	ForceReauth bool
 	Out         io.Writer
 	BrowserOpen func(string) error
 	Timeout     time.Duration
@@ -43,6 +48,7 @@ func (o OpenOptions) endpoint() string {
 // Open connects to the canonical Rovo endpoint first, then opens the expanded
 // tool catalogue with exactly the same OAuth handler/token source.
 func Open(ctx context.Context, options OpenOptions) (*RovoSession, error) {
+	options = withDefaults(options)
 	path := options.CachePath
 	if path == "" {
 		var err error
@@ -52,12 +58,21 @@ func Open(ctx context.Context, options OpenOptions) (*RovoSession, error) {
 		}
 	}
 	interactive := options.Interactive
+	if options.ForceReauth && !interactive {
+		return nil, LoginRequired
+	}
 	record, cacheErr := loadAuthCache(path)
 	if cacheErr != nil && !os.IsNotExist(cacheErr) {
 		return nil, cacheErr
 	}
 	if os.IsNotExist(cacheErr) && !interactive {
 		return nil, LoginRequired
+	}
+	if options.ForceReauth {
+		// An explicit login replaces the cached account, so bootstrap the
+		// authorization-code flow without the cached client or token.
+		record = authRecord{}
+		cacheErr = nil
 	}
 	var callback *loopbackCallback
 	var err error
@@ -86,7 +101,8 @@ func Open(ctx context.Context, options OpenOptions) (*RovoSession, error) {
 		}
 	}()
 	cacheTransaction := newAuthCacheTransaction(path)
-	bootstrapHandler, err := newOAuthHandler(ctx, record, cacheErr == nil, callback, options.HTTPClient, cacheTransaction)
+	cached := cacheErr == nil && !options.ForceReauth
+	bootstrapHandler, err := newOAuthHandler(ctx, record, cached, callback, options.HTTPClient, cacheTransaction)
 	if err != nil {
 		return nil, redactOAuthError(err)
 	}
@@ -289,6 +305,20 @@ func (t *authCacheTransaction) Staged() (authRecord, bool) {
 		return authRecord{}, false
 	}
 	return *t.pending, true
+}
+
+// withDefaults fills the bounded default HTTP client and validation surface
+// without changing an explicitly supplied client.
+func withDefaults(options OpenOptions) OpenOptions {
+	if options.HTTPClient == nil {
+		options.HTTPClient = defaultHTTPClient()
+	}
+	return options
+}
+
+// defaultHTTPClient returns a finite-timeout client for OAuth and MCP traffic.
+func defaultHTTPClient() *http.Client {
+	return &http.Client{Timeout: rovoHTTPTimeout}
 }
 
 func redactOAuthError(err error) error {

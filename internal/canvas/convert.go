@@ -69,12 +69,13 @@ func Slug(value string) string {
 	if value == "" {
 		return "untitled"
 	}
-	if len(value) <= 60 {
+	runes := []rune(value)
+	if len(runes) <= 60 {
 		return value
 	}
-	cut := value[:60]
-	if value[60] != '-' {
-		if i := strings.LastIndexByte(cut, '-'); i > 0 {
+	cut := string(runes[:60])
+	if runes[60] != '-' {
+		if i := strings.LastIndex(cut, "-"); i > 0 {
 			cut = cut[:i]
 		}
 	}

@@ -2,7 +2,9 @@ package canvas
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestConvertStripsCanvasVerifiersAndConvertsTime(t *testing.T) {
@@ -16,6 +18,20 @@ func TestConvertStripsCanvasVerifiersAndConvertsTime(t *testing.T) {
 	markdown, err := ToMarkdown(`<p>Hello <a href="https://canvas.example.edu/files/1?verifier=no">file</a></p>`)
 	if err != nil || markdown != "Hello [file](https://canvas.example.edu/files/1)\n" {
 		t.Fatalf("ToMarkdown() = %q, %v", markdown, err)
+	}
+}
+
+func TestSlugTruncatesByRunesNotBytes(t *testing.T) {
+	// 50 multibyte runes (3 bytes each) plus an ASCII tail. Byte-based
+	// truncation would cut a rune in the middle; rune-based keeps 60 runes.
+	value := strings.Repeat("国", 50) + "abcdefghij"
+	got := Slug(value)
+	want := strings.Repeat("国", 50) + "abcdefghij"[:10]
+	if got != want {
+		t.Fatalf("Slug() = %q (len %d), want %q", got, len([]rune(got)), want)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("Slug() produced invalid UTF-8: %q", got)
 	}
 }
 

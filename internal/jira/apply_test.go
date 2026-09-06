@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/algebananazzzzz/Corum/internal/config"
+	"github.com/algebananazzzzz/Corum/internal/lockfile"
 )
 
 func validConfig() (config.Workspace, config.Course) {
@@ -291,5 +294,122 @@ func TestReconciliationRejectsUnownedChildrenAndKeepsBarrier(t *testing.T) {
 	_, err := Apply(context.Background(), root, workspace, course, createPlan(), &panicClient{}, false)
 	if !errors.Is(err, ErrReconciliationRequired) {
 		t.Fatalf("barrier lost: %v", err)
+	}
+}
+
+type crashDuringCreateClient struct{ root string }
+
+func (c *crashDuringCreateClient) CreateIssue(context.Context, map[string]any) (string, error) {
+	manifest := readJSONMapForHelper(filepath.Join(c.root, "courses", "CS3103", "state", "latest-run.json"))
+	stage, _ := manifest["jira"].(map[string]any)
+	failures, _ := stage["failures"].([]any)
+	if stage["reconciliation_required"] != true || len(failures) != 1 {
+		os.Exit(87)
+	}
+	failure, _ := failures[0].(map[string]any)
+	exact, _ := failure["exact_action"].(map[string]any)
+	issue, _ := exact["issue"].(map[string]any)
+	if failure["write_state"] != "unknown" || exact["action"] != "create" || issue["summary"] != "Task" {
+		os.Exit(88)
+	}
+	os.Exit(86)
+	return "", nil
+}
+func (*crashDuringCreateClient) UpdateFields(context.Context, string, map[string]any) error {
+	panic("unexpected update")
+}
+func (*crashDuringCreateClient) TransitionIssue(context.Context, string, string) error {
+	panic("unexpected transition")
+}
+func (*crashDuringCreateClient) FetchIssue(context.Context, string) (map[string]any, error) {
+	panic("unexpected fetch")
+}
+func (*crashDuringCreateClient) EpicChildren(_ context.Context, epic string) ([]map[string]any, error) {
+	return []map[string]any{ownedRemoteIssue("STUDY-2", epic)}, nil
+}
+
+func readJSONMapForHelper(path string) map[string]any {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var value map[string]any
+	if json.Unmarshal(data, &value) != nil {
+		return nil
+	}
+	return value
+}
+
+func TestApplyCrashHelperProcess(t *testing.T) {
+	root := os.Getenv("CORUM_JIRA_CRASH_HELPER")
+	if root == "" {
+		return
+	}
+	workspace, course := validConfig()
+	_, _ = Apply(context.Background(), root, workspace, course, createPlan(), &crashDuringCreateClient{root: root}, false)
+	os.Exit(89)
+}
+
+func TestApplyPersistsExactUnknownBarrierBeforeRemoteMutation(t *testing.T) {
+	root := prepareRoot(t)
+	command := exec.Command(os.Args[0], "-test.run=^TestApplyCrashHelperProcess$")
+	command.Env = append(os.Environ(), "CORUM_JIRA_CRASH_HELPER="+root)
+	err := command.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 86 {
+		t.Fatalf("crash helper exit = %v", err)
+	}
+	workspace, course := validConfig()
+	if _, err := Apply(context.Background(), root, workspace, course, createPlan(), &panicClient{}, false); !errors.Is(err, ErrReconciliationRequired) {
+		t.Fatalf("retry after crash error = %v, want ErrReconciliationRequired", err)
+	}
+}
+
+type blockingMutationClient struct {
+	entered chan struct{}
+	release chan struct{}
+	calls   atomic.Int32
+}
+
+func (c *blockingMutationClient) CreateIssue(context.Context, map[string]any) (string, error) {
+	c.calls.Add(1)
+	close(c.entered)
+	<-c.release
+	return "STUDY-4", nil
+}
+func (*blockingMutationClient) UpdateFields(context.Context, string, map[string]any) error {
+	panic("unexpected update")
+}
+func (*blockingMutationClient) TransitionIssue(context.Context, string, string) error {
+	panic("unexpected transition")
+}
+func (*blockingMutationClient) FetchIssue(_ context.Context, key string) (map[string]any, error) {
+	return ownedRemoteIssue(key, "STUDY-1"), nil
+}
+func (*blockingMutationClient) EpicChildren(_ context.Context, epic string) ([]map[string]any, error) {
+	return []map[string]any{ownedRemoteIssue("STUDY-2", epic)}, nil
+}
+
+func TestApplyRejectsConcurrentProcessBeforeSecondPreflight(t *testing.T) {
+	root := prepareRoot(t)
+	workspace, course := validConfig()
+	first := &blockingMutationClient{entered: make(chan struct{}), release: make(chan struct{})}
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := Apply(context.Background(), root, workspace, course, createPlan(), first, false)
+		firstDone <- err
+	}()
+	<-first.entered
+	second := &recordingClient{}
+	_, secondErr := Apply(context.Background(), root, workspace, course, createPlan(), second, false)
+	if !errors.Is(secondErr, lockfile.ErrLocked) {
+		t.Fatalf("concurrent Apply() error = %v, calls = %v", secondErr, second.events)
+	}
+	if len(second.events) != 0 {
+		t.Fatalf("second Apply reached Jira preflight: %v", second.events)
+	}
+	close(first.release)
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
 	}
 }

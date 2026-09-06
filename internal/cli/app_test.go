@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/algebananazzzzz/Corum/internal/buildinfo"
+	"github.com/algebananazzzzz/Corum/internal/canvas"
+	"github.com/algebananazzzzz/Corum/internal/config"
 	"github.com/algebananazzzzz/Corum/internal/update"
 	"github.com/algebananazzzzz/Corum/internal/vault"
 )
@@ -98,6 +101,65 @@ func TestRunInitDefaultsAndDoctor(t *testing.T) {
 	}
 }
 
+func TestRunDoctorOptionalPathDefaultsToWorkingDirectory(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	root := filepath.Join(t.TempDir(), "vault")
+	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("init code = %d", code)
+	}
+	t.Chdir(root)
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), []string{"doctor"}, nil, &out, &errOut); code != 0 {
+		t.Fatalf("doctor code = %d, stderr = %s", code, errOut.String())
+	}
+	if out.String() != "doctor: 0 courses\n" {
+		t.Fatalf("doctor output = %q", out.String())
+	}
+	registered, err := vault.Registered()
+	if err != nil || len(registered) != 1 {
+		t.Fatalf("registered = %#v, err = %v", registered, err)
+	}
+	if code := Run(context.Background(), []string{"doctor", "/nonexistent/corum-vault"}, nil, &out, &errOut); code != 1 {
+		t.Fatalf("invalid doctor path code = %d", code)
+	}
+}
+
+func TestRunJiraLoginRejectsInvalidVaultBeforeTTY(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), []string{"jira", "login", "/nonexistent/corum-vault"}, nil, &out, &errOut); code != 1 {
+		t.Fatalf("jira login code = %d, stderr = %q", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "vault validation failed") {
+		t.Fatalf("stderr = %q", errOut.String())
+	}
+}
+
+func TestRunJiraStatusRejectsInvalidVault(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), []string{"jira", "status", "/nonexistent/corum-vault"}, nil, &out, &errOut); code != 1 {
+		t.Fatalf("jira status code = %d, stderr = %q", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "vault validation failed") {
+		t.Fatalf("stderr = %q", errOut.String())
+	}
+}
+
+func TestRunUpdateContinuationReportsWithoutSecondCheck(t *testing.T) {
+	oldMaybe := maybeUpdate
+	t.Cleanup(func() { maybeUpdate = oldMaybe })
+	maybeUpdate = func(context.Context, update.Options) (update.Outcome, error) {
+		t.Fatal("continuation invoked an update check")
+		return update.Outcome{}, nil
+	}
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), []string{update.ContinuationArg}, nil, &out, &errOut); code != 0 {
+		t.Fatalf("continuation code = %d, stderr = %q", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "corum updated to") {
+		t.Fatalf("stdout = %q", out.String())
+	}
+}
+
 func TestRunInteractiveInitExplainsNonTTYFallback(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := Run(context.Background(), []string{"init", "vault"}, &bytes.Buffer{}, &out, &errOut); code != 2 {
@@ -108,7 +170,62 @@ func TestRunInteractiveInitExplainsNonTTYFallback(t *testing.T) {
 	}
 }
 
+func TestRunSyncJSONEmitsPerCourseManifestsPreservingEarlierCourses(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("CORUM_CANVAS_TOKEN", "test-token")
+	root := filepath.Join(t.TempDir(), "vault")
+	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("init code = %d", code)
+	}
+	writeCourse(t, root, "CS3103", "version: 2\ncode: CS3103\ncanvas:\n  id: 1\n  sources:\n    - announcements\n")
+	writeCourse(t, root, "CS3104", "version: 2\ncode: CS3104\ncanvas:\n  id: 2\n  sources:\n    - announcements\n")
+	t.Chdir(root)
+	oldSync := syncCanvas
+	t.Cleanup(func() { syncCanvas = oldSync })
+	syncCanvas = func(_ context.Context, root string, workspace config.Workspace, course config.Course, _ canvas.SourceClient, _ bool) (canvas.StageResult, error) {
+		result := canvas.StageResult{Course: course.Code, Changes: []canvas.Change{}, Failures: []canvas.Failure{}, Sources: []canvas.SourceResult{{Source: "announcements", Status: "up_to_date", Changes: []string{}, Failures: []string{}}}}
+		if course.Code == "CS3104" {
+			return result, errors.New("injected course failure")
+		}
+		result.Status = "up_to_date"
+		return result, nil
+	}
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), []string{"sync", "--all", "--json"}, nil, &out, &errOut); code != 1 {
+		t.Fatalf("sync code = %d, stderr = %q", code, errOut.String())
+	}
+	var manifests []map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(out.Bytes()))
+	if err := decoder.Decode(&manifests); err != nil {
+		t.Fatalf("manifests = %q, err = %v", out.String(), err)
+	}
+	if len(manifests) != 2 {
+		t.Fatalf("manifest count = %d: %v", len(manifests), manifests)
+	}
+	first := manifests[0]
+	if first["course"] != "CS3103" || first["run_id"] == "" || first["canvas"] == nil || first["jira"] == nil || first["wiki"] == nil || first["effective_features"] == nil {
+		t.Fatalf("first manifest = %#v", first)
+	}
+	if second := manifests[1]; second["course"] != "CS3104" {
+		t.Fatalf("second manifest = %#v", second)
+	}
+	if !strings.Contains(errOut.String(), "injected course failure") {
+		t.Fatalf("stderr = %q", errOut.String())
+	}
+}
+
+func writeCourse(t *testing.T, root, code, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, "courses", code), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "courses", code, "course.yaml"), []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunJiraApplyDryRunEchoesPlanWithoutOAuth(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "courses", "CS3103"), 0o755); err != nil {
 		t.Fatal(err)

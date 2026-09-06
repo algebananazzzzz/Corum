@@ -30,6 +30,22 @@ func TestRovoListsAllToolPages(t *testing.T) {
 	}
 }
 
+func TestRovoBoundedToolPaginationRejectsRepeatedCursor(t *testing.T) {
+	// A hostile server that never advances its cursor must be rejected before
+	// the page bound, so tool discovery cannot loop forever.
+	session := &fakeToolLister{pages: make([]*mcp.ListToolsResult, maxToolPages*2)}
+	for i := range session.pages {
+		session.pages[i] = &mcp.ListToolsResult{NextCursor: "same-cursor", Tools: []*mcp.Tool{{Name: "atlassianUserInfo"}}}
+	}
+	_, err := listAllTools(context.Background(), session)
+	if err == nil || !strings.Contains(err.Error(), "forward progress") {
+		t.Fatalf("listAllTools error = %v, want forward-progress rejection", err)
+	}
+	if session.index > 2 {
+		t.Fatalf("repeated cursor made %d requests", session.index)
+	}
+}
+
 func TestRovoRequiresAllSafetyBoundaryTools(t *testing.T) {
 	err := requireTools(map[string]*mcp.Tool{"atlassianUserInfo": {Name: "atlassianUserInfo"}})
 	if err == nil || !strings.Contains(err.Error(), "getAccessibleAtlassianResources") {

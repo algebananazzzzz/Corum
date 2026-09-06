@@ -8,9 +8,15 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/algebananazzzzz/Corum/internal/lockfile"
 )
 
 const toolkitTemporaryPrefix = ".corum-toolkit-"
+
+// toolkitLockName serializes toolkit transactions per vault. A process
+// holding it owns every transaction path in the vault.
+const toolkitLockName = ".toolkit.lock"
 
 var removeAll = os.RemoveAll
 
@@ -63,15 +69,22 @@ func toolkitIsCurrent(root, version string) bool {
 }
 
 func syncToolkit(root string, assets fs.FS, version string, rename func(string, string) error) error {
+	corumDir := filepath.Join(root, ".corum")
+	if err := os.MkdirAll(corumDir, 0o755); err != nil {
+		return err
+	}
+	lock, err := lockfile.TryAcquire(filepath.Join(corumDir, toolkitLockName))
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	payload, err := collectToolkit(assets, version)
 	if err != nil {
 		return err
 	}
+	// The per-vault lock guarantees no live Corum process owns a transaction
+	// path, so every remaining stage/backup directory is stale and removable.
 	if err := cleanToolkitTemporaryFiles(root, false); err != nil {
-		return err
-	}
-	corumDir := filepath.Join(root, ".corum")
-	if err := os.MkdirAll(corumDir, 0o755); err != nil {
 		return err
 	}
 	id := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())

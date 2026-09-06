@@ -51,6 +51,35 @@ type StageResult struct {
 	Changes  []Change       `json:"changes"`
 	Failures []Failure      `json:"failures"`
 	Sources  []SourceResult `json:"sources"`
+	Manifest *RunManifest   `json:"-"`
+}
+
+type CanvasManifestStage struct {
+	Status   string         `json:"status"`
+	Changes  []Change       `json:"changes"`
+	Failures []Failure      `json:"failures"`
+	Sources  []SourceResult `json:"sources"`
+}
+
+// RunManifest is the complete per-course machine-readable sync result.
+type RunManifest struct {
+	Version           int                 `json:"version"`
+	RunID             string              `json:"run_id"`
+	Course            string              `json:"course"`
+	EffectiveFeatures map[string]bool     `json:"effective_features"`
+	Canvas            CanvasManifestStage `json:"canvas"`
+	Jira              any                 `json:"jira"`
+	Wiki              any                 `json:"wiki"`
+}
+
+// ManifestOf returns the stage result's complete run manifest, building a
+// minimal one when the sync failed before producing its own manifest.
+func (result StageResult) ManifestOf(workspace config.Workspace, course config.Course) *RunManifest {
+	if result.Manifest != nil {
+		return result.Manifest
+	}
+	manifest := buildManifest("", workspace, course, result)
+	return &manifest
 }
 
 func canvasPaths(root string, course config.Course, create bool) (string, string, error) {

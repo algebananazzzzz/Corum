@@ -93,6 +93,19 @@ func TestLoadRejectsVersionOneWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestLoadWorkspaceExplainsVersionOneVault(t *testing.T) {
+	root := t.TempDir()
+	contents := strings.Replace(validWorkspace, "version: 2", "version: 1", 1)
+	writeConfig(t, root, "", contents)
+	_, err := LoadWorkspace(root)
+	if err == nil {
+		t.Fatal("LoadWorkspace() accepted version 1")
+	}
+	if !strings.Contains(err.Error(), "version 1") || !strings.Contains(err.Error(), "version 2") {
+		t.Fatalf("error = %v, want v1 migration guidance", err)
+	}
+}
+
 func TestLoadWorkspaceValidatesTimezoneOriginIdentifiersAndPaths(t *testing.T) {
 	cases := map[string]string{
 		"timezone":           strings.Replace(validWorkspace, "Asia/Singapore", "Moon/Base", 1),

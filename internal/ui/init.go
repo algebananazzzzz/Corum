@@ -91,7 +91,10 @@ func RunInit(ctx context.Context, proposedRoot string, deps InitDependencies) (e
 	keepAuth := false
 	defer func() {
 		if restore != nil && !keepAuth {
-			if restoreErr := restore(); err == nil && restoreErr != nil {
+			restoreErr := restore()
+			if err != nil && restoreErr != nil {
+				err = errors.Join(err, fmt.Errorf("restore previous Jira authentication: %w", restoreErr))
+			} else if err == nil {
 				err = restoreErr
 			}
 		}
@@ -155,7 +158,19 @@ type LoginDependencies struct {
 
 func DefaultLoginDependencies(in io.Reader, out io.Writer) LoginDependencies {
 	init := DefaultInitDependencies(in, out, nil, "")
-	return LoginDependencies{Prompts: init.Prompts, Output: out, OpenJira: init.OpenJira, SnapshotAuth: init.SnapshotAuth, Write: vault.WriteWorkspace}
+	return LoginDependencies{
+		Prompts: init.Prompts,
+		Output:  out,
+		OpenJira: func(ctx context.Context) (JiraSession, error) {
+			session, err := jira.Open(ctx, jira.OpenOptions{Interactive: true, ForceReauth: true, Out: out})
+			if err != nil {
+				return nil, err
+			}
+			return rovoSelectionSession{session}, nil
+		},
+		SnapshotAuth: init.SnapshotAuth,
+		Write:        vault.WriteWorkspace,
+	}
 }
 
 // RunJiraLogin authenticates and selects a Jira project, then changes only
@@ -175,7 +190,10 @@ func RunJiraLogin(ctx context.Context, root string, deps LoginDependencies) (err
 	keepAuth := false
 	defer func() {
 		if !keepAuth {
-			if restoreErr := restore(); err == nil && restoreErr != nil {
+			restoreErr := restore()
+			if err != nil && restoreErr != nil {
+				err = errors.Join(err, fmt.Errorf("restore previous Jira authentication: %w", restoreErr))
+			} else if err == nil {
 				err = restoreErr
 			}
 		}

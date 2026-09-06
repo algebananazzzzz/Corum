@@ -19,6 +19,11 @@ import (
 
 const ReexecEnv = "CORUM_UPDATE_REEXEC"
 
+// ContinuationArg replaces "update" in the argv of a re-executed process after
+// an explicit self-update, so the new process reports the outcome instead of
+// performing a second metadata check.
+const ContinuationArg = "update-continuation"
+
 // Options supplies process and platform state to the updater. The zero values
 // use the running process, current platform, GitHub API, and user cache.
 type Options struct {
@@ -110,6 +115,7 @@ func Run(ctx context.Context, options Options) (Outcome, error) {
 	if !Newer(release.Tag, options.Version) {
 		return outcome, nil
 	}
+	options.Args = explicitUpdateContinuationArgs(options.Args)
 	updated, err := installRelease(ctx, options, release)
 	if err != nil {
 		return outcome, err
@@ -120,6 +126,21 @@ func Run(ctx context.Context, options Options) (Outcome, error) {
 	}
 	outcome.Updated = true
 	return outcome, nil
+}
+
+// explicitUpdateContinuationArgs swaps the "update" argv slot for the
+// continuation slot so the re-executed process does not re-run the explicit
+// update check.
+func explicitUpdateContinuationArgs(args []string) []string {
+	result := make([]string, len(args))
+	copy(result, args)
+	for i, arg := range result {
+		if arg == "update" {
+			result[i] = ContinuationArg
+			break
+		}
+	}
+	return result
 }
 
 func installRelease(ctx context.Context, options Options, release Release) (bool, error) {

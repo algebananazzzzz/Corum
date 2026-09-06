@@ -38,13 +38,14 @@ type manifestApplied struct {
 }
 
 type manifestFailure struct {
-	ID         string         `json:"id"`
-	Action     string         `json:"action,omitempty"`
-	Target     *string        `json:"target"`
-	Error      string         `json:"error"`
-	WriteState WriteState     `json:"write_state"`
-	RetrySafe  bool           `json:"retry_safe"`
-	Details    map[string]any `json:"details"`
+	ID          string         `json:"id"`
+	Action      string         `json:"action,omitempty"`
+	Target      *string        `json:"target"`
+	Error       string         `json:"error"`
+	WriteState  WriteState     `json:"write_state"`
+	RetrySafe   bool           `json:"retry_safe"`
+	Details     map[string]any `json:"details"`
+	ExactAction *Action        `json:"exact_action,omitempty"`
 }
 
 type manifestStage struct {
@@ -262,7 +263,7 @@ func stageFromResult(result ApplyResult) manifestStage {
 			value := item.Key
 			target = &value
 		}
-		stage.Failures = append(stage.Failures, manifestFailure{ID: item.ID, Action: item.Action, Target: target, Error: item.Error, WriteState: item.WriteState, RetrySafe: item.RetrySafe, Details: map[string]any{"action_index": item.ActionIndex, "phase": item.Phase}})
+		stage.Failures = append(stage.Failures, manifestFailure{ID: item.ID, Action: item.Action, Target: target, Error: item.Error, WriteState: item.WriteState, RetrySafe: item.RetrySafe, Details: map[string]any{"action_index": item.ActionIndex, "phase": item.Phase}, ExactAction: item.ExactAction})
 	}
 	return stage
 }
@@ -286,7 +287,7 @@ func resultFromStage(course, epic string, stage manifestStage) (ApplyResult, err
 		if item.Target != nil {
 			key = *item.Target
 		}
-		result.Failures = append(result.Failures, ActionFailure{ID: item.ID, ActionIndex: index, Action: item.Action, Key: key, Phase: phase, Error: item.Error, WriteState: item.WriteState, RetrySafe: item.RetrySafe})
+		result.Failures = append(result.Failures, ActionFailure{ID: item.ID, ActionIndex: index, Action: item.Action, Key: key, Phase: phase, Error: item.Error, WriteState: item.WriteState, RetrySafe: item.RetrySafe, ExactAction: item.ExactAction})
 	}
 	return result, nil
 }

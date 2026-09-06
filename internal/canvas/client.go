@@ -3,15 +3,37 @@ package canvas
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// maxPaginationPages bounds list retrieval so a malformed or hostile server
+// cannot loop the client indefinitely.
+const maxPaginationPages = 200
+
+// verifierParamRE matches Canvas verifier query parameters in arbitrary text
+// so transport errors never leak the user-specific secret.
+var verifierParamRE = regexp.MustCompile(`[?&]?verifier=[^&"'\s)]*`)
+
+// redactTransportError returns an error whose message carries no verifier
+// secrets. The concrete URL is never re-parsed, so a malformed error cannot
+// panic.
+func redactTransportError(err error) error {
+	if err == nil {
+		return nil
+	}
+	message := verifierParamRE.ReplaceAllString(err.Error(), "")
+	message = strings.ReplaceAll(message, "?&", "?")
+	return errors.New(message)
+}
 
 // SourceClient is the capture boundary. It enables deterministic sync tests
 // without constructing an authenticated HTTP client for disabled or dry runs.
@@ -85,7 +107,7 @@ func (c *Client) do(ctx context.Context, raw string, query url.Values, destinati
 		req.Header.Set("Authorization", "Bearer "+c.token)
 		response, err := c.http.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("Canvas request failed: %w", err)
+			return nil, redactTransportError(fmt.Errorf("Canvas request failed: %w", err))
 		}
 		if response.StatusCode >= 300 && response.StatusCode < 400 {
 			location := response.Header.Get("Location")
@@ -138,7 +160,25 @@ func (c *Client) GetAll(ctx context.Context, endpoint string, query url.Values) 
 	}
 	next := endpoint
 	records := []map[string]any{}
+	visited := map[string]bool{}
+	pages := 0
 	for next != "" {
+		pages++
+		if pages > maxPaginationPages {
+			return nil, errors.New("Canvas pagination exceeded page bound")
+		}
+		resolved, err := c.requestURL(next)
+		if err != nil {
+			return nil, err
+		}
+		key := resolved.String()
+		if query != nil {
+			key = key + "?" + query.Encode()
+		}
+		if visited[key] {
+			return nil, errors.New("Canvas pagination repeated a request without forward progress")
+		}
+		visited[key] = true
 		response, err := c.do(ctx, next, query, "")
 		if err != nil {
 			return nil, err
@@ -151,11 +191,11 @@ func (c *Client) GetAll(ctx context.Context, endpoint string, query url.Values) 
 			return nil, fmt.Errorf("Canvas list response must be an array: %w", decodeErr)
 		}
 		records = append(records, page...)
+		if len(page) == 0 && link != "" {
+			return nil, errors.New("Canvas pagination returned an empty page with a next link")
+		}
 		if link == "" {
 			break
-		}
-		if _, err := c.requestURL(link); err != nil {
-			return nil, fmt.Errorf("Canvas pagination link: %w", err)
 		}
 		next = link
 		query = nil
@@ -190,7 +230,7 @@ func (c *Client) Download(ctx context.Context, raw, target string) error {
 		}
 		response, err = c.http.Do(req)
 		if err != nil {
-			return fmt.Errorf("Canvas download failed: %w", err)
+			return redactTransportError(fmt.Errorf("Canvas download failed: %w", err))
 		}
 		if response.StatusCode >= 300 && response.StatusCode < 400 {
 			location := response.Header.Get("Location")

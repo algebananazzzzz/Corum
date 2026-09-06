@@ -164,6 +164,31 @@ func TestOAuthCancellationRestoresPriorState(t *testing.T) {
 	}
 }
 
+func TestFailedInitJiraLoginJoinsRollbackError(t *testing.T) {
+	root := t.TempDir() + "/vault"
+	prompts := &scriptedPrompts{answers: []any{root, "Asia/Singapore", "Term", "https://canvas.example.edu", true, true}}
+	restored := false
+	restoreErr := errors.New("injected restore failure")
+	deps := testDependencies(prompts)
+	deps.SnapshotAuth = func() (func() error, error) {
+		return func() error {
+			restored = true
+			return restoreErr
+		}, nil
+	}
+	deps.OpenJira = func(context.Context) (JiraSession, error) { return nil, errors.New("injected open failure") }
+	err := RunInit(context.Background(), root, deps)
+	if err == nil {
+		t.Fatal("RunInit() succeeded")
+	}
+	if !restored {
+		t.Fatal("restore was not attempted")
+	}
+	if !strings.Contains(err.Error(), "injected open failure") || !strings.Contains(err.Error(), "injected restore failure") {
+		t.Fatalf("RunInit error = %v, want both the open and restore errors", err)
+	}
+}
+
 func TestCancelledVaultJiraLoginPreservesAuthAndConfiguration(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "vault")

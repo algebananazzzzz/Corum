@@ -51,6 +51,7 @@ type ActionFailure struct {
 	Error       string     `json:"error"`
 	WriteState  WriteState `json:"write_state"`
 	RetrySafe   bool       `json:"retry_safe"`
+	ExactAction *Action    `json:"exact_action,omitempty"`
 }
 
 type ApplyResult struct {

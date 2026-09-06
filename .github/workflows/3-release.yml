@@ -20,10 +20,34 @@ defaults:
     shell: bash
 
 jobs:
+  verify:
+    name: Correctness Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # Verify the exact commit that will be tagged and released: the
+          # pushed main commit, or the existing tag on manual dispatch.
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || '' }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
   tag:
     name: Cut Release Tag
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
+    needs: [verify]
     permissions:
       contents: write
     outputs:

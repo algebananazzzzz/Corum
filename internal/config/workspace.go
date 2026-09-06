@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -55,6 +56,24 @@ func LoadWorkspace(root string) (Workspace, error) {
 	return workspace, nil
 }
 
+// rejectVersionOne returns migration guidance for a v1 vault instead of a
+// generic unknown-field failure, because v1 layouts are not upgradeable.
+func rejectVersionOne(node *yaml.Node) error {
+	if node.Kind == yaml.DocumentNode && len(node.Content) == 1 {
+		node = node.Content[0]
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := node.Content[i], node.Content[i+1]
+		if key.Value == "version" && value.Tag == "!!int" && value.Value == "1" {
+			return errors.New("corum.yaml is a version 1 vault; Corum v2 requires a version 2 vault, and v1 vaults cannot be migrated in place")
+		}
+	}
+	return nil
+}
+
 func decodeFile(path string, target any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -68,6 +87,9 @@ func decodeFile(path string, target any) error {
 		return err
 	}
 	if err := rejectCredentialKeys(&node); err != nil {
+		return err
+	}
+	if err := rejectVersionOne(&node); err != nil {
 		return err
 	}
 	decoder := yaml.NewDecoder(bytesReader(data))

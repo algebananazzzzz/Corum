@@ -120,6 +120,7 @@
         "error": {"type": "string"},
         "write_state": {"enum": ["not_applied", "applied", "unknown"]},
         "retry_safe": {"type": "boolean"},
+        "exact_action": {"type": ["object", "null"]},
         "details": {"type": "object"}
       }
     }

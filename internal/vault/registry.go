@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/algebananazzzzz/Corum/internal/lockfile"
 )
 
 type registry struct {
@@ -21,18 +23,37 @@ func registryPath() (string, error) {
 	return filepath.Join(dir, "corum", "vaults.json"), nil
 }
 
+// lockRegistry serializes registry read-modify-write cycles across processes.
+func lockRegistry(path string) (*lockfile.Lock, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	return lockfile.Acquire(filepath.Join(filepath.Dir(path), "registry.lock"))
+}
+
 // Register adds an absolute vault path to the versioned per-user registry.
+// The config-directory lock spans the read-modify-write so concurrent
+// registrations cannot drop each other's vaults.
 func Register(root string) error {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return err
 	}
+	path, err := registryPath()
+	if err != nil {
+		return err
+	}
+	lock, err := lockRegistry(path)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	paths, err := Registered()
 	if err != nil {
 		return err
 	}
 	paths = append(paths, root)
-	return writeRegistry(paths)
+	return writeRegistryLocked(paths)
 }
 
 // Registered returns sorted, deduplicated absolute registered vault paths.
@@ -74,16 +95,15 @@ func normalizePaths(paths []string) ([]string, error) {
 	return result, nil
 }
 
-func writeRegistry(paths []string) error {
+// writeRegistryLocked persists the registry while the caller already holds
+// the registry lock.
+func writeRegistryLocked(paths []string) error {
 	paths, err := normalizePaths(paths)
 	if err != nil {
 		return err
 	}
 	path, err := registryPath()
 	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	data, err := json.Marshal(registry{Version: 2, Vaults: paths})

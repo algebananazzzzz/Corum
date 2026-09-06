@@ -10,6 +10,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/algebananazzzzz/Corum/internal/lockfile"
+
 	"github.com/algebananazzzzz/Corum/internal/config"
 )
 
@@ -172,6 +174,21 @@ func TestValidateRegistersMovedVaultAndRejectsDuplicateCodes(t *testing.T) {
 	if _, _, err := Validate(root); err == nil {
 		t.Fatal("Validate() accepted duplicate course codes")
 	}
+}
+
+func TestSyncToolkitRefusesConcurrentProcessBeforeAnyWrite(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	root := initializedVault(t, "old")
+	corumDir := filepath.Join(root, ".corum")
+	lock, err := lockfile.Acquire(filepath.Join(corumDir, toolkitLockName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syncToolkit(root, testAssets("new"), "new", os.Rename); !errors.Is(err, lockfile.ErrLocked) {
+		t.Fatalf("syncToolkit error = %v, want ErrLocked", err)
+	}
+	assertToolkitVersion(t, root, "old")
 }
 
 func TestToolkitOverwritesOnlyOwnedFiles(t *testing.T) {

@@ -14,6 +14,12 @@ import (
 	"time"
 
 	"github.com/algebananazzzzz/Corum/internal/config"
+	"github.com/algebananazzzzz/Corum/internal/lockfile"
+)
+
+var (
+	writeCanvasManifest = func(path string, manifest RunManifest) error { return atomicJSON(path, manifest) }
+	writeCanvasState    = writeState
 )
 
 // Sync captures exactly the selected Canvas sources. It does not construct a
@@ -22,36 +28,49 @@ func Sync(ctx context.Context, root string, workspace config.Workspace, course c
 	result := StageResult{Course: course.Code, DryRun: dryRun, Changes: []Change{}, Failures: []Failure{}, Sources: []SourceResult{}}
 	if !config.Effective(workspace, course).Canvas {
 		result.Status = "disabled"
+		manifest := buildManifest("", workspace, course, result)
+		result.Manifest = &manifest
 		return result, nil
 	}
 	if course.Canvas == nil || workspace.Canvas == nil {
 		result.Status = "disabled"
+		manifest := buildManifest("", workspace, course, result)
+		result.Manifest = &manifest
 		return result, nil
 	}
 	if dryRun && client == nil {
 		result.Status = "pending"
+		manifest := buildManifest("", workspace, course, result)
+		result.Manifest = &manifest
 		return result, nil
 	}
 	if client == nil {
-		return result, fmt.Errorf("Canvas client is required")
+		return failResult(result), fmt.Errorf("Canvas client is required")
 	}
 	statePath, manifestPath, err := canvasPaths(root, course, !dryRun)
 	if err != nil {
-		return result, err
+		return failResult(result), err
+	}
+	if !dryRun {
+		courseLock, lockErr := lockfile.TryAcquire(filepath.Join(filepath.Dir(statePath), ".course.lock"))
+		if lockErr != nil {
+			return failResult(result), fmt.Errorf("course %s: %w", course.Code, lockErr)
+		}
+		defer courseLock.Close()
 	}
 	state, err := readState(statePath, course.Canvas.Sources)
 	if err != nil {
-		return result, err
+		return failResult(result), err
 	}
 	courseDir := filepath.Dir(filepath.Dir(statePath))
 	rawDir := filepath.Join(courseDir, "raw")
 	if info, statErr := os.Lstat(rawDir); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
-		return result, fmt.Errorf("raw directory must not be a symlink")
+		return failResult(result), fmt.Errorf("raw directory must not be a symlink")
 	} else if statErr != nil && !os.IsNotExist(statErr) {
-		return result, statErr
+		return failResult(result), statErr
 	} else if os.IsNotExist(statErr) && !dryRun {
 		if err := os.MkdirAll(rawDir, 0755); err != nil {
-			return result, err
+			return failResult(result), err
 		}
 	}
 	updates := map[string]any{}
@@ -99,6 +118,8 @@ func Sync(ctx context.Context, root string, workspace config.Workspace, course c
 		result.Status = "up_to_date"
 	}
 	sortedResult(&result)
+	manifest := buildManifest(manifestPath, workspace, course, result)
+	result.Manifest = &manifest
 	if dryRun {
 		return result, nil
 	}
@@ -120,13 +141,22 @@ func Sync(ctx context.Context, root string, workspace config.Workspace, course c
 		}
 		state.Sources[source] = existing
 	}
-	if err := writeState(statePath, state, workspace.Workspace.Timezone); err != nil {
+	if err := writeCanvasManifest(manifestPath, manifest); err != nil {
 		return result, err
 	}
-	if err := persistManifest(manifestPath, workspace, course, result); err != nil {
+	if err := writeCanvasState(statePath, state, workspace.Workspace.Timezone); err != nil {
 		return result, err
 	}
 	return result, nil
+}
+
+// failResult marks a stage as failed so its run manifest stays schema-valid
+// when Sync aborts before producing its normal outcome.
+func failResult(result StageResult) StageResult {
+	if result.Status == "" {
+		result.Status = "failed"
+	}
+	return result
 }
 
 func sourceState(value any) map[string]any {
@@ -174,15 +204,16 @@ func failureOf(source, kind, item, message, path string) Failure {
 	}(), Source: source, ItemID: itemCopy, Kind: kind, Status: "failed", Error: message, RawPath: pathCopy, Details: map[string]any{}}
 }
 func isNew(seen map[string]any, item string) bool { _, ok := seen[item]; return !ok }
-func minute(value string) string {
-	if value == "" {
-		return ""
+func sameMinute(left, right string) bool {
+	if left == "" || right == "" {
+		return left == right
 	}
-	moment, err := time.Parse(time.RFC3339, value)
-	if err != nil {
-		return value
+	leftTime, leftErr := time.Parse(time.RFC3339, left)
+	rightTime, rightErr := time.Parse(time.RFC3339, right)
+	if leftErr != nil || rightErr != nil {
+		return left == right
 	}
-	return moment.Truncate(time.Minute).Format(time.RFC3339)
+	return leftTime.Truncate(time.Minute).Equal(rightTime.Truncate(time.Minute))
 }
 func digest(value any) string {
 	data, _ := json.Marshal(value)
@@ -237,7 +268,7 @@ func captureBodies(ctx context.Context, source, courseDir string, courseID int, 
 		if source == "assignments" {
 			title = str(record, "name")
 			old, _ := seen[item].(string)
-			changed = changed || minute(str(record, "due_at")) != minute(old)
+			changed = changed || !sameMinute(str(record, "due_at"), old)
 		}
 		if !changed {
 			continue
@@ -253,7 +284,15 @@ func captureBodies(ctx context.Context, source, courseDir string, courseID int, 
 		if source == "assignments" {
 			summary += " · due " + first(date, "none")
 		}
-		change := changeOf(source, kind, item, summary, relative, map[string]any{"title": title, "url": StripVerifier(str(record, "html_url"))})
+		details := map[string]any{"title": title, "url": StripVerifier(str(record, "html_url"))}
+		if source == "announcements" {
+			details["author"] = str(record, "user_name")
+			details["posted"] = date
+		} else {
+			details["due"] = date
+			details["points"] = record["points_possible"]
+		}
+		change := changeOf(source, kind, item, summary, relative, details)
 		if dry {
 			changes = append(changes, change)
 			continue
@@ -267,7 +306,15 @@ func captureBodies(ctx context.Context, source, courseDir string, courseID int, 
 			failures = append(failures, failureOf(source, kind, item, "image not downloaded: "+imageErr.Error(), relative))
 			continue
 		}
-		if err := writeBody(courseDir, relative, map[string]any{"source": "canvas", "kind": kind, "id": item, "title": title, "url": StripVerifier(str(record, "html_url")), "fetched": now(zone)}, body, origin, imagePaths); err != nil {
+		fields := map[string]any{"source": "canvas", "kind": kind, "id": item, "title": title, "url": StripVerifier(str(record, "html_url")), "fetched": now(zone)}
+		if source == "announcements" {
+			fields["author"] = str(record, "user_name")
+			fields["posted"] = date
+		} else {
+			fields["due"] = date
+			fields["points"] = record["points_possible"]
+		}
+		if err := writeBody(courseDir, relative, fields, body, origin, imagePaths); err != nil {
 			return changes, nil, updates, err
 		}
 		changes = append(changes, change)
@@ -302,7 +349,8 @@ func captureFiles(ctx context.Context, courseDir string, courseID int, seen map[
 			continue
 		}
 		relative := Place(folderPaths[valueID(record, "folder_id")], str(record, "display_name"), folders)
-		change := changeOf("files", "file", item, "file "+item+" · "+relative, relative, map[string]any{"display_name": str(record, "display_name")})
+		folderID := valueID(record, "folder_id")
+		change := changeOf("files", "file", item, "file "+item+" · "+relative, relative, map[string]any{"display_name": str(record, "display_name"), "folder_id": folderID, "folder": folderPaths[folderID]})
 		if dry {
 			changes = append(changes, change)
 			continue
@@ -347,11 +395,12 @@ func capturePages(ctx context.Context, courseDir string, courseID int, seen map[
 		}
 		updated := str(record, "updated_at")
 		old, known := seen[item].(string)
-		if known && (old == "" || (updated != "" && updated <= old)) {
+		if known && (old == "" || !instantAfter(updated, old)) {
 			continue
 		}
+		updatedLocal, _ := LocalTime(updated, zone)
 		relative := "pages/" + Slug(str(record, "title")) + "-" + Slug(item) + ".md"
-		changes = append(changes, changeOf("pages", "page", item, "page "+item+" · "+str(record, "title"), relative, map[string]any{"title": str(record, "title")}))
+		changes = append(changes, changeOf("pages", "page", item, "page "+item+" · "+str(record, "title"), relative, map[string]any{"title": str(record, "title"), "page_url": item, "updated": updatedLocal, "url": StripVerifier(str(record, "html_url"))}))
 		if dry {
 			continue
 		}
@@ -363,10 +412,10 @@ func capturePages(ctx context.Context, courseDir string, courseID int, seen map[
 			}
 			body = str(record, "body")
 		}
-		if err := writeBody(courseDir, relative, map[string]any{"source": "canvas", "kind": "page", "page_url": item, "title": str(record, "title"), "fetched": now(zone)}, body, origin, nil); err != nil {
+		if err := writeBody(courseDir, relative, map[string]any{"source": "canvas", "kind": "page", "page_url": item, "url": StripVerifier(str(record, "html_url")), "title": str(record, "title"), "updated": updatedLocal, "fetched": now(zone)}, body, origin, nil); err != nil {
 			return changes, nil, updates, err
 		}
-		updates[item] = updated
+		updates[item] = updatedLocal
 	}
 	return changes, nil, updates, nil
 }
@@ -411,15 +460,15 @@ func captureModules(ctx context.Context, courseDir string, courseID int, seen ma
 		sortRecords(items)
 		d := digest(map[string]any{"name": str(module, "name"), "position": module["position"], "items": items})
 		updates[moduleID] = d
-		if seen[moduleID] == d {
-			continue
-		}
-		changes = append(changes, changeOf("modules", "module", moduleID, "module "+moduleID+" · "+str(module, "name"), "modules.md", map[string]any{"digest": d}))
 		lines = append(lines, "## "+str(module, "name"), "", "| # | Type | Title |", "| --- | --- | --- |")
 		for _, item := range items {
 			lines = append(lines, fmt.Sprintf("| %v | %s | %s |", item["position"], str(item, "type"), strings.ReplaceAll(str(item, "title"), "|", `\|`)))
 		}
 		lines = append(lines, "")
+		if seen[moduleID] == d {
+			continue
+		}
+		changes = append(changes, changeOf("modules", "module", moduleID, "module "+moduleID+" · "+str(module, "name"), "modules.md", map[string]any{"name": str(module, "name"), "position": module["position"], "digest": d}))
 	}
 	if len(changes) > 0 && !dry {
 		target, err := SafeDestination(filepath.Join(courseDir, "raw"), "modules.md")
@@ -431,7 +480,10 @@ func captureModules(ctx context.Context, courseDir string, courseID int, seen ma
 			return changes, nil, updates, err
 		}
 		if err = os.MkdirAll(filepath.Dir(target), 0755); err == nil {
-			err = os.WriteFile(target, []byte(content+strings.Join(lines, "\n")), 0644)
+			target, err = SafeDestination(filepath.Join(courseDir, "raw"), "modules.md")
+		}
+		if err == nil {
+			err = atomicWriteFile(target, []byte(content+strings.Join(lines, "\n")), 0644)
 		}
 		if err != nil {
 			return changes, nil, updates, err
@@ -449,11 +501,12 @@ func captureSyllabus(ctx context.Context, courseDir string, courseID int, seen a
 	if previous, ok := seen.(string); ok && previous == d {
 		return nil, nil, d, nil
 	}
-	change := changeOf("syllabus", "syllabus", "syllabus", "syllabus changed", "syllabus.md", map[string]any{"digest": d})
+	safeURL := StripVerifier(str(record, "html_url"))
+	change := changeOf("syllabus", "syllabus", "syllabus", "syllabus changed", "syllabus.md", map[string]any{"digest": d, "url": safeURL})
 	if dry {
 		return []Change{change}, nil, d, nil
 	}
-	if err := writeBody(courseDir, "syllabus.md", map[string]any{"source": "canvas", "kind": "syllabus", "fetched": now(zone)}, body, origin, nil); err != nil {
+	if err := writeBody(courseDir, "syllabus.md", map[string]any{"source": "canvas", "kind": "syllabus", "url": safeURL, "fetched": now(zone)}, body, origin, nil); err != nil {
 		return nil, nil, nil, err
 	}
 	return []Change{change}, nil, d, nil
@@ -505,7 +558,11 @@ func writeBody(courseDir, relative string, fields map[string]any, body, origin s
 	if err = os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(target, []byte(frontmatter+markdown), 0644)
+	target, err = SafeDestination(filepath.Join(courseDir, "raw"), relative)
+	if err != nil {
+		return err
+	}
+	return atomicWriteFile(target, []byte(frontmatter+markdown), 0644)
 }
 func first(values ...string) string {
 	for _, value := range values {
@@ -537,23 +594,36 @@ func now(zone string) string {
 	}
 	return value.Format(time.RFC3339)
 }
-func persistManifest(path string, workspace config.Workspace, course config.Course, result StageResult) error {
-	canvasStage := map[string]any{"status": result.Status, "changes": result.Changes, "failures": result.Failures, "sources": result.Sources}
-	manifest := map[string]any{"version": 2, "run_id": time.Now().Format("20060102T150405Z0700"), "course": course.Code, "effective_features": map[string]bool{"jira": config.Effective(workspace, course).Jira, "wiki": config.Effective(workspace, course).Wiki}, "canvas": canvasStage, "jira": map[string]any{"status": featureStatus(config.Effective(workspace, course).Jira)}, "wiki": map[string]any{"status": featureStatus(config.Effective(workspace, course).Wiki)}}
-	if data, err := os.ReadFile(path); err == nil {
-		var old map[string]json.RawMessage
-		if json.Unmarshal(data, &old) == nil {
-			for _, key := range []string{"jira", "wiki"} {
-				if value, ok := old[key]; ok {
-					var preserved any
-					if json.Unmarshal(value, &preserved) == nil {
-						manifest[key] = preserved
-					}
+func buildManifest(path string, workspace config.Workspace, course config.Course, result StageResult) RunManifest {
+	manifest := RunManifest{
+		Version:           2,
+		RunID:             time.Now().UTC().Format("20060102T150405Z0700"),
+		Course:            course.Code,
+		EffectiveFeatures: map[string]bool{"jira": config.Effective(workspace, course).Jira, "wiki": config.Effective(workspace, course).Wiki},
+		Canvas:            CanvasManifestStage{Status: result.Status, Changes: result.Changes, Failures: result.Failures, Sources: result.Sources},
+		Jira:              map[string]any{"status": featureStatus(config.Effective(workspace, course).Jira)},
+		Wiki:              map[string]any{"status": featureStatus(config.Effective(workspace, course).Wiki)},
+	}
+	if path != "" {
+		if data, err := os.ReadFile(path); err == nil {
+			var old map[string]json.RawMessage
+			if json.Unmarshal(data, &old) == nil {
+				if value, ok := old["jira"]; ok {
+					_ = json.Unmarshal(value, &manifest.Jira)
+				}
+				if value, ok := old["wiki"]; ok {
+					_ = json.Unmarshal(value, &manifest.Wiki)
 				}
 			}
 		}
 	}
-	return atomicJSON(path, manifest)
+	return manifest
+}
+
+func instantAfter(left, right string) bool {
+	leftTime, leftErr := time.Parse(time.RFC3339, left)
+	rightTime, rightErr := time.Parse(time.RFC3339, right)
+	return leftErr == nil && rightErr == nil && leftTime.After(rightTime)
 }
 func featureStatus(enabled bool) string {
 	if enabled {

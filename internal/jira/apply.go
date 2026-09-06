@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/algebananazzzzz/Corum/internal/config"
+	"github.com/algebananazzzzz/Corum/internal/lockfile"
 )
 
 func Apply(ctx context.Context, root string, workspace config.Workspace, course config.Course, plan Plan, client Client, dryRun bool) (ApplyResult, error) {
@@ -29,6 +31,11 @@ func Apply(ctx context.Context, root string, workspace config.Workspace, course 
 	if err != nil {
 		return ApplyResult{}, err
 	}
+	courseLock, err := lockfile.TryAcquire(filepath.Join(filepath.Dir(cachePath), ".course.lock"))
+	if err != nil {
+		return ApplyResult{}, fmt.Errorf("course %s: %w", course.Code, err)
+	}
+	defer courseLock.Close()
 	previous, _, err := readManifestStage(manifestPath, course.Code)
 	if err != nil {
 		return ApplyResult{}, err
@@ -101,6 +108,12 @@ func Apply(ctx context.Context, root string, workspace config.Workspace, course 
 
 	for index, action := range plan.Actions {
 		key := ""
+		if action.Action != "create" {
+			key = action.Key
+		}
+		if err := persistInFlight(manifestPath, workspace, course, plan, result, index, action, key); err != nil {
+			return result, fmt.Errorf("persist Jira mutation barrier: %w", err)
+		}
 		var mutationErr error
 		switch action.Action {
 		case "create":
@@ -135,6 +148,19 @@ func Apply(ctx context.Context, root string, workspace config.Workspace, course 
 		}
 		if cacheErr := upsertIssue(cachePath, issue); cacheErr != nil {
 			return failedApply(workspace, course, plan, result, index, action, key, "cache", &MutationError{Message: cacheErr.Error(), State: WriteApplied}, manifestPath)
+		}
+		if index < len(plan.Actions)-1 {
+			checkpoint := result
+			checkpoint.Status = "partial"
+			checkpoint.Failures = []ActionFailure{}
+			checkpoint.ReconciliationRequired = true
+			checkpoint.RetrySafe = false
+			checkpoint.Reconciled = false
+			if err := persistResult(manifestPath, workspace, course, checkpoint); err != nil {
+				result.ReconciliationRequired = true
+				result.RetrySafe = false
+				return result, fmt.Errorf("persist Jira action checkpoint: %w", err)
+			}
 		}
 	}
 	result.Status = "applied"
@@ -365,12 +391,13 @@ func createFieldsMap(project string, fields IssueFields) map[string]any {
 func failedApply(workspace config.Workspace, course config.Course, plan Plan, result ApplyResult, index int, action Action, key, phase string, cause error, manifestPath string) (ApplyResult, error) {
 	state := classifyWrite(cause)
 	retrySafe := state == WriteNotApplied && len(result.Applied) == 0
+	actionCopy := action
 	failure := ActionFailure{ID: fmt.Sprintf("jira:%d:%s:%s:%s", index, action.Action, func() string {
 		if key == "" {
 			return "unknown"
 		}
 		return key
-	}(), phase), ActionIndex: index, Action: action.Action, Key: key, Phase: phase, Error: safeFailureMessage(cause), WriteState: state, RetrySafe: state == WriteNotApplied}
+	}(), phase), ActionIndex: index, Action: action.Action, Key: key, Phase: phase, Error: safeFailureMessage(cause), WriteState: state, RetrySafe: state == WriteNotApplied, ExactAction: &actionCopy}
 	result.Status = "failed"
 	if len(result.Applied) > 0 {
 		result.Status = "partial"
@@ -384,6 +411,39 @@ func failedApply(workspace config.Workspace, course config.Course, plan Plan, re
 		return result, errors.Join(applyErr, fmt.Errorf("persist Jira failure evidence: %w", persistErr))
 	}
 	return result, applyErr
+}
+
+func persistInFlight(manifestPath string, workspace config.Workspace, course config.Course, plan Plan, result ApplyResult, index int, action Action, key string) error {
+	actionCopy := action
+	pending := result
+	pending.Status = "failed"
+	if len(result.Applied) > 0 {
+		pending.Status = "partial"
+	}
+	pending.Failures = []ActionFailure{{
+		ID:          fmt.Sprintf("jira:%d:%s:%s:mutation_in_flight", index, action.Action, firstNonempty(key, "unknown")),
+		ActionIndex: index,
+		Action:      action.Action,
+		Key:         key,
+		Phase:       "mutation_in_flight",
+		Error:       "Jira mutation outcome is unknown",
+		WriteState:  WriteUnknown,
+		RetrySafe:   false,
+		ExactAction: &actionCopy,
+	}}
+	pending.ReconciliationRequired = true
+	pending.RetrySafe = false
+	pending.Reconciled = false
+	return persistResult(manifestPath, workspace, course, pending)
+}
+
+func firstNonempty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func safeFailureMessage(err error) string {

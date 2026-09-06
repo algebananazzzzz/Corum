@@ -138,6 +138,24 @@ func TestOAuthFreshBootstrapReusesBearerForAllTools(t *testing.T) {
 	}
 }
 
+func TestOAuthForceReauthIgnoresValidCachedToken(t *testing.T) {
+	fixture := newFreshOAuthMCPServer(t)
+	path := filepath.Join(t.TempDir(), "corum", "auth.json")
+	record := authRecord{Version: 1, ClientID: "cached-client", Token: &oauth2.Token{AccessToken: "fresh-bearer", Expiry: time.Now().Add(time.Hour)}}
+	if err := saveAuthCache(path, record); err != nil {
+		t.Fatal(err)
+	}
+	var browserCalls int
+	session, err := Open(context.Background(), OpenOptions{Endpoint: fixture.server.URL + "/v2/mcp", CachePath: path, Interactive: true, ForceReauth: true, BrowserOpen: callbackBrowser(t, &browserCalls), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	if browserCalls != 1 || fixture.registrationCount() != 1 {
+		t.Fatalf("forced reauth browser calls=%d registrations=%d, want a fresh authorization", browserCalls, fixture.registrationCount())
+	}
+}
+
 func TestOAuthSecondAuthorizationFailsClosedWithoutAnotherBrowser(t *testing.T) {
 	fixture := newFreshOAuthMCPServer(t)
 	var browserCalls int

@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 
 	corum "github.com/algebananazzzzz/Corum"
 	"github.com/algebananazzzzz/Corum/internal/buildinfo"
@@ -24,6 +25,7 @@ var (
 	makeJiraClient                                           = jira.NewJiraClient
 	maybeUpdate                                              = update.Maybe
 	syncVaultToolkits func(fs.FS, string) []vault.SyncResult = vault.SyncToolkits
+	syncCanvas                                               = canvas.Sync
 )
 
 // RunProcess performs invocation-time update and toolkit work before dispatching
@@ -66,7 +68,7 @@ func RunProcess(ctx context.Context, argv []string, in io.Reader, out, errOut io
 func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
 	_ = in
 	if len(args) == 1 && args[0] == "--help" {
-		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor PATH | corum version | corum update | corum sync COURSE...|--all [--dry-run] [--json] | corum jira login [PATH]|status|logout | corum jira apply COURSE [--dry-run]")
+		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum sync COURSE...|--all [--dry-run] [--json] | corum jira login [PATH] | corum jira status [PATH] | corum jira logout | corum jira apply COURSE [--dry-run]")
 		return 0
 	}
 	if len(args) == 1 && args[0] == "update" {
@@ -86,6 +88,12 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		default:
 			fmt.Fprintf(out, "corum %s is up to date\n", withV(buildinfo.Version))
 		}
+		return 0
+	}
+	if len(args) == 1 && args[0] == update.ContinuationArg {
+		// The updated binary re-executed itself after an explicit update.
+		// Report the result without another metadata request.
+		fmt.Fprintf(out, "corum updated to %s\n", withV(buildinfo.Version))
 		return 0
 	}
 	if len(args) == 1 && args[0] == "version" {
@@ -121,14 +129,20 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, "vault initialized")
 		return 0
 	}
-	if len(args) == 2 && args[0] == "doctor" {
-		_, courses, err := vault.Validate(args[1])
-		if err != nil {
-			fmt.Fprintln(errOut, "vault validation failed")
-			return 1
+	if len(args) == 1 || len(args) == 2 {
+		if args[0] == "doctor" {
+			path := "."
+			if len(args) == 2 {
+				path = args[1]
+			}
+			if _, courses, err := vault.Validate(path); err != nil {
+				fmt.Fprintln(errOut, "vault validation failed")
+				return 1
+			} else {
+				fmt.Fprintf(out, "doctor: %d courses\n", len(courses))
+				return 0
+			}
 		}
-		fmt.Fprintf(out, "doctor: %d courses\n", len(courses))
-		return 0
 	}
 	if len(args) == 3 && args[0] == "jira" && args[1] == "apply" && args[2] == "--help" {
 		fmt.Fprintln(out, "usage: corum jira apply COURSE [--dry-run]")
@@ -157,12 +171,21 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, "usage: corum jira login [PATH]")
 		return 0
 	}
-	if len(args) == 3 && args[0] == "jira" && args[1] == "login" {
+	if (len(args) == 2 || len(args) == 3) && args[0] == "jira" && args[1] == "login" {
+		path := "."
+		if len(args) == 3 {
+			path = args[2]
+		}
+		root, err := openVault(path)
+		if err != nil {
+			fmt.Fprintln(errOut, "vault validation failed")
+			return 1
+		}
 		if !isTerminal(in) {
 			fmt.Fprintln(errOut, ui.NonTTYGuidance("jira login"))
 			return 2
 		}
-		if err := ui.RunJiraLogin(ctx, args[2], ui.DefaultLoginDependencies(in, out)); err != nil {
+		if err := ui.RunJiraLogin(ctx, root, ui.DefaultLoginDependencies(in, out)); err != nil {
 			if errors.Is(err, ui.ErrCancelled) {
 				fmt.Fprintln(errOut, "Jira setup cancelled")
 			} else {
@@ -173,9 +196,16 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, "Jira configured")
 		return 0
 	}
-	if len(args) == 2 && args[0] == "jira" && (args[1] == "login" || args[1] == "status") {
-		interactive := args[1] == "login"
-		session, err := jira.Open(ctx, jira.OpenOptions{Interactive: interactive, Out: errOut})
+	if (len(args) == 2 || len(args) == 3) && args[0] == "jira" && args[1] == "status" {
+		// An explicit path validates and re-registers that vault; the bare
+		// form remains a global OAuth session check.
+		if len(args) == 3 {
+			if _, err := openVault(args[2]); err != nil {
+				fmt.Fprintln(errOut, "vault validation failed")
+				return 1
+			}
+		}
+		session, err := jira.Open(ctx, jira.OpenOptions{Interactive: false, Out: errOut})
 		if err != nil {
 			if err == jira.LoginRequired {
 				fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum jira login")
@@ -201,7 +231,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, label)
 		return 0
 	}
-	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor PATH | corum version | corum update | corum sync COURSE...|--all [--dry-run] [--json] | corum jira login [PATH]|status|logout | corum jira apply COURSE [--dry-run]")
+	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum sync COURSE...|--all [--dry-run] [--json] | corum jira login [PATH] | corum jira status [PATH] | corum jira logout | corum jira apply COURSE [--dry-run]")
 	return 2
 }
 
@@ -240,7 +270,7 @@ func runCanvasSync(ctx context.Context, args []string, out, errOut io.Writer) (i
 	if all == (len(codes) > 0) {
 		return 0, false
 	}
-	root, err := os.Getwd()
+	root, err := openVault(".")
 	if err != nil {
 		fmt.Fprintln(errOut, "could not locate vault")
 		return 1, true
@@ -274,33 +304,37 @@ func runCanvasSync(ctx context.Context, args []string, out, errOut io.Writer) (i
 	}
 	results := make([]canvas.StageResult, 0, len(courses))
 	var client canvas.SourceClient
+	failures := []string{}
 	for _, course := range courses {
 		if !dryRun && config.Effective(workspace, course).Canvas {
 			if client == nil {
 				constructed, constructErr := canvas.NewClientFromEnvironment(workspace.Canvas.URL)
 				if constructErr != nil {
 					fmt.Fprintln(errOut, constructErr)
+					if flushErr := flushSyncResults(jsonOutput, out, workspace, courses, results); flushErr != nil {
+						fmt.Fprintln(errOut, "could not write sync result")
+						return 1, true
+					}
 					return 1, true
 				}
 				client = constructed
 			}
 		}
-		result, syncErr := canvas.Sync(ctx, root, workspace, course, client, dryRun)
+		result, syncErr := syncCanvas(ctx, root, workspace, course, client, dryRun)
 		results = append(results, result)
 		if syncErr != nil {
-			fmt.Fprintln(errOut, syncErr)
-			return 1, true
+			failures = append(failures, fmt.Sprintf("%s: %v", course.Code, syncErr))
 		}
 	}
-	if jsonOutput {
-		if err := json.NewEncoder(out).Encode(results); err != nil {
-			fmt.Fprintln(errOut, "could not write sync result")
-			return 1, true
-		}
-	} else {
-		for _, result := range results {
-			fmt.Fprintf(out, "%s: %s\n", result.Course, result.Status)
-		}
+	if err := flushSyncResults(jsonOutput, out, workspace, courses, results); err != nil {
+		fmt.Fprintln(errOut, "could not write sync result")
+		return 1, true
+	}
+	for _, message := range failures {
+		fmt.Fprintln(errOut, message)
+	}
+	if len(failures) > 0 {
+		return 1, true
 	}
 	for _, result := range results {
 		if result.Status == "failed" || result.Status == "partial" {
@@ -308,6 +342,42 @@ func runCanvasSync(ctx context.Context, args []string, out, errOut io.Writer) (i
 		}
 	}
 	return 0, true
+}
+
+// flushSyncResults writes the accumulated per-course results. JSON mode emits
+// one complete run manifest per course; text mode emits one concise line per
+// course. Completed course results are preserved even when a later course
+// fails.
+func flushSyncResults(jsonOutput bool, out io.Writer, workspace config.Workspace, courses []config.Course, results []canvas.StageResult) error {
+	if jsonOutput {
+		manifests := make([]any, 0, len(results))
+		for index, result := range results {
+			manifests = append(manifests, result.ManifestOf(workspace, courses[index]))
+		}
+		return json.NewEncoder(out).Encode(manifests)
+	}
+	for _, result := range results {
+		fmt.Fprintf(out, "%s: %s\n", result.Course, result.Status)
+	}
+	return nil
+}
+
+// openVault centralizes validated vault opening. It resolves an optional path
+// (defaulting to the working directory), validates the vault, and registers
+// the validated absolute path in the per-user registry (repairing moved or
+// newly used vaults).
+func openVault(path string) (string, error) {
+	if path == "" {
+		path = "."
+	}
+	root, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if _, _, err := vault.Validate(root); err != nil {
+		return "", err
+	}
+	return root, nil
 }
 
 func runJiraApply(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) (int, bool) {
@@ -325,7 +395,7 @@ func runJiraApply(ctx context.Context, args []string, in io.Reader, out, errOut 
 		fmt.Fprintln(errOut, "could not read Jira plan")
 		return 1, true
 	}
-	root, err := os.Getwd()
+	root, err := openVault(".")
 	if err != nil {
 		fmt.Fprintln(errOut, "could not locate vault")
 		return 1, true

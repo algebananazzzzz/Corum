@@ -60,23 +60,35 @@ func (s *RovoSession) toolsFor(ctx context.Context) (map[string]*mcp.Tool, error
 	return tools, nil
 }
 
+const maxToolPages = 100
+
+const maxProjectPages = 1000
+
 func listAllTools(ctx context.Context, session toolLister) (map[string]*mcp.Tool, error) {
 	tools := make(map[string]*mcp.Tool)
+	seen := map[string]bool{}
 	var cursor string
-	for {
-		page, err := session.ListTools(ctx, &mcp.ListToolsParams{Cursor: cursor})
-		if err != nil || page == nil {
+	for page := 0; ; page++ {
+		if page >= maxToolPages {
+			return nil, rovoError("Atlassian tool pagination made no forward progress")
+		}
+		if seen[cursor] {
+			return nil, rovoError("Atlassian tool pagination made no forward progress")
+		}
+		seen[cursor] = true
+		toolPage, err := session.ListTools(ctx, &mcp.ListToolsParams{Cursor: cursor})
+		if err != nil || toolPage == nil {
 			return nil, rovoError("could not discover Atlassian tools")
 		}
-		for _, tool := range page.Tools {
+		for _, tool := range toolPage.Tools {
 			if tool != nil {
 				tools[tool.Name] = tool
 			}
 		}
-		if page.NextCursor == "" {
+		if toolPage.NextCursor == "" {
 			return tools, nil
 		}
-		cursor = page.NextCursor
+		cursor = toolPage.NextCursor
 	}
 }
 
@@ -217,7 +229,10 @@ func (s *RovoSession) Resources(ctx context.Context) ([]AtlassianResource, error
 func (s *RovoSession) Projects(ctx context.Context, cloudID string) ([]JiraProject, error) {
 	var projects []JiraProject
 	startAt := 0
-	for {
+	for page := 0; ; page++ {
+		if page >= maxProjectPages {
+			return nil, rovoError("Atlassian project pagination made no forward progress")
+		}
 		arguments := map[string]any{"cloudId": cloudID, "maxResults": 100}
 		if startAt != 0 {
 			arguments["startAt"] = startAt
