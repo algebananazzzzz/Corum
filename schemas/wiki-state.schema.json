@@ -3,9 +3,9 @@
   "title": "Corum wiki source-finalization state",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "ingested"],
+  "required": ["version", "ingested"],
   "properties": {
-    "schema": {"const": 1},
+    "version": {"const": 2},
     "ingested": {
       "type": "object",
       "propertyNames": {

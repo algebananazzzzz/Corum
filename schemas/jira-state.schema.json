@@ -3,9 +3,9 @@
   "title": "Corum Jira state",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "reconciled_at", "issues"],
+  "required": ["version", "reconciled_at", "issues"],
   "properties": {
-    "schema": {"const": 1},
+    "version": {"const": 2},
     "reconciled_at": {"type": ["string", "null"], "format": "date-time"},
     "issues": {
       "type": "array",

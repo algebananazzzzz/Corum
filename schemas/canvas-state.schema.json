@@ -3,9 +3,9 @@
   "title": "Corum Canvas capture state",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "synced_at", "sources"],
+  "required": ["version", "synced_at", "sources"],
   "properties": {
-    "schema": {"const": 1},
+    "version": {"const": 2},
     "synced_at": {"type": ["string", "null"]},
     "sources": {
       "type": "object",

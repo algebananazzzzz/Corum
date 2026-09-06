@@ -3,9 +3,9 @@
   "title": "Corum run manifest",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "run_id", "course", "effective_features", "canvas", "jira", "wiki"],
+  "required": ["version", "run_id", "course", "effective_features", "canvas", "jira", "wiki"],
   "properties": {
-    "schema": {"const": 1},
+    "version": {"const": 2},
     "run_id": {"type": "string"},
     "course": {"type": "string"},
     "effective_features": {
