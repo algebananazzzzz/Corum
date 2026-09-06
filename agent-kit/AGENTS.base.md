@@ -23,15 +23,20 @@ Jira plan, but it never generates or rewrites educational prose.
 ## Clean v2 configuration
 
 Corum accepts only `version: 2`. Service presence is the feature switch: a service
-operates only when its block is present in both `corum.yaml` and the selected
-course's `course.yaml`. Never add the v1 `schema` field or a separate `features`
-mapping. Version-1 vaults require a new initialization and manual import of
-user-owned content.
+operates only when its block is present in both `.config/corum/corum.yaml` and
+the selected course's `course.yaml`. Never add the v1 `schema` field or a
+separate `features` mapping. Version-1 vaults require a new initialization and
+manual import of user-owned content.
 
 ## Vault layout
 
 ```text
-corum.yaml
+.config/
+  corum/
+    .gitignore
+    corum.yaml
+    canvas.json
+    auth.json
 AGENTS.md
 skills/
 templates/
@@ -73,8 +78,8 @@ An optional state file may be absent when its service has never been enabled.
 
 Corum owns and may replace the complete `AGENTS.md`, `skills/`, and `templates/`
 paths plus `.corum/toolkit-version`. Do not store personal instructions or files
-there. Corum does not replace `corum.yaml`, `courses/`, raw captures, wiki pages,
-state, calendars, changelogs, or credentials.
+there. Toolkit refreshes do not replace `.config/corum/corum.yaml`, `courses/`,
+raw captures, wiki pages, state, calendars, changelogs, or credentials.
 
 ## Service isolation and secrets
 

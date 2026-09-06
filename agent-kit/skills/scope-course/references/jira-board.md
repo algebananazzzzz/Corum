@@ -20,7 +20,7 @@ Every create uses the course epic from `course.yaml`. Summaries start with
 
 ## Dates
 
-Convert source timestamps to the timezone in `corum.yaml`. Look up week numbers in
+Convert source timestamps to the timezone in `.config/corum/corum.yaml`. Look up week numbers in
 the configured term-calendar file. For a `Task` whose true local deadline is before
 1500, use the preceding date as Jira `due`; this leaves a usable workday. Sessions
 and milestones remain on the day they happen.

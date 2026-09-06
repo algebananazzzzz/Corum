@@ -188,7 +188,7 @@ func TestJiraAuthCancellationRestoresPriorState(t *testing.T) {
 	if err := vault.Initialize(root, workspace, uiAssets(), "test"); err != nil {
 		t.Fatal(err)
 	}
-	before, err := os.ReadFile(filepath.Join(root, "corum.yaml"))
+	before, err := os.ReadFile(config.WorkspacePath(root))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestJiraAuthCancellationRestoresPriorState(t *testing.T) {
 	if !errors.Is(err, ErrCancelled) || !restored || writeCalled {
 		t.Fatalf("RunJiraAuth() = %v, restored = %v, write = %v", err, restored, writeCalled)
 	}
-	after, err := os.ReadFile(filepath.Join(root, "corum.yaml"))
+	after, err := os.ReadFile(config.WorkspacePath(root))
 	if err != nil || string(after) != string(before) {
 		t.Fatalf("corum.yaml changed: %q, %v", after, err)
 	}

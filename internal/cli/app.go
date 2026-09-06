@@ -21,11 +21,11 @@ import (
 )
 
 var (
-	openJiraSession                                          = jira.Open
-	makeJiraClient                                           = jira.NewJiraClient
-	maybeUpdate                                              = update.Maybe
-	syncVaultToolkits func(fs.FS, string) []vault.SyncResult = vault.SyncToolkits
-	syncCanvas                                               = canvas.Sync
+	openJiraSession                                    = jira.Open
+	makeJiraClient                                     = jira.NewJiraClient
+	maybeUpdate                                        = update.Maybe
+	syncVaultToolkit func(string, fs.FS, string) error = vault.SyncToolkit
+	syncCanvas                                         = canvas.Sync
 )
 
 // RunProcess performs invocation-time update and toolkit work before dispatching
@@ -50,14 +50,14 @@ func RunProcess(ctx context.Context, argv []string, in io.Reader, out, errOut io
 		}
 	}
 	if buildinfo.Version != "dev" {
-		for _, result := range syncVaultToolkits(corum.Assets, buildinfo.Version) {
-			if result.Err == nil {
-				continue
-			}
-			if result.Root == "" {
-				fmt.Fprintf(errOut, "warning: toolkit update failed: %v\n", result.Err)
-			} else {
-				fmt.Fprintf(errOut, "warning: toolkit update failed for %s: %v\n", result.Root, result.Err)
+		if path, ok := commandVaultPath(args); ok {
+			root, err := filepath.Abs(path)
+			if err == nil {
+				if _, _, validateErr := vault.Validate(root); validateErr == nil {
+					if syncErr := syncVaultToolkit(root, corum.Assets, buildinfo.Version); syncErr != nil {
+						fmt.Fprintf(errOut, "warning: toolkit update failed for %s: %v\n", root, syncErr)
+					}
+				}
 			}
 		}
 	}
@@ -158,16 +158,16 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		return code
 	}
 	if (len(args) == 2 || len(args) == 3) && args[0] == "jira" && args[1] == "logout" {
-		path := ""
+		path := "."
 		if len(args) == 3 {
-			root, err := openVault(args[2])
-			if err != nil {
-				fmt.Fprintln(errOut, "vault validation failed")
-				return 1
-			}
-			path = root
+			path = args[2]
 		}
-		removed, err := jira.ClearAuthFor(path)
+		root, err := openVault(path)
+		if err != nil {
+			fmt.Fprintln(errOut, "vault validation failed")
+			return 1
+		}
+		removed, err := jira.ClearAuthFor(root)
 		if err != nil {
 			fmt.Fprintln(errOut, "could not clear Jira authentication")
 			return 1
@@ -180,16 +180,14 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		return 0
 	}
 	if (len(args) == 2 || len(args) == 3) && args[0] == "jira" && args[1] == "status" {
-		// An explicit path validates and re-registers that vault; the bare
-		// form remains a global OAuth session check.
-		root := ""
+		path := "."
 		if len(args) == 3 {
-			var err error
-			root, err = openVault(args[2])
-			if err != nil {
-				fmt.Fprintln(errOut, "vault validation failed")
-				return 1
-			}
+			path = args[2]
+		}
+		root, err := openVault(path)
+		if err != nil {
+			fmt.Fprintln(errOut, "vault validation failed")
+			return 1
 		}
 		session, err := jira.Open(ctx, jira.OpenOptions{Interactive: false, CachePath: jiraCacheFor(root), Out: errOut})
 		if err != nil {
@@ -221,13 +219,8 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	return 2
 }
 
-// jiraCacheFor resolves the project-local cache path for a validated vault
-// root (or the global fallback when empty).
+// jiraCacheFor resolves the project-local cache path for a validated vault.
 func jiraCacheFor(root string) string {
-	if root == "" {
-		path, _ := jira.AuthCachePath()
-		return path
-	}
 	path, _ := jira.AuthCachePathFor(root)
 	return path
 }
@@ -245,7 +238,12 @@ func runAuth(ctx context.Context, args []string, in io.Reader, out, errOut io.Wr
 	path := "."
 	target := "all"
 	if len(args) == 2 {
-		path = args[1]
+		switch args[1] {
+		case "jira", "canvas":
+			target = args[1]
+		default:
+			path = args[1]
+		}
 	} else if len(args) == 3 {
 		switch args[1] {
 		case "jira", "canvas":
@@ -437,9 +435,7 @@ func flushSyncResults(jsonOutput bool, out io.Writer, workspace config.Workspace
 }
 
 // openVault centralizes validated vault opening. It resolves an optional path
-// (defaulting to the working directory), validates the vault, and registers
-// the validated absolute path in the per-user registry (repairing moved or
-// newly used vaults).
+// (defaulting to the working directory) and validates the vault.
 func openVault(path string) (string, error) {
 	if path == "" {
 		path = "."
@@ -452,6 +448,46 @@ func openVault(path string) (string, error) {
 		return "", err
 	}
 	return root, nil
+}
+
+// commandVaultPath identifies commands that operate on one project so process
+// startup can refresh only that project's toolkit without a global registry.
+func commandVaultPath(args []string) (string, bool) {
+	if len(args) == 0 {
+		return "", false
+	}
+	switch args[0] {
+	case "doctor":
+		if len(args) == 1 {
+			return ".", true
+		}
+		if len(args) == 2 {
+			return args[1], true
+		}
+	case "auth":
+		if len(args) == 1 {
+			return ".", true
+		}
+		if len(args) == 2 && args[1] != "--help" {
+			if args[1] == "jira" || args[1] == "canvas" {
+				return ".", true
+			}
+			return args[1], true
+		}
+		if len(args) == 3 && (args[1] == "jira" || args[1] == "canvas") {
+			return args[2], true
+		}
+	case "sync":
+		return ".", true
+	case "jira":
+		if len(args) >= 2 && (args[1] == "apply" || args[1] == "status" || args[1] == "logout") {
+			if (args[1] == "status" || args[1] == "logout") && len(args) == 3 {
+				return args[2], true
+			}
+			return ".", true
+		}
+	}
+	return "", false
 }
 
 func runJiraApply(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) (int, bool) {

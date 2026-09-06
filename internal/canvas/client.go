@@ -62,8 +62,7 @@ func NewClient(origin, token string) (*Client, error) {
 }
 
 // NewClientFromEnvironment resolves the effective token (environment first,
-// then project-local, then the global fallback) when a real Canvas operation
-// starts.
+// then project-local) when a real Canvas operation starts.
 func NewClientFromEnvironment(origin, root string) (*Client, error) {
 	token, err := LoadCredential(root)
 	if err != nil {

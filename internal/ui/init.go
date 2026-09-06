@@ -131,8 +131,8 @@ func jiraProjectCachePath(root string) string {
 }
 
 // RunJiraAuth authenticates (always fresh) and selects a Jira project, then
-// changes only corum.yaml after confirmation. The preceding cache is restored
-// on failure.
+// changes only .config/corum/corum.yaml after confirmation. The preceding
+// cache is restored on failure.
 func RunJiraAuth(ctx context.Context, root string, deps JiraAuthDependencies) (err error) {
 	if deps.Prompts == nil || deps.OpenJira == nil || deps.SnapshotAuth == nil || deps.Write == nil {
 		return fmt.Errorf("interactive Jira authentication is unavailable")

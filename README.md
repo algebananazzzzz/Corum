@@ -49,20 +49,20 @@ defaults:
 corum init --defaults ~/Corum
 ```
 
-The vault receives `corum.yaml`, `AGENTS.md`, `skills/`, `templates/`, an empty
-`courses/` directory, and `.corum/toolkit-version`. `corum init` and successful
-`corum doctor` checks register the vault so a later binary update can roll out
-the current toolkit.
+The vault receives `.config/corum/corum.yaml`, `.config/corum/.gitignore`,
+`AGENTS.md`, `skills/`, `templates/`, an empty `courses/` directory, and
+`.corum/toolkit-version`. Corum keeps no global vault registry; release builds
+refresh only the toolkit belonging to the project used by the current command.
 
 Corum owns and may replace the complete `AGENTS.md`, `skills/`, and `templates/`
 paths plus `.corum/toolkit-version`. Keep personal instructions and files outside
-those paths. Corum never replaces `corum.yaml`, `courses/`, captured sources, wiki
-pages, state, calendars, or credentials.
+those paths. Toolkit refreshes never replace `.config/corum/corum.yaml`,
+`courses/`, captured sources, wiki pages, state, calendars, or credentials.
 
 ## Authentication
 
-`corum init` is purely local: it writes configuration and the toolkit, and
-registers the vault. Authentication is a separate interactive step:
+`corum init` is purely local: it writes project configuration and the toolkit.
+Authentication is a separate interactive step:
 
 ```console
 corum auth ~/Corum        # authenticate every enabled service
@@ -81,13 +81,14 @@ Jira uses Atlassian browser OAuth only. There is no email/API-token mode, Rovo
 CLI dependency, keyring integration, or local protocol server. `corum auth
 jira` opens Atlassian in the default browser, lets the user select an
 accessible site and project, and writes only the non-secret `jira` block to
-`corum.yaml`.
+`.config/corum/corum.yaml`.
 
-Credentials are project-local by default: `<vault>/.config/corum/` holds
-`canvas.json` and `auth.json` with `0700`/`0600` modes and a gitignore guard,
-so they travel with the vault and are never committed. Commands run without a
-vault context fall back to the platform user configuration directory (on Linux
-normally `~/.config/corum/`). Do not copy, inspect, or commit credential files.
+All Corum configuration is project-local: `<vault>/.config/corum/` holds
+`corum.yaml`, `canvas.json`, and `auth.json`. The directory is private, and its
+gitignore guard excludes the credential files. Commands without an explicit
+path use the current project and never fall back to a global configuration
+directory. `CORUM_CANVAS_TOKEN` remains the only credential override. Do not
+copy, inspect, or commit credential files.
 
 Disabled Jira paths and `corum jira apply ... --dry-run` do not open OAuth or make
 Jira calls.
@@ -96,6 +97,9 @@ Jira calls.
 
 Corum v2 accepts only `version: 2`. Service-block presence is the feature switch;
 the v1 `features` mapping and `schema: 1` vocabulary are unsupported.
+Workspace configuration lives at `.config/corum/corum.yaml`. The first command
+that opens an existing v2 vault atomically moves a legacy root `corum.yaml` to
+that path; if both files exist, Corum refuses the ambiguous vault.
 
 ```yaml
 version: 2
@@ -196,8 +200,8 @@ credentials.
 Release builds check for a newer version at most once every 24 hours when Corum is
 invoked. A failed attempt is cached for the same interval so offline use does not
 retry on every command. A verified update atomically replaces the binary,
-re-executes the original command once, and refreshes the owned toolkit paths in
-registered vaults.
+re-executes the original command once, and refreshes the owned toolkit paths for
+the active project when the requested command operates on a vault.
 
 Set `DISABLE_AUTO_UPDATES=1` to disable automatic checks:
 

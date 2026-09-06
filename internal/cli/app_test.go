@@ -16,7 +16,6 @@ import (
 	"github.com/algebananazzzzz/Corum/internal/canvas"
 	"github.com/algebananazzzzz/Corum/internal/config"
 	"github.com/algebananazzzzz/Corum/internal/update"
-	"github.com/algebananazzzzz/Corum/internal/vault"
 )
 
 func TestRunVersionPrintsBuildVersion(t *testing.T) {
@@ -49,11 +48,11 @@ func TestRunUpdateRejectsDevelopmentBuild(t *testing.T) {
 func TestRunProcessReexecSyncsBeforeDispatchAndReportsPartialErrors(t *testing.T) {
 	oldVersion := buildinfo.Version
 	oldMaybe := maybeUpdate
-	oldSync := syncVaultToolkits
+	oldSync := syncVaultToolkit
 	t.Cleanup(func() {
 		buildinfo.Version = oldVersion
 		maybeUpdate = oldMaybe
-		syncVaultToolkits = oldSync
+		syncVaultToolkit = oldSync
 	})
 	buildinfo.Version = "v2.0.0"
 	t.Setenv(update.ReexecEnv, "1")
@@ -63,20 +62,27 @@ func TestRunProcessReexecSyncsBeforeDispatchAndReportsPartialErrors(t *testing.T
 	}
 	var out, errOut bytes.Buffer
 	syncCalls := 0
-	syncVaultToolkits = func(fs.FS, string) []vault.SyncResult {
+	root := filepath.Join(t.TempDir(), "vault")
+	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("init code = %d", code)
+	}
+	syncVaultToolkit = func(gotRoot string, _ fs.FS, _ string) error {
 		syncCalls++
+		if gotRoot != root {
+			t.Fatalf("toolkit root = %q, want %q", gotRoot, root)
+		}
 		if out.Len() != 0 {
 			t.Fatal("command dispatched before toolkit sync")
 		}
-		return []vault.SyncResult{{Root: "/good"}, {Root: "/bad", Err: errors.New("injected toolkit failure")}}
+		return errors.New("injected toolkit failure")
 	}
-	if code := RunProcess(context.Background(), []string{"corum", "version"}, nil, &out, &errOut); code != 0 {
+	if code := RunProcess(context.Background(), []string{"corum", "doctor", root}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("RunProcess code = %d, stderr = %q", code, errOut.String())
 	}
-	if syncCalls != 1 || out.String() != "v2.0.0\n" {
+	if syncCalls != 1 || out.String() != "doctor: 0 courses\n" {
 		t.Fatalf("sync calls = %d, stdout = %q", syncCalls, out.String())
 	}
-	if !strings.Contains(errOut.String(), "/bad") || !strings.Contains(errOut.String(), "injected toolkit failure") {
+	if !strings.Contains(errOut.String(), root) || !strings.Contains(errOut.String(), "injected toolkit failure") {
 		t.Fatalf("stderr = %q", errOut.String())
 	}
 }
@@ -88,7 +94,7 @@ func TestRunInitDefaultsAndDoctor(t *testing.T) {
 	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("init code = %d, stderr = %s", code, errOut.String())
 	}
-	if _, err := os.Stat(filepath.Join(root, "corum.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, ".config", "corum", "corum.yaml")); err != nil {
 		t.Fatal(err)
 	}
 	out.Reset()
@@ -115,12 +121,19 @@ func TestRunDoctorOptionalPathDefaultsToWorkingDirectory(t *testing.T) {
 	if out.String() != "doctor: 0 courses\n" {
 		t.Fatalf("doctor output = %q", out.String())
 	}
-	registered, err := vault.Registered()
-	if err != nil || len(registered) != 1 {
-		t.Fatalf("registered = %#v, err = %v", registered, err)
-	}
 	if code := Run(context.Background(), []string{"doctor", "/nonexistent/corum-vault"}, nil, &out, &errOut); code != 1 {
 		t.Fatalf("invalid doctor path code = %d", code)
+	}
+}
+
+func TestRunJiraStatusWithoutPathRequiresCurrentProject(t *testing.T) {
+	t.Chdir(t.TempDir())
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), []string{"jira", "status"}, nil, &out, &errOut); code != 1 {
+		t.Fatalf("jira status code = %d, stderr = %q", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "vault validation failed") {
+		t.Fatalf("stderr = %q", errOut.String())
 	}
 }
 
@@ -249,7 +262,10 @@ func TestRunJiraApplyDryRunEchoesPlanWithoutOAuth(t *testing.T) {
 	}
 	workspace := "version: 2\nworkspace:\n  timezone: Asia/Singapore\n  term: AY2026/27 Semester 1\njira:\n  cloud_id: cloud-1\n  project: STUDY\n  transitions:\n    this_week: \"2\"\ncalendar:\n  timetable: Timetable.md\n  term: Term_Calendar.md\n"
 	course := "version: 2\ncode: CS3103\njira:\n  epic: STUDY-1\n"
-	if err := os.WriteFile(filepath.Join(root, "corum.yaml"), []byte(workspace), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, ".config", "corum"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".config", "corum", "corum.yaml"), []byte(workspace), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "courses", "CS3103", "course.yaml"), []byte(course), 0o644); err != nil {

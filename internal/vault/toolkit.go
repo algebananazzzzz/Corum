@@ -34,33 +34,13 @@ type replacement struct {
 	installed bool
 }
 
-// SyncResult reports one independently attempted registered vault.
-type SyncResult struct {
-	Root string
-	Err  error
-}
-
-// SyncToolkits updates each valid registered vault independently. Invalid and
-// missing entries remain registered but are reported instead of blocking others.
-func SyncToolkits(assets fs.FS, version string) []SyncResult {
-	roots, err := Registered()
-	if err != nil {
-		return []SyncResult{{Err: err}}
+// SyncToolkit updates the toolkit only for the active project. Current
+// toolkits are left untouched.
+func SyncToolkit(root string, assets fs.FS, version string) error {
+	if toolkitIsCurrent(root, version) {
+		return nil
 	}
-	results := make([]SyncResult, 0, len(roots))
-	for _, root := range roots {
-		if _, _, err := Validate(root); err != nil {
-			results = append(results, SyncResult{Root: root, Err: err})
-			continue
-		}
-		if toolkitIsCurrent(root, version) {
-			results = append(results, SyncResult{Root: root})
-			continue
-		}
-		err := syncToolkit(root, assets, version, os.Rename)
-		results = append(results, SyncResult{Root: root, Err: err})
-	}
-	return results
+	return syncToolkit(root, assets, version, os.Rename)
 }
 
 func toolkitIsCurrent(root, version string) bool {

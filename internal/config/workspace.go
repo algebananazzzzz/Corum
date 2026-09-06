@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Workspace is the root corum.yaml document.
+// Workspace is the project-wide .config/corum/corum.yaml document.
 type Workspace struct {
 	Version   int              `yaml:"version"`
 	Workspace WorkspaceDetails `yaml:"workspace"`
@@ -43,15 +43,89 @@ type Calendar struct {
 	Term      string `yaml:"term"`
 }
 
-// LoadWorkspace reads corum.yaml below root without changing the vault.
+const projectGitignore = "/auth.json\n/canvas.json\n/.auth-*.json\n"
+
+// ProjectDir returns the project-local directory for Corum configuration.
+func ProjectDir(root string) string {
+	return filepath.Join(root, ".config", "corum")
+}
+
+// WorkspacePath returns the project-local workspace configuration path.
+func WorkspacePath(root string) string {
+	return filepath.Join(ProjectDir(root), "corum.yaml")
+}
+
+// EnsureProjectDir creates the private project-local configuration directory
+// and installs a guard for credential files without replacing an existing
+// project-specific ignore file.
+func EnsureProjectDir(root string) error {
+	dir := ProjectDir(root)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	guard := filepath.Join(dir, ".gitignore")
+	if _, err := os.Stat(guard); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return os.WriteFile(guard, []byte(projectGitignore), 0o600)
+}
+
+// MigrateWorkspace moves a valid v2 root-level corum.yaml into the
+// project-local configuration directory. It refuses ambiguous layouts and
+// validates before changing the filesystem.
+func MigrateWorkspace(root string) (bool, error) {
+	legacy := filepath.Join(root, "corum.yaml")
+	current := WorkspacePath(root)
+	_, legacyErr := os.Stat(legacy)
+	_, currentErr := os.Stat(current)
+	legacyExists := legacyErr == nil
+	currentExists := currentErr == nil
+	if legacyErr != nil && !os.IsNotExist(legacyErr) {
+		return false, legacyErr
+	}
+	if currentErr != nil && !os.IsNotExist(currentErr) {
+		return false, currentErr
+	}
+	if legacyExists && currentExists {
+		return false, errors.New("both corum.yaml and .config/corum/corum.yaml exist; remove the unintended copy")
+	}
+	if !legacyExists {
+		return false, nil
+	}
+	if _, err := loadWorkspaceFile(legacy); err != nil {
+		return false, err
+	}
+	if err := EnsureProjectDir(root); err != nil {
+		return false, err
+	}
+	if err := os.Rename(legacy, current); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// LoadWorkspace reads .config/corum/corum.yaml below root without changing
+// the vault.
 func LoadWorkspace(root string) (Workspace, error) {
-	var workspace Workspace
-	path := filepath.Join(root, "corum.yaml")
-	if err := decodeFile(path, &workspace); err != nil {
+	workspace, err := loadWorkspaceFile(WorkspacePath(root))
+	if err != nil {
 		return Workspace{}, fmt.Errorf("load workspace: %w", err)
 	}
+	return workspace, nil
+}
+
+func loadWorkspaceFile(path string) (Workspace, error) {
+	var workspace Workspace
+	if err := decodeFile(path, &workspace); err != nil {
+		return Workspace{}, err
+	}
 	if err := validateWorkspace(workspace); err != nil {
-		return Workspace{}, fmt.Errorf("load workspace: %w", err)
+		return Workspace{}, err
 	}
 	return workspace, nil
 }

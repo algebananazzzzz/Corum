@@ -21,7 +21,7 @@ a title or summary.
 
 | Effective service | Inputs |
 | --- | --- |
-| Jira enabled | `corum.yaml` Jira conventions, course epic, `state/jira.json`, and [Jira planning](references/jira-board.md) |
+| Jira enabled | `.config/corum/corum.yaml` Jira conventions, course epic, `state/jira.json`, and [Jira planning](references/jira-board.md) |
 | Jira disabled | None: do not read Jira files, configuration, credentials, or network state |
 | Wiki enabled | `state/wiki.json`, wiki index/pages, configured split rule, and changed raw sources |
 | Wiki disabled | None: do not read wiki state, pages, templates, or raw content for wiki planning |

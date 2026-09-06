@@ -27,35 +27,15 @@ type authRecord struct {
 }
 
 // AuthCachePathFor returns the project-local cache path under a validated
-// vault, or the platform user configuration fallback when no vault is given.
-// The vault-local form is the default: credentials travel with the vault they
-// authenticate, and the directory is gitignored.
+// vault.
 func AuthCachePathFor(root string) (string, error) {
 	if root == "" {
-		return AuthCachePath()
+		return "", errors.New("Jira authentication cache requires a project root")
 	}
 	return filepath.Join(root, ".config", "corum", "auth.json"), nil
 }
 
-// AuthCachePath is the global fallback used only without a vault context.
-func AuthCachePath() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("locate Jira authentication cache: %w", err)
-	}
-	return filepath.Join(dir, "corum", "auth.json"), nil
-}
-
-// ClearAuth removes only Corum's OAuth cache. It is safe to call repeatedly.
-func ClearAuth() (bool, error) {
-	path, err := AuthCachePath()
-	if err != nil {
-		return false, err
-	}
-	return clearAuth(path)
-}
-
-// ClearAuthFor removes the cache for the given vault (or global fallback).
+// ClearAuthFor removes the cache for the given vault.
 func ClearAuthFor(root string) (bool, error) {
 	path, err := AuthCachePathFor(root)
 	if err != nil {
@@ -72,7 +52,7 @@ type AuthSnapshot struct {
 	exists bool
 }
 
-// SnapshotAuthFor preserves the raw cache for a vault (or global fallback).
+// SnapshotAuthFor preserves the raw cache for a vault.
 func SnapshotAuthFor(root string) (AuthSnapshot, error) {
 	path, err := AuthCachePathFor(root)
 	if err != nil {
@@ -140,17 +120,14 @@ func (s AuthSnapshot) Restore() error {
 	return os.Rename(temporary, s.path)
 }
 
-// ensureCredentialGuard adds a gitignore so a vault-local credential
-// directory can never be committed. The global fallback directory is skipped.
+// ensureCredentialGuard adds a gitignore so project-local credentials cannot
+// be committed.
 func ensureCredentialGuard(dir string) error {
-	if global, err := AuthCachePath(); err == nil && dir == filepath.Dir(global) {
-		return nil
-	}
 	guard := filepath.Join(dir, ".gitignore")
 	if _, err := os.Stat(guard); err == nil {
 		return nil
 	}
-	if err := os.WriteFile(guard, []byte("*\n! .gitignore\n"), 0o600); err != nil {
+	if err := os.WriteFile(guard, []byte("/auth.json\n/canvas.json\n/.auth-*.json\n"), 0o600); err != nil {
 		return fmt.Errorf("write credential guard: %w", err)
 	}
 	return nil

@@ -51,11 +51,7 @@ func Open(ctx context.Context, options OpenOptions) (*RovoSession, error) {
 	options = withDefaults(options)
 	path := options.CachePath
 	if path == "" {
-		var err error
-		path, err = AuthCachePath()
-		if err != nil {
-			return nil, err
-		}
+		return nil, errors.New("Jira authentication cache requires a project path")
 	}
 	interactive := options.Interactive
 	if options.ForceReauth && !interactive {

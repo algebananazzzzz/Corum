@@ -13,6 +13,7 @@ import (
 	"github.com/algebananazzzzz/Corum/internal/lockfile"
 
 	"github.com/algebananazzzzz/Corum/internal/config"
+	"gopkg.in/yaml.v3"
 )
 
 func failRenameAt(wants ...int) func(string, string) error {
@@ -50,7 +51,6 @@ func testAssets(label string) fs.FS {
 
 func initializedVault(t *testing.T, label string) string {
 	t.Helper()
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "vault")
 	if err := Initialize(root, testWorkspace(), testAssets(label), label); err != nil {
 		t.Fatal(err)
@@ -102,7 +102,8 @@ func TestInitializeCreatesOnlyExpectedTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		".corum", ".corum/toolkit-version", "AGENTS.md", "corum.yaml", "courses",
+		".config", ".config/corum", ".config/corum/.gitignore", ".config/corum/corum.yaml",
+		".corum", ".corum/toolkit-version", "AGENTS.md", "courses",
 		"skills", "skills/example", "skills/example/SKILL.md",
 		"templates", "templates/template.md", "templates/wiki", "templates/wiki/index.md",
 	}
@@ -113,7 +114,7 @@ func TestInitializeCreatesOnlyExpectedTree(t *testing.T) {
 
 func TestInitializedConfigurationConformsToV2BlockSchema(t *testing.T) {
 	root := initializedVault(t, "v1")
-	contents, err := os.ReadFile(filepath.Join(root, "corum.yaml"))
+	contents, err := os.ReadFile(filepath.Join(root, ".config", "corum", "corum.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,39 +130,54 @@ func TestInitializedConfigurationConformsToV2BlockSchema(t *testing.T) {
 	}
 }
 
-func TestRegistryIsAbsoluteSortedAndDeduplicated(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	a := t.TempDir()
-	b := t.TempDir()
-	if err := Register(b); err != nil {
-		t.Fatal(err)
-	}
-	if err := Register(a); err != nil {
-		t.Fatal(err)
-	}
-	if err := Register(a); err != nil {
-		t.Fatal(err)
-	}
-	got, err := Registered()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{a, b}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Registered() = %#v, want %#v", got, want)
-	}
-}
-
-func TestValidateRegistersMovedVaultAndRejectsDuplicateCodes(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+func TestInitializeAndValidateDoNotWriteGlobalConfiguration(t *testing.T) {
+	globalConfig := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", globalConfig)
 	root := initializedVault(t, "old")
 	if _, courses, err := Validate(root); err != nil || len(courses) != 0 {
 		t.Fatalf("Validate() = %v courses, %v", len(courses), err)
 	}
-	registered, err := Registered()
-	if err != nil || !reflect.DeepEqual(registered, []string{root}) {
-		t.Fatalf("Registered() = %#v, %v", registered, err)
+	if _, err := os.Stat(filepath.Join(globalConfig, "corum")); !os.IsNotExist(err) {
+		t.Fatalf("global Corum configuration exists: %v", err)
 	}
+}
+
+func TestValidateMigratesLegacyV2WorkspaceConfiguration(t *testing.T) {
+	root := t.TempDir()
+	contents, err := yaml.Marshal(testWorkspace())
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(root, "corum.yaml")
+	if err := os.WriteFile(legacy, contents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "courses"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Validate(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy configuration remains: %v", err)
+	}
+	assertFileContent(t, filepath.Join(root, ".config", "corum", "corum.yaml"), string(contents))
+}
+
+func TestValidateRejectsAmbiguousWorkspaceConfigurations(t *testing.T) {
+	root := initializedVault(t, "old")
+	legacy := filepath.Join(root, "corum.yaml")
+	if err := os.WriteFile(legacy, []byte("do not overwrite"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Validate(root); err == nil {
+		t.Fatal("Validate() accepted both workspace configuration paths")
+	}
+	assertFileContent(t, legacy, "do not overwrite")
+}
+
+func TestValidateRejectsDuplicateCodes(t *testing.T) {
+	root := initializedVault(t, "old")
 	for _, directory := range []string{"A", "B"} {
 		path := filepath.Join(root, "courses", directory, "course.yaml")
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -208,40 +224,16 @@ func TestToolkitOverwritesOnlyOwnedFiles(t *testing.T) {
 	assertFileContent(t, userPath, "preserve")
 }
 
-func TestSyncToolkitsSkipsMissingVault(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	missing := filepath.Join(t.TempDir(), "missing")
-	if err := Register(missing); err != nil {
+func TestSyncToolkitSkipsCurrentProject(t *testing.T) {
+	root := initializedVault(t, "new")
+	agents := filepath.Join(root, "AGENTS.md")
+	if err := os.WriteFile(agents, []byte("current sentinel"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := SyncToolkits(testAssets("new"), "new")
-	if len(got) != 1 || got[0].Root != missing || got[0].Err == nil {
-		t.Fatalf("SyncToolkits() = %#v", got)
-	}
-}
-
-func TestSyncToolkitsRetriesOnlyVaultsWithOldMarkers(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	parent := t.TempDir()
-	current := filepath.Join(parent, "current")
-	stale := filepath.Join(parent, "stale")
-	if err := Initialize(current, testWorkspace(), testAssets("new"), "new"); err != nil {
+	if err := SyncToolkit(root, testAssets("new"), "new"); err != nil {
 		t.Fatal(err)
 	}
-	if err := Initialize(stale, testWorkspace(), testAssets("old"), "old"); err != nil {
-		t.Fatal(err)
-	}
-	currentAgents := filepath.Join(current, "AGENTS.md")
-	if err := os.WriteFile(currentAgents, []byte("current sentinel"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	results := SyncToolkits(testAssets("new"), "new")
-	if len(results) != 2 || results[0].Err != nil || results[1].Err != nil {
-		t.Fatalf("SyncToolkits() = %#v", results)
-	}
-	assertFileContent(t, currentAgents, "current sentinel")
-	assertFileContent(t, filepath.Join(stale, "AGENTS.md"), "new agents")
-	assertToolkitVersion(t, stale, "new")
+	assertFileContent(t, agents, "current sentinel")
 }
 
 func TestToolkitFailureRollsBackOwnedFiles(t *testing.T) {

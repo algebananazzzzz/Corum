@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,7 +39,7 @@ wiki: {}
 
 func writeConfig(t *testing.T, root, course, contents string) {
 	t.Helper()
-	path := filepath.Join(root, "corum.yaml")
+	path := filepath.Join(root, ".config", "corum", "corum.yaml")
 	if course != "" {
 		path = filepath.Join(root, "courses", course, "course.yaml")
 	}
@@ -84,12 +85,22 @@ func TestLoadRejectsVersionOneWithoutWriting(t *testing.T) {
 	if _, err := LoadWorkspace(root); err == nil {
 		t.Fatal("LoadWorkspace() accepted version 1")
 	}
-	got, err := os.ReadFile(filepath.Join(root, "corum.yaml"))
+	got, err := os.ReadFile(filepath.Join(root, ".config", "corum", "corum.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(got) != contents {
 		t.Fatalf("corum.yaml changed to %q", got)
+	}
+}
+
+func TestLoadWorkspaceDoesNotReadLegacyRootConfiguration(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "corum.yaml"), []byte(validWorkspace), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadWorkspace(root); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("LoadWorkspace() error = %v, want not exist", err)
 	}
 }
 

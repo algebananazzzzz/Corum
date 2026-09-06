@@ -1,4 +1,4 @@
-// Package vault owns initialization, validation, registration, and replacement
+// Package vault owns initialization, validation, and replacement
 // of the small toolkit boundary inside a Corum vault.
 package vault
 
@@ -47,7 +47,10 @@ func Initialize(root string, workspace config.Workspace, assets fs.FS, toolkitVe
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(root, "corum.yaml"), contents, 0o644); err != nil {
+	if err := config.EnsureProjectDir(root); err != nil {
+		return err
+	}
+	if err := os.WriteFile(config.WorkspacePath(root), contents, 0o644); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Join(root, "courses"), 0o755); err != nil {
@@ -56,7 +59,7 @@ func Initialize(root string, workspace config.Workspace, assets fs.FS, toolkitVe
 	if err := installPayload(root, payload); err != nil {
 		return err
 	}
-	return Register(root)
+	return nil
 }
 
 func validateWorkspaceForInit(value config.Workspace) error {
@@ -66,7 +69,8 @@ func validateWorkspaceForInit(value config.Workspace) error {
 	return nil
 }
 
-// WriteWorkspace atomically replaces only corum.yaml after validating v2 data.
+// WriteWorkspace atomically replaces only the project-local corum.yaml after
+// validating v2 data.
 func WriteWorkspace(root string, workspace config.Workspace) error {
 	if err := config.ValidateWorkspace(workspace); err != nil {
 		return fmt.Errorf("validate workspace: %w", err)
@@ -75,7 +79,7 @@ func WriteWorkspace(root string, workspace config.Workspace) error {
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(root, "corum.yaml")
+	path := config.WorkspacePath(root)
 	file, err := os.CreateTemp(filepath.Dir(path), ".corum-*.yaml")
 	if err != nil {
 		return err

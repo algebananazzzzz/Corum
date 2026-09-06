@@ -10,8 +10,9 @@ import (
 	"testing"
 )
 
-func TestLoadCredentialPrefersEnvironmentThenProjectLocal(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+func TestLoadCredentialUsesOnlyEnvironmentThenProjectLocal(t *testing.T) {
+	globalConfig := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", globalConfig)
 	t.Setenv("CORUM_CANVAS_TOKEN", "")
 	root := t.TempDir()
 	project, _ := CredentialPathFor(root)
@@ -32,22 +33,24 @@ func TestLoadCredentialPrefersEnvironmentThenProjectLocal(t *testing.T) {
 		t.Fatalf("env precedence: %q, %v", token, err)
 	}
 	t.Setenv("CORUM_CANVAS_TOKEN", "")
-	if err := SaveCredential("", "global-token"); err != nil {
+	globalPath := filepath.Join(globalConfig, "corum", "canvas.json")
+	if err := os.MkdirAll(filepath.Dir(globalPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	token, err = LoadCredential("")
-	if err != nil || token != "global-token" {
-		t.Fatalf("global fallback: %q, %v", token, err)
-	}
-	removed, err := ClearCredential("")
-	if err != nil || !removed {
-		t.Fatalf("ClearCredential = %v, %v", removed, err)
+	if err := os.WriteFile(globalPath, []byte(`{"version":1,"token":"global-token"}`), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.Remove(project); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadCredential(""); !os.IsNotExist(err) && err != ErrNoCredential {
-		t.Fatalf("after clear: %v", err)
+	if _, err := LoadCredential(root); err != ErrNoCredential {
+		t.Fatalf("global credential was used: %v", err)
+	}
+}
+
+func TestCredentialPathRequiresProjectRoot(t *testing.T) {
+	if _, err := CredentialPathFor(""); err == nil {
+		t.Fatal("CredentialPathFor accepted an empty project root")
 	}
 }
 

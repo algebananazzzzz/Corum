@@ -164,21 +164,26 @@ func TestInstalledBinary(t *testing.T) {
 		}
 	})
 
-	t.Run("headless init creates a valid registered vault", func(t *testing.T) {
+	t.Run("headless init creates a valid project-local vault", func(t *testing.T) {
 		environment := isolatedEnvironment(t)
 		vault := filepath.Join(environment.root, "vault")
 		mustSucceed(t, runBinary(binary, environment, "", "", "init", "--defaults", vault))
+		if _, err := os.Stat(filepath.Join(vault, ".config", "corum", "corum.yaml")); err != nil {
+			t.Fatalf("project-local configuration: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(vault, "corum.yaml")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("unexpected root configuration: %v", err)
+		}
 
 		result := runBinary(binary, environment, "", "", "doctor", vault)
 		mustSucceed(t, result)
 		if result.stdout != "doctor: 0 courses\n" {
 			t.Fatalf("doctor stdout = %q", result.stdout)
 		}
-		assertRegistry(t, environment.config, []string{vault})
-		assertNoOAuthCache(t, environment.config)
+		assertNoGlobalCorumConfig(t, environment.config)
 	})
 
-	t.Run("v1 vault rejection leaves the vault and registry unchanged", func(t *testing.T) {
+	t.Run("v1 vault rejection leaves the vault and global config unchanged", func(t *testing.T) {
 		environment := isolatedEnvironment(t)
 		vault := filepath.Join(environment.root, "v1-vault")
 		mustWrite(t, filepath.Join(vault, "corum.yaml"), "schema: 1\nworkspace:\n  timezone: Asia/Singapore\n  term: old\n")
@@ -193,8 +198,28 @@ func TestInstalledBinary(t *testing.T) {
 		if after := snapshot(t, vault); after != before {
 			t.Fatalf("v1 rejection mutated vault:\nbefore:\n%s\nafter:\n%s", before, after)
 		}
-		assertRegistry(t, environment.config, nil)
-		assertNoOAuthCache(t, environment.config)
+		assertNoGlobalCorumConfig(t, environment.config)
+	})
+
+	t.Run("legacy v2 workspace configuration moves into the project config directory", func(t *testing.T) {
+		environment := isolatedEnvironment(t)
+		vault := filepath.Join(environment.root, "legacy-v2-vault")
+		contents := "version: 2\nworkspace:\n  timezone: Asia/Singapore\n  term: AY2026/27 Semester 1\ncalendar:\n  timetable: Timetable.md\n  term: Term_Calendar.md\n"
+		mustWrite(t, filepath.Join(vault, "corum.yaml"), contents)
+		mustWrite(t, filepath.Join(vault, "keep.txt"), "user-owned\n")
+
+		result := runBinary(binary, environment, "", "", "doctor", vault)
+		mustSucceed(t, result)
+		if _, err := os.Stat(filepath.Join(vault, "corum.yaml")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("legacy configuration remains: %v", err)
+		}
+		if got := mustRead(t, filepath.Join(vault, ".config", "corum", "corum.yaml")); got != contents {
+			t.Fatalf("migrated configuration = %q", got)
+		}
+		if got := mustRead(t, filepath.Join(vault, "keep.txt")); got != "user-owned\n" {
+			t.Fatalf("user file = %q", got)
+		}
+		assertNoGlobalCorumConfig(t, environment.config)
 	})
 
 	t.Run("Jira-disabled validation does not require OAuth", func(t *testing.T) {
@@ -209,13 +234,13 @@ func TestInstalledBinary(t *testing.T) {
 		if !strings.Contains(result.stderr, "Jira is disabled for COURSE") {
 			t.Fatalf("Jira-disabled stderr = %q", result.stderr)
 		}
-		assertNoOAuthCache(t, environment.config)
+		assertNoGlobalCorumConfig(t, environment.config)
 	})
 
 	t.Run("Jira dry-run validates without OAuth or state writes", func(t *testing.T) {
 		environment := isolatedEnvironment(t)
 		vault := filepath.Join(environment.root, "vault")
-		mustWrite(t, filepath.Join(vault, "corum.yaml"), "version: 2\nworkspace:\n  timezone: Asia/Singapore\n  term: AY2026/27 Semester 1\njira:\n  cloud_id: cloud-1\n  project: STUDY\ncalendar:\n  timetable: Timetable.md\n  term: Term_Calendar.md\n")
+		mustWrite(t, filepath.Join(vault, ".config", "corum", "corum.yaml"), "version: 2\nworkspace:\n  timezone: Asia/Singapore\n  term: AY2026/27 Semester 1\njira:\n  cloud_id: cloud-1\n  project: STUDY\ncalendar:\n  timetable: Timetable.md\n  term: Term_Calendar.md\n")
 		mustWrite(t, filepath.Join(vault, "courses", "COURSE", "course.yaml"), "version: 2\ncode: COURSE\njira:\n  epic: STUDY-1\n")
 		plan := `{"version":2,"course":"COURSE","epic":"STUDY-1","actions":[]}`
 
@@ -231,10 +256,10 @@ func TestInstalledBinary(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(vault, "courses", "COURSE", "state")); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("dry-run state path exists: %v", err)
 		}
-		assertNoOAuthCache(t, environment.config)
+		assertNoGlobalCorumConfig(t, environment.config)
 	})
 
-	t.Run("release startup replaces two toolkits and preserves user files", func(t *testing.T) {
+	t.Run("release startup refreshes only the active project toolkit", func(t *testing.T) {
 		environment := isolatedEnvironment(t)
 		vaults := []string{filepath.Join(environment.root, "vault-b"), filepath.Join(environment.root, "vault-a")}
 		for _, vault := range vaults {
@@ -245,9 +270,18 @@ func TestInstalledBinary(t *testing.T) {
 			mustWrite(t, filepath.Join(vault, "user-sentinel.md"), "preserve root file\n")
 			mustWrite(t, filepath.Join(vault, "courses", "user-sentinel.md"), "preserve course file\n")
 		}
-		assertRegistry(t, environment.config, []string{vaults[1], vaults[0]})
-
 		mustSucceed(t, runBinary(binary, environment, "", "", "version"))
+		for _, vault := range vaults {
+			if got := mustRead(t, filepath.Join(vault, ".corum", "toolkit-version")); got != "v1.9.0\n" {
+				t.Fatalf("version command changed %s toolkit to %q", vault, got)
+			}
+		}
+
+		mustSucceed(t, runBinary(binary, environment, "", "", "doctor", vaults[0]))
+		if got := mustRead(t, filepath.Join(vaults[1], ".corum", "toolkit-version")); got != "v1.9.0\n" {
+			t.Fatalf("inactive project toolkit changed to %q", got)
+		}
+		mustSucceed(t, runBinary(binary, environment, "", "", "doctor", vaults[1]))
 		for _, vault := range vaults {
 			agents := mustRead(t, filepath.Join(vault, "AGENTS.md"))
 			if !strings.Contains(agents, "# Corum Vault Instructions") || strings.Contains(agents, "stale owned toolkit") {
@@ -266,6 +300,7 @@ func TestInstalledBinary(t *testing.T) {
 				t.Fatalf("%s course sentinel = %q", vault, got)
 			}
 		}
+		assertNoGlobalCorumConfig(t, environment.config)
 	})
 }
 
@@ -493,32 +528,10 @@ func mustExit(t *testing.T, result commandResult, want int) {
 	}
 }
 
-func assertRegistry(t *testing.T, configDirectory string, want []string) {
+func assertNoGlobalCorumConfig(t *testing.T, configDirectory string) {
 	t.Helper()
-	path := filepath.Join(configDirectory, "corum", "vaults.json")
-	if want == nil {
-		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("unexpected registry at %s: %v", path, err)
-		}
-		return
-	}
-	var registry struct {
-		Version int      `json:"version"`
-		Vaults  []string `json:"vaults"`
-	}
-	if err := json.Unmarshal([]byte(mustRead(t, path)), &registry); err != nil {
-		t.Fatalf("decode registry: %v", err)
-	}
-	sort.Strings(want)
-	if registry.Version != 2 || strings.Join(registry.Vaults, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("registry = %#v, want version 2 and %#v", registry, want)
-	}
-}
-
-func assertNoOAuthCache(t *testing.T, configDirectory string) {
-	t.Helper()
-	if _, err := os.Stat(filepath.Join(configDirectory, "corum", "auth.json")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("OAuth cache was created: %v", err)
+	if _, err := os.Stat(filepath.Join(configDirectory, "corum")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("global Corum configuration was created: %v", err)
 	}
 }
 

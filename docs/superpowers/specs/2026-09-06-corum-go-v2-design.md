@@ -53,23 +53,24 @@ credentials, OAuth callback parameters, raw remote payloads, or stack traces.
 
 ### Authentication flow
 
-`corum init` is purely local and deterministic: it writes `corum.yaml`, the
-toolkit, and registers the vault, and performs no network, browser, or
-credential work.
+`corum init` is purely local and deterministic: it writes
+`.config/corum/corum.yaml` and the toolkit, and performs no network, browser,
+or credential work.
 
 `corum auth` authenticates every service enabled in the vault. The Canvas
 flow stores the API token (prompting once when none is stored), validates it
 against the configured origin, and prints the accessible courses with their
 numeric IDs for `course.yaml` authoring. The Jira flow runs a fresh browser
 OAuth against the configured vault, lets the user pick site and project, and
-updates only the non-secret `jira` block in `corum.yaml`. `corum auth jira`
+updates only the non-secret `jira` block in `.config/corum/corum.yaml`.
+`corum auth jira`
 and `corum auth canvas` run the individual flows.
 
-Credentials are project-local by default: `<vault>/.config/corum/` holds
-`canvas.json` and `auth.json` with `0700`/`0600` modes and a gitignore guard.
-The platform user configuration directory (`~/.config/corum` or equivalent)
-is used only when a command runs without a vault context. The
-`CORUM_CANVAS_TOKEN` environment variable still takes precedence for
+All configuration is project-local: `<vault>/.config/corum/` holds
+`corum.yaml`, `canvas.json`, and `auth.json`. The directory is `0700`, the
+credential files are `0600`, and its gitignore excludes credentials. Commands
+without an explicit path use the current project; there is no global
+configuration fallback. `CORUM_CANVAS_TOKEN` still takes precedence for
 automation.
 
 ## Repository and Package Structure
@@ -79,7 +80,7 @@ cmd/corum/                 entry point and version injection
 internal/cli/              command parsing and orchestration
 internal/ui/               Huh prompts and accessible terminal mode
 internal/config/           v2 YAML models and validation
-internal/vault/            initialization, doctor, registry, toolkit sync
+internal/vault/            initialization, doctor, toolkit sync
 internal/canvas/           Canvas HTTP capture and content conversion
 internal/jira/             OAuth, Rovo adapter, plans, cache, reconciliation
 internal/update/           release checks, verification, self-replacement
@@ -97,8 +98,10 @@ installation instructions. No dual-runtime release is produced.
 
 ## Clean v2 Configuration
 
-The root configuration is `corum.yaml` with `version: 2`. Service presence is
-the feature switch; v1's separate `features` mapping is removed.
+The project configuration is `.config/corum/corum.yaml` with `version: 2`.
+Service presence is the feature switch; v1's separate `features` mapping is
+removed. A valid legacy v2 root `corum.yaml` is atomically moved on first open;
+v1 files are not moved, and dual paths are rejected as ambiguous.
 
 ```yaml
 version: 2
@@ -135,12 +138,15 @@ origin, and wiki choice. It is purely local and deterministic: no network,
 browser, OAuth, or credential work happens during initialization, and no Jira
 step is offered. The final summary contains no credentials. Nothing is written
 before confirmation, and initialization refuses a nonempty target. Jira is
-configured later by `corum auth` after a `jira` block exists in `corum.yaml`.
+configured later by `corum auth` after a `jira` block exists in
+`.config/corum/corum.yaml`.
 
 The binary embeds the canonical toolkit. Initialization writes:
 
 ```text
-corum.yaml
+.config/corum/
+  .gitignore
+  corum.yaml
 AGENTS.md
 skills/
 templates/
@@ -148,15 +154,12 @@ courses/
 .corum/toolkit-version
 ```
 
-The initialized vault is added atomically to the per-user registry. Opening a
-valid v2 vault through another command also registers it, allowing manually moved
-vaults to repair registry membership.
-
 Toolkit synchronization stages a complete new `AGENTS.md`, `skills/`, and
 `templates/` set beside the existing files and replaces only those owned paths.
 The version marker changes only after all replacements succeed. User files are
-outside this boundary. Missing or invalid registry entries are skipped and
-reported; they do not block other vaults.
+outside this boundary. There is no registry: release startup refreshes only the
+valid project targeted by the current vault-aware command. Failures are warned
+without blocking command dispatch.
 
 ## Jira OAuth and Rovo MCP
 
@@ -209,8 +212,8 @@ No automatic retry may duplicate a potentially applied mutation.
 ## Canvas and Wiki Boundaries
 
 Canvas remains a direct HTTPS client authenticated with the project-local
-credential store (environment variable first, then `<vault>/.config/corum/canvas.json`,
-then the global fallback).
+credential store (environment variable first, then
+`<vault>/.config/corum/canvas.json`).
 The Go port preserves origin restrictions, pagination, source selection, safe
 path placement, verifier-bearing URL stripping, conversion behavior, dry-run,
 atomic state, and partial-failure reporting. HTML-to-Markdown and PDF extraction
@@ -258,8 +261,8 @@ At process start:
 5. A newer release triggers archive/checksum download and verification.
 6. Corum atomically replaces its executable and re-executes the original command
    with an internal guard preventing an update loop.
-7. The new process synchronizes every registered vault's toolkit before running
-   the requested command.
+7. For vault-aware commands, the new process synchronizes only the active
+   project's toolkit before running the requested command.
 
 Checksum failure, unsupported platform, unwritable executable, or extraction
 failure leaves the installed binary and toolkits unchanged and emits one concise
@@ -281,7 +284,7 @@ Implementation proceeds risk-first:
 4. Port Jira plan validation, adapter mappings, sequential application, cache,
    and reconciliation.
 5. Port Canvas capture, conversion, placement, and state behavior.
-6. Add vault registration, transactional toolkit synchronization, installer,
+6. Add active-vault transactional toolkit synchronization, installer,
    automatic updater, GoReleaser, and GitHub Actions.
 7. Remove Python code and packaging, update documentation, and run acceptance.
 
@@ -306,8 +309,8 @@ Tests use temporary directories and local HTTP/MCP servers. They cover strict v2
 validation, no-write cancellation, path safety, OAuth-cache permissions and
 redaction, Rovo normalization, all Jira operation mappings, mutation uncertainty,
 reconciliation, Canvas fixtures, update intervals and opt-out, release selection,
-checksum rejection, executable replacement, registry repair, and transactional
-toolkit replacement.
+checksum rejection, executable replacement, active-project toolkit refresh, and
+transactional toolkit replacement.
 
 Final installed-binary acceptance covers:
 

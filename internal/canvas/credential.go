@@ -8,10 +8,9 @@ import (
 	"path/filepath"
 )
 
-// The Canvas token is a credential, so it lives in a private, ignored
-// per-vault directory by default and in the platform user configuration
-// directory only when no vault is involved. The CORUM_CANVAS_TOKEN
-// environment variable always takes precedence for automation.
+// The Canvas token is a credential, so it lives only in a private, ignored
+// project-local directory. The CORUM_CANVAS_TOKEN environment variable always
+// takes precedence for automation.
 
 const credentialVersion = 1
 
@@ -23,15 +22,10 @@ type credentialFile struct {
 	Token   string `json:"token"`
 }
 
-// CredentialPathFor returns the project-local credential path when root is a
-// validated vault and the global fallback path otherwise.
+// CredentialPathFor returns the project-local credential path.
 func CredentialPathFor(root string) (string, error) {
 	if root == "" {
-		dir, err := os.UserConfigDir()
-		if err != nil {
-			return "", fmt.Errorf("locate Canvas credential: %w", err)
-		}
-		return filepath.Join(dir, "corum", "canvas.json"), nil
+		return "", errors.New("Canvas credential requires a project root")
 	}
 	return filepath.Join(root, ".config", "corum", "canvas.json"), nil
 }
@@ -48,33 +42,20 @@ func ensureCredentialDir(path string) error {
 	}
 	guard := filepath.Join(dir, ".gitignore")
 	if _, err := os.Stat(guard); err != nil {
-		if err := os.WriteFile(guard, []byte("*\n! .gitignore\n"), 0o600); err != nil {
+		if err := os.WriteFile(guard, []byte("/auth.json\n/canvas.json\n/.auth-*.json\n"), 0o600); err != nil {
 			return fmt.Errorf("write Canvas credential guard: %w", err)
 		}
 	}
 	return nil
 }
 
-// LoadCredential returns the effective Canvas token and whether a value is
-// available: environment first, then project-local, then the global fallback.
+// LoadCredential returns the effective Canvas token: environment first, then
+// the project-local credential.
 func LoadCredential(root string) (string, error) {
 	if token := os.Getenv("CORUM_CANVAS_TOKEN"); token != "" {
 		return token, nil
 	}
-	if root != "" {
-		path, err := CredentialPathFor(root)
-		if err != nil {
-			return "", err
-		}
-		token, err := readCredential(path)
-		if err == nil {
-			return token, nil
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return "", err
-		}
-	}
-	path, err := CredentialPathFor("")
+	path, err := CredentialPathFor(root)
 	if err != nil {
 		return "", err
 	}

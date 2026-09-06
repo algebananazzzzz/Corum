@@ -9,12 +9,15 @@ import (
 	"github.com/algebananazzzzz/Corum/internal/config"
 )
 
-// Validate loads a vault and every course file, rejects duplicate course codes,
-// and registers the resulting absolute vault path only after success.
+// Validate upgrades a legacy v2 workspace path, loads the vault and every
+// course file, and rejects duplicate course codes.
 func Validate(root string) (config.Workspace, []config.Course, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return config.Workspace{}, nil, err
+	}
+	if _, err := config.MigrateWorkspace(root); err != nil {
+		return config.Workspace{}, nil, fmt.Errorf("migrate workspace configuration: %w", err)
 	}
 	workspace, err := config.LoadWorkspace(root)
 	if err != nil {
@@ -46,9 +49,6 @@ func Validate(root string) (config.Workspace, []config.Course, error) {
 		}
 		codes[course.Code] = struct{}{}
 		courses = append(courses, course)
-	}
-	if err := Register(root); err != nil {
-		return config.Workspace{}, nil, err
 	}
 	return workspace, courses, nil
 }

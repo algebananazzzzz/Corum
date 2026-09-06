@@ -21,6 +21,12 @@ func TestAuthCacheMissingReturnsNotExist(t *testing.T) {
 	}
 }
 
+func TestAuthCachePathRequiresProjectRoot(t *testing.T) {
+	if _, err := AuthCachePathFor(""); err == nil {
+		t.Fatal("AuthCachePathFor accepted an empty project root")
+	}
+}
+
 func TestAuthCacheRoundTripIsPrivate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "auth.json")
 	want := authRecord{Version: 1, ClientID: "client", Issuer: "https://issuer.example", AuthURL: "https://issuer.example/auth", TokenURL: "https://issuer.example/token", RedirectURL: "http://127.0.0.1:1234/callback", Scopes: []string{"read"}, Token: &oauth2.Token{AccessToken: "synthetic-access", RefreshToken: "synthetic-refresh", Expiry: time.Now().Add(time.Hour)}}

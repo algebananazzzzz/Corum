@@ -31,9 +31,9 @@ automatic check is a warning and does not block the requested command.
 
 ## Credential boundary
 
-Credentials are stored project-local by default, in `<vault>/.config/corum/`,
-with `0700` directories, `0600` files, and a gitignore guard so they travel with
-the vault and are never committed.
+All configuration is stored project-locally in `<vault>/.config/corum/`.
+`corum.yaml` contains non-secret workspace settings; credential files use
+`0600` modes within the `0700` directory and are excluded by its gitignore.
 
 - `corum auth canvas` (or the combined `corum auth`) stores the Canvas API token
   at `<vault>/.config/corum/canvas.json`. It is read only for enabled,
@@ -43,10 +43,9 @@ the vault and are never committed.
 - Jira uses Atlassian browser OAuth only. Corum does not accept Jira email/API
   tokens and never stores credentials in YAML, Markdown, or state. `corum auth
   jira` writes the OAuth record to `<vault>/.config/corum/auth.json`.
-- Commands run without a vault context fall back to the platform user
-  configuration directory (normally `~/.config/corum/` on Linux). On POSIX
-  systems Corum requires the credential directory to be `0700` and the files to
-  be `0600` before reading.
+- Commands without an explicit vault path use the current project. Corum never
+  reads or writes a global configuration directory. The only global Corum data
+  is the non-secret update-check cache in the platform user cache directory.
 - Do not copy, inspect, log, or commit credential files. Run `corum jira logout`
   and revoke Atlassian access after suspected exposure.
 
@@ -66,10 +65,12 @@ rollout:
 - `.corum/toolkit-version`
 
 Do not store personal changes inside those paths. Everything else is user-owned,
-including `corum.yaml`, `courses/`, raw captures, wiki pages and assets, course
-state, calendars, changelogs, and credentials. Corum must preserve user-owned
+including `.config/corum/corum.yaml`, `courses/`, raw captures, wiki pages and
+assets, course state, calendars, changelogs, and credentials. Corum must preserve user-owned
 paths when updating the toolkit. It refuses to initialize a nonempty directory
-and rejects v1 configuration before registering or modifying that vault.
+and rejects v1 configuration before modifying that vault. For an existing v2
+vault, it atomically moves root `corum.yaml` to `.config/corum/corum.yaml`; it
+refuses to choose when both paths exist.
 
 Wiki prose is authored by an LLM operating through the installed skills, never by
 Corum code. Review the single combined Jira/wiki plan before allowing mutations.
