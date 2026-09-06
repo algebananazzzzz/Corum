@@ -6,17 +6,22 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/algebananazzzzz/Corum/internal/config"
 )
 
-func failRenameAt(want int) func(string, string) error {
+func failRenameAt(wants ...int) func(string, string) error {
+	failures := map[int]bool{}
+	for _, want := range wants {
+		failures[want] = true
+	}
 	count := 0
 	return func(old, new string) error {
 		count++
-		if count == want {
+		if failures[count] {
 			return errors.New("injected rename failure")
 		}
 		return os.Rename(old, new)
@@ -101,6 +106,24 @@ func TestInitializeCreatesOnlyExpectedTree(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("initialized tree = %#v, want %#v", got, want)
+	}
+}
+
+func TestInitializedConfigurationConformsToV2BlockSchema(t *testing.T) {
+	root := initializedVault(t, "v1")
+	contents, err := os.ReadFile(filepath.Join(root, "corum.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(contents), "jira: null") || strings.Contains(string(contents), "canvas: null") || strings.Contains(string(contents), "wiki: null") {
+		t.Fatalf("initialized configuration contains a null service block:\n%s", contents)
+	}
+	workspace, err := config.LoadWorkspace(root)
+	if err != nil {
+		t.Fatalf("initialized configuration is not valid v2 configuration: %v", err)
+	}
+	if workspace.Jira != nil || workspace.Canvas == nil {
+		t.Fatalf("initialized services = %+v", workspace)
 	}
 }
 
@@ -194,6 +217,74 @@ func TestToolkitFailureRollsBackOwnedFiles(t *testing.T) {
 			assertFileContent(t, filepath.Join(root, "templates", "template.md"), "old template")
 		})
 	}
+}
+
+func TestToolkitReportsRollbackFailureAndRetainsBackup(t *testing.T) {
+	root := initializedVault(t, "old")
+	err := syncToolkit(root, testAssets("new"), "new", failRenameAt(2, 3))
+	if err == nil || !strings.Contains(err.Error(), "injected rename failure") || !strings.Contains(err.Error(), "rollback") {
+		t.Fatalf("syncToolkit() error = %v", err)
+	}
+	entries, readErr := os.ReadDir(filepath.Join(root, ".corum"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), toolkitTemporaryPrefix+"backup-") {
+			assertFileContent(t, filepath.Join(root, ".corum", entry.Name()), "old agents")
+			return
+		}
+	}
+	t.Fatal("rollback removed the recoverable backup")
+}
+
+func TestToolkitKeepsRecoveryBackupAcrossAnotherFailedSync(t *testing.T) {
+	root := initializedVault(t, "old")
+	if err := syncToolkit(root, testAssets("new"), "new", failRenameAt(2, 3)); err == nil {
+		t.Fatal("first sync succeeded")
+	}
+	if err := syncToolkit(root, testAssets("newer"), "newer", failRenameAt(1)); err == nil {
+		t.Fatal("second sync succeeded")
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".corum"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), toolkitTemporaryPrefix+"backup-") {
+			assertFileContent(t, filepath.Join(root, ".corum", entry.Name()), "old agents")
+			return
+		}
+	}
+	t.Fatal("second failed sync discarded the recoverable backup")
+}
+
+func TestToolkitReportsRollbackRemovalFailureAndRetainsBackup(t *testing.T) {
+	root := initializedVault(t, "old")
+	agents := filepath.Join(root, "AGENTS.md")
+	originalRemoveAll := removeAll
+	removeAll = func(path string) error {
+		if path == agents {
+			return errors.New("injected removal failure")
+		}
+		return originalRemoveAll(path)
+	}
+	t.Cleanup(func() { removeAll = originalRemoveAll })
+	err := syncToolkit(root, testAssets("new"), "new", failRenameAt(4))
+	if err == nil || !strings.Contains(err.Error(), "injected removal failure") || !strings.Contains(err.Error(), "rollback") {
+		t.Fatalf("syncToolkit() error = %v", err)
+	}
+	entries, readErr := os.ReadDir(filepath.Join(root, ".corum"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), toolkitTemporaryPrefix+"backup-") && strings.Contains(entry.Name(), "AGENTS.md") {
+			assertFileContent(t, filepath.Join(root, ".corum", entry.Name()), "old agents")
+			return
+		}
+	}
+	t.Fatal("rollback removed the backup after replacement removal failed")
 }
 
 func assertToolkitVersion(t *testing.T, root, want string) {

@@ -137,6 +137,52 @@ func TestLoadCourseAcceptsHumanFolderNames(t *testing.T) {
 	}
 }
 
+func TestLoadCourseRejectsEscapingAndMismatchedCodes(t *testing.T) {
+	root := t.TempDir()
+	escaped := filepath.Join(root, "outside", "course.yaml")
+	if err := os.MkdirAll(filepath.Dir(escaped), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(escaped, []byte(validCourse), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadCourse(filepath.Join(root, "courses", "safe"), "../../../outside"); err == nil {
+		t.Fatal("LoadCourse() accepted an escaping course code")
+	}
+	writeConfig(t, root, "MATH101", strings.Replace(validCourse, "code: MATH101", "code: OTHER", 1))
+	if _, err := LoadCourse(root, "MATH101"); err == nil {
+		t.Fatal("LoadCourse() accepted a declared code that differs from its directory")
+	}
+}
+
+func TestLoadRejectsNullServiceBlocksAndMissingCanvasSources(t *testing.T) {
+	for name, contents := range map[string]string{
+		"workspace canvas null": strings.Replace(validWorkspace, "canvas:\n  url: https://canvas.example.edu", "canvas: null", 1),
+		"workspace jira null":   strings.Replace(validWorkspace, "jira:\n  cloud_id: opaque-cloud\n  project: TODO\n  transitions:\n    this_week: \"2\"", "jira: null", 1),
+		"workspace wiki null":   strings.Replace(validWorkspace, "wiki: {}", "wiki: null", 1),
+		"course canvas null":    strings.Replace(validCourse, "canvas:\n  id: 1\n  sources: [announcements, assignments]\n  folders:\n    Course Materials: lectures", "canvas: null", 1),
+		"course jira null":      strings.Replace(validCourse, "jira:\n  epic: TODO-1", "jira: null", 1),
+		"course wiki null":      strings.Replace(validCourse, "wiki: {}", "wiki: null", 1),
+		"course sources absent": strings.Replace(validCourse, "  sources: [announcements, assignments]\n", "", 1),
+		"course sources null":   strings.Replace(validCourse, "sources: [announcements, assignments]", "sources: null", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			if strings.HasPrefix(name, "workspace") {
+				writeConfig(t, root, "", contents)
+				if _, err := LoadWorkspace(root); err == nil {
+					t.Fatal("LoadWorkspace() succeeded")
+				}
+				return
+			}
+			writeConfig(t, root, "MATH101", contents)
+			if _, err := LoadCourse(root, "MATH101"); err == nil {
+				t.Fatal("LoadCourse() succeeded")
+			}
+		})
+	}
+}
+
 func TestEffectiveServicesUseBlockPresence(t *testing.T) {
 	workspace := Workspace{Canvas: &CanvasWorkspace{}, Jira: &JiraWorkspace{}, Wiki: &WikiWorkspace{}}
 	course := Course{Canvas: &CanvasCourse{}, Wiki: &WikiCourse{}}

@@ -6,7 +6,7 @@
   "required": ["version", "code"],
   "properties": {
     "version": {"const": 2},
-    "code": {"type": "string", "pattern": "^\\S+$"},
+    "code": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"},
     "canvas": {
       "type": "object",
       "additionalProperties": false,

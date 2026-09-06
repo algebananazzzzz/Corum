@@ -16,6 +16,7 @@ var (
 	projectRE    = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 	issueRE      = regexp.MustCompile(`^[A-Z][A-Z0-9_]*-[1-9][0-9]*$`)
 	identifierRE = regexp.MustCompile(`^\S+$`)
+	courseCodeRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 	transitionRE = regexp.MustCompile(`^[0-9]+$`)
 )
 
@@ -68,12 +69,15 @@ func validateCourse(value Course) error {
 	if value.Version != 2 {
 		return fmt.Errorf("unsupported configuration version %d (only version 2 is supported)", value.Version)
 	}
-	if !identifierRE.MatchString(value.Code) {
+	if !courseCodeRE.MatchString(value.Code) {
 		return fmt.Errorf("course code is invalid")
 	}
 	if value.Canvas != nil {
 		if value.Canvas.ID <= 0 {
 			return fmt.Errorf("canvas id must be positive")
+		}
+		if value.Canvas.Sources == nil {
+			return fmt.Errorf("canvas sources are required when canvas is configured")
 		}
 		seen := map[string]bool{}
 		for _, source := range value.Canvas.Sources {
@@ -93,6 +97,25 @@ func validateCourse(value Course) error {
 	}
 	if value.Jira != nil && !issueRE.MatchString(value.Jira.Epic) {
 		return fmt.Errorf("jira epic is invalid")
+	}
+	return nil
+}
+
+func rejectNullServiceBlocks(node *yaml.Node) error {
+	if node.Kind == yaml.DocumentNode && len(node.Content) == 1 {
+		node = node.Content[0]
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := node.Content[i], node.Content[i+1]
+		switch key.Value {
+		case "canvas", "jira", "wiki":
+			if value.Tag == "!!null" {
+				return fmt.Errorf("%s service block must be omitted or an object, not null", key.Value)
+			}
+		}
 	}
 	return nil
 }

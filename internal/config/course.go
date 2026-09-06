@@ -9,9 +9,9 @@ import (
 type Course struct {
 	Version int           `yaml:"version"`
 	Code    string        `yaml:"code"`
-	Canvas  *CanvasCourse `yaml:"canvas"`
-	Jira    *JiraCourse   `yaml:"jira"`
-	Wiki    *WikiCourse   `yaml:"wiki"`
+	Canvas  *CanvasCourse `yaml:"canvas,omitempty"`
+	Jira    *JiraCourse   `yaml:"jira,omitempty"`
+	Wiki    *WikiCourse   `yaml:"wiki,omitempty"`
 }
 
 type CanvasCourse struct {
@@ -47,7 +47,7 @@ func Effective(workspace Workspace, course Course) Services {
 
 // LoadCourse reads one course configuration below root without changing the vault.
 func LoadCourse(root, code string) (Course, error) {
-	if !identifierRE.MatchString(code) {
+	if !courseCodeRE.MatchString(code) {
 		return Course{}, fmt.Errorf("invalid course code %q", code)
 	}
 	var course Course
@@ -57,6 +57,9 @@ func LoadCourse(root, code string) (Course, error) {
 	}
 	if err := validateCourse(course); err != nil {
 		return Course{}, fmt.Errorf("load course %q: %w", code, err)
+	}
+	if course.Code != code {
+		return Course{}, fmt.Errorf("load course %q: declared code does not match directory", code)
 	}
 	return course, nil
 }

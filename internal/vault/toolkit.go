@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -10,6 +11,8 @@ import (
 )
 
 const toolkitTemporaryPrefix = ".corum-toolkit-"
+
+var removeAll = os.RemoveAll
 
 type assetFile struct {
 	path string
@@ -55,7 +58,7 @@ func syncToolkit(root string, assets fs.FS, version string, rename func(string, 
 	if err != nil {
 		return err
 	}
-	if err := cleanToolkitTemporaryFiles(root); err != nil {
+	if err := cleanToolkitTemporaryFiles(root, false); err != nil {
 		return err
 	}
 	corumDir := filepath.Join(root, ".corum")
@@ -67,7 +70,7 @@ func syncToolkit(root string, assets fs.FS, version string, rename func(string, 
 	if err := installPayload(stageRoot, payload); err != nil {
 		return err
 	}
-	defer os.RemoveAll(stageRoot)
+	defer removeAll(stageRoot)
 	items := []struct{ name string }{{"AGENTS.md"}, {"skills"}, {"templates"}, {".corum/toolkit-version"}}
 	replacements := make([]replacement, 0, len(items))
 	for _, item := range items {
@@ -82,41 +85,55 @@ func syncToolkit(root string, assets fs.FS, version string, rename func(string, 
 		item := &replacements[index]
 		if _, err := os.Lstat(item.target); err == nil {
 			if err := rename(item.target, item.backup); err != nil {
-				rollback(replacements, rename)
-				return fmt.Errorf("backup %s: %w", item.target, err)
+				return rollbackResult(fmt.Errorf("backup %s: %w", item.target, err), rollback(replacements, rename))
 			}
 			item.hadOld = true
 		} else if !os.IsNotExist(err) {
-			rollback(replacements, rename)
-			return err
+			return rollbackResult(err, rollback(replacements, rename))
 		}
 		if err := rename(item.stage, item.target); err != nil {
-			rollback(replacements, rename)
-			return fmt.Errorf("install %s: %w", item.target, err)
+			return rollbackResult(fmt.Errorf("install %s: %w", item.target, err), rollback(replacements, rename))
 		}
 		item.installed = true
 	}
 	for _, item := range replacements {
 		if item.hadOld {
-			_ = os.RemoveAll(item.backup)
+			_ = removeAll(item.backup)
 		}
+	}
+	if err := cleanToolkitTemporaryFiles(root, true); err != nil {
+		return fmt.Errorf("clean completed toolkit transaction: %w", err)
 	}
 	return nil
 }
 
-func rollback(items []replacement, rename func(string, string) error) {
+func rollbackResult(cause, rollbackErr error) error {
+	if rollbackErr == nil {
+		return cause
+	}
+	return errors.Join(cause, fmt.Errorf("rollback failure: %w", rollbackErr))
+}
+
+func rollback(items []replacement, rename func(string, string) error) error {
+	var errs []error
 	for index := len(items) - 1; index >= 0; index-- {
 		item := items[index]
 		if item.installed {
-			_ = os.RemoveAll(item.target)
+			if err := removeAll(item.target); err != nil {
+				errs = append(errs, fmt.Errorf("remove replacement %s: %w", item.target, err))
+				continue
+			}
 		}
 		if item.hadOld {
-			_ = rename(item.backup, item.target)
+			if err := rename(item.backup, item.target); err != nil {
+				errs = append(errs, fmt.Errorf("restore %s: %w", item.target, err))
+			}
 		}
 	}
+	return errors.Join(errs...)
 }
 
-func cleanToolkitTemporaryFiles(root string) error {
+func cleanToolkitTemporaryFiles(root string, cleanBackups bool) error {
 	corumDir := filepath.Join(root, ".corum")
 	entries, err := os.ReadDir(corumDir)
 	if os.IsNotExist(err) {
@@ -127,8 +144,8 @@ func cleanToolkitTemporaryFiles(root string) error {
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if strings.HasPrefix(name, toolkitTemporaryPrefix+"stage-") || strings.HasPrefix(name, toolkitTemporaryPrefix+"backup-") {
-			if err := os.RemoveAll(filepath.Join(corumDir, name)); err != nil {
+		if strings.HasPrefix(name, toolkitTemporaryPrefix+"stage-") || (cleanBackups && strings.HasPrefix(name, toolkitTemporaryPrefix+"backup-")) {
+			if err := removeAll(filepath.Join(corumDir, name)); err != nil {
 				return err
 			}
 		}

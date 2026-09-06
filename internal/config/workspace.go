@@ -14,9 +14,9 @@ import (
 type Workspace struct {
 	Version   int              `yaml:"version"`
 	Workspace WorkspaceDetails `yaml:"workspace"`
-	Canvas    *CanvasWorkspace `yaml:"canvas"`
-	Jira      *JiraWorkspace   `yaml:"jira"`
-	Wiki      *WikiWorkspace   `yaml:"wiki"`
+	Canvas    *CanvasWorkspace `yaml:"canvas,omitempty"`
+	Jira      *JiraWorkspace   `yaml:"jira,omitempty"`
+	Wiki      *WikiWorkspace   `yaml:"wiki,omitempty"`
 	Calendar  Calendar         `yaml:"calendar"`
 }
 
@@ -62,6 +62,9 @@ func decodeFile(path string, target any) error {
 	}
 	var node yaml.Node
 	if err := yaml.Unmarshal(data, &node); err != nil {
+		return err
+	}
+	if err := rejectNullServiceBlocks(&node); err != nil {
 		return err
 	}
 	if err := rejectCredentialKeys(&node); err != nil {
