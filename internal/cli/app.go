@@ -21,11 +21,12 @@ import (
 )
 
 var (
-	openJiraSession                                    = jira.Open
-	makeJiraClient                                     = jira.NewJiraClient
-	maybeUpdate                                        = update.Maybe
-	syncVaultToolkit func(string, fs.FS, string) error = vault.SyncToolkit
-	syncCanvas                                         = canvas.Sync
+	openJiraSession                                       = jira.Open
+	makeJiraClient                                        = jira.NewJiraClient
+	maybeUpdate                                           = update.Maybe
+	syncVaultToolkit    func(string, fs.FS, string) error = vault.SyncToolkit
+	refreshVaultToolkit func(string, fs.FS, string) error = vault.RefreshToolkit
+	syncCanvas                                            = canvas.Sync
 )
 
 // RunProcess performs invocation-time update and toolkit work before dispatching
@@ -68,7 +69,7 @@ func RunProcess(ctx context.Context, argv []string, in io.Reader, out, errOut io
 // Run dispatches the complete local Corum command surface.
 func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
 	if len(args) == 1 && args[0] == "--help" {
-		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum auth [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira status [PATH] | corum jira logout [PATH] | corum jira apply COURSE [--dry-run]")
+		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum auth [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira status [PATH] | corum jira logout [PATH] | corum jira apply COURSE [--dry-run]")
 		return 0
 	}
 	if len(args) == 1 && args[0] == "update" {
@@ -98,6 +99,23 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	}
 	if len(args) == 1 && args[0] == "version" {
 		fmt.Fprintln(out, buildinfo.Version)
+		return 0
+	}
+	if (len(args) == 2 || len(args) == 3) && args[0] == "toolkit" && args[1] == "update" {
+		path := "."
+		if len(args) == 3 {
+			path = args[2]
+		}
+		root, err := openVault(path)
+		if err != nil {
+			fmt.Fprintln(errOut, "vault validation failed")
+			return 1
+		}
+		if err := refreshVaultToolkit(root, corum.Assets, buildinfo.Version); err != nil {
+			fmt.Fprintln(errOut, "toolkit update failed")
+			return 1
+		}
+		fmt.Fprintln(out, "toolkit updated")
 		return 0
 	}
 	if (len(args) == 2 && args[0] == "init" && args[1] == "--help") || (len(args) == 3 && args[0] == "init" && args[1] == "--help") {
@@ -214,7 +232,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, label)
 		return 0
 	}
-	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum auth [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira status [PATH] | corum jira logout [PATH] | corum jira apply COURSE [--dry-run]")
+	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum auth [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira status [PATH] | corum jira logout [PATH] | corum jira apply COURSE [--dry-run]")
 	return 2
 }
 
@@ -474,6 +492,13 @@ func commandVaultPath(args []string) (string, bool) {
 		}
 	case "sync":
 		return ".", true
+	case "toolkit":
+		if len(args) == 2 && args[1] == "update" {
+			return ".", true
+		}
+		if len(args) == 3 && args[1] == "update" {
+			return args[2], true
+		}
 	case "jira":
 		if len(args) >= 2 && (args[1] == "apply" || args[1] == "status" || args[1] == "logout") {
 			if (args[1] == "status" || args[1] == "logout") && len(args) == 3 {

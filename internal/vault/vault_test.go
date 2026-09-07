@@ -115,7 +115,7 @@ func TestInitializeCreatesOnlyExpectedTree(t *testing.T) {
 func assertToolkitLinks(t *testing.T, root, label string) {
 	t.Helper()
 	for path, target := range map[string]string{
-		"AGENTS.md":      "CLAUDE.md",
+		"CLAUDE.md":      "AGENTS.md",
 		".claude/skills": "../skills",
 		".codex/skills":  "../skills",
 		".agents/skills": "../skills",
@@ -343,7 +343,7 @@ func TestToolkitKeepsRecoveryBackupAcrossAnotherFailedSync(t *testing.T) {
 
 func TestToolkitReportsRollbackRemovalFailureAndRetainsBackup(t *testing.T) {
 	root := initializedVault(t, "old")
-	agents := filepath.Join(root, "CLAUDE.md")
+	agents := filepath.Join(root, "AGENTS.md")
 	originalRemoveAll := removeAll
 	removeAll = func(path string) error {
 		if path == agents {
@@ -352,7 +352,7 @@ func TestToolkitReportsRollbackRemovalFailureAndRetainsBackup(t *testing.T) {
 		return originalRemoveAll(path)
 	}
 	t.Cleanup(func() { removeAll = originalRemoveAll })
-	err := syncToolkit(root, testAssets("new"), "new", failRenameAt(4))
+	err := syncToolkit(root, testAssets("new"), "new", failRenameAt(6))
 	if err == nil || !strings.Contains(err.Error(), "injected removal failure") || !strings.Contains(err.Error(), "rollback") {
 		t.Fatalf("syncToolkit() error = %v", err)
 	}
@@ -361,7 +361,7 @@ func TestToolkitReportsRollbackRemovalFailureAndRetainsBackup(t *testing.T) {
 		t.Fatal(readErr)
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), toolkitTemporaryPrefix+"backup-") && strings.Contains(entry.Name(), "CLAUDE.md") {
+		if strings.HasPrefix(entry.Name(), toolkitTemporaryPrefix+"backup-") && strings.Contains(entry.Name(), "AGENTS.md") {
 			assertFileContent(t, filepath.Join(root, ".corum", entry.Name()), "old agents")
 			return
 		}

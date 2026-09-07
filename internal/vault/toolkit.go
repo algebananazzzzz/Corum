@@ -19,7 +19,7 @@ const toolkitLockName = ".toolkit.lock"
 var removeAll = os.RemoveAll
 
 var toolkitLinks = []struct{ path, target string }{
-	{"AGENTS.md", "CLAUDE.md"},
+	{"CLAUDE.md", "AGENTS.md"},
 	{".claude/skills", "../skills"},
 	{".codex/skills", "../skills"},
 	{".agents/skills", "../skills"},
@@ -45,6 +45,11 @@ func SyncToolkit(root string, assets fs.FS, version string) error {
 	if toolkitIsCurrent(root, version) {
 		return nil
 	}
+	return syncToolkit(root, assets, version, os.Rename)
+}
+
+// RefreshToolkit replaces the complete toolkit with the version embedded in Corum.
+func RefreshToolkit(root string, assets fs.FS, version string) error {
 	return syncToolkit(root, assets, version, os.Rename)
 }
 
@@ -95,7 +100,7 @@ func syncToolkit(root string, assets fs.FS, version string, rename func(string, 
 	if err := installPayload(stageRoot, payload); err != nil {
 		return err
 	}
-	items := []string{"CLAUDE.md", "skills", "templates"}
+	items := []string{"AGENTS.md", "skills", "templates"}
 	for _, link := range toolkitLinks {
 		items = append(items, link.path)
 	}
@@ -198,7 +203,7 @@ func collectToolkit(assets fs.FS, version string) ([]assetFile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read embedded AGENTS.md: %w", err)
 	}
-	payload = append(payload, assetFile{path: "CLAUDE.md", data: agents, mode: 0o644})
+	payload = append(payload, assetFile{path: "AGENTS.md", data: agents, mode: 0o644})
 	for _, source := range []string{"agent-kit/skills", "agent-kit/templates"} {
 		err := fs.WalkDir(assets, source, func(item string, entry fs.DirEntry, err error) error {
 			if err != nil {

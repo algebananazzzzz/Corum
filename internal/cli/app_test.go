@@ -214,6 +214,28 @@ func TestRunUpdateContinuationReportsWithoutSecondCheck(t *testing.T) {
 	}
 }
 
+func TestRunToolkitUpdateRefreshesValidatedVault(t *testing.T) {
+	oldRefresh := refreshVaultToolkit
+	t.Cleanup(func() { refreshVaultToolkit = oldRefresh })
+	root := filepath.Join(t.TempDir(), "vault")
+	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("init code = %d", code)
+	}
+	refreshVaultToolkit = func(gotRoot string, _ fs.FS, _ string) error {
+		if gotRoot != root {
+			t.Fatalf("toolkit root = %q, want %q", gotRoot, root)
+		}
+		return nil
+	}
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), []string{"toolkit", "update", root}, nil, &out, &errOut); code != 0 {
+		t.Fatalf("Run code = %d, stderr = %q", code, errOut.String())
+	}
+	if out.String() != "toolkit updated\n" {
+		t.Fatalf("stdout = %q", out.String())
+	}
+}
+
 func TestRunInteractiveInitExplainsNonTTYFallback(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := Run(context.Background(), []string{"init", "vault"}, &bytes.Buffer{}, &out, &errOut); code != 2 {

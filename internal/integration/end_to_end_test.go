@@ -175,7 +175,7 @@ func TestInstalledBinary(t *testing.T) {
 			t.Fatalf("unexpected root configuration: %v", err)
 		}
 		for path, target := range map[string]string{
-			"AGENTS.md": "CLAUDE.md", ".claude/skills": "../skills",
+			"CLAUDE.md": "AGENTS.md", ".claude/skills": "../skills",
 			".codex/skills": "../skills", ".agents/skills": "../skills",
 		} {
 			got, err := os.Readlink(filepath.Join(vault, path))
@@ -195,6 +195,26 @@ func TestInstalledBinary(t *testing.T) {
 			t.Fatalf("doctor stdout = %q", result.stdout)
 		}
 		assertNoGlobalCorumConfig(t, environment.config)
+	})
+
+	t.Run("toolkit update refreshes a selected vault", func(t *testing.T) {
+		environment := isolatedEnvironment(t)
+		vault := filepath.Join(environment.root, "vault")
+		mustSucceed(t, runBinary(binary, environment, "", "", "init", "--defaults", vault))
+		mustWrite(t, filepath.Join(vault, "AGENTS.md"), "stale toolkit\n")
+
+		result := runBinary(binary, environment, "", "", "toolkit", "update", vault)
+		mustSucceed(t, result)
+		if result.stdout != "toolkit updated\n" {
+			t.Fatalf("toolkit update stdout = %q", result.stdout)
+		}
+		agents := mustRead(t, filepath.Join(vault, "AGENTS.md"))
+		if !strings.Contains(agents, "# Corum Wiki Guide") || strings.Contains(agents, "stale toolkit") {
+			t.Fatalf("AGENTS.md was not refreshed: %q", agents)
+		}
+		if target, err := os.Readlink(filepath.Join(vault, "CLAUDE.md")); err != nil || target != "AGENTS.md" {
+			t.Fatalf("CLAUDE.md link = %q, %v", target, err)
+		}
 	})
 
 	t.Run("Jira-disabled validation does not require OAuth", func(t *testing.T) {
@@ -259,7 +279,7 @@ func TestInstalledBinary(t *testing.T) {
 		mustSucceed(t, runBinary(binary, environment, "", "", "doctor", vaults[1]))
 		for _, vault := range vaults {
 			agents := mustRead(t, filepath.Join(vault, "AGENTS.md"))
-			if !strings.Contains(agents, "# Corum Vault Instructions") || strings.Contains(agents, "stale owned toolkit") {
+			if !strings.Contains(agents, "# Corum Wiki Guide") || strings.Contains(agents, "stale owned toolkit") {
 				t.Fatalf("%s AGENTS.md was not replaced: %q", vault, agents)
 			}
 			if _, err := os.Stat(filepath.Join(vault, "skills", "obsolete")); !errors.Is(err, os.ErrNotExist) {

@@ -83,3 +83,15 @@ Update Corum with:
 ```console
 corum update
 ```
+
+Refresh a vault's agent instructions, skills, templates, and assets with the toolkit embedded in the installed Corum version:
+
+```console
+corum toolkit update
+```
+
+Pass a vault path to refresh a different vault:
+
+```console
+corum toolkit update path-to-vault
+```
