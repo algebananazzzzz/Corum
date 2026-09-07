@@ -1,10 +1,5 @@
 # Course Concept Boundaries
 
-Read `courses/{{COURSE}}/course.yaml` and use `wiki.split_rules` when present.
-Interpret the value as the course's explicit concept-boundary instruction. If it is
-`default` or absent, keep concept pages coarse and split only when a page becomes
-heavy: roughly more than 200 lines or six content `##` sections, excluding Sources.
+Read `courses/{{COURSE}}/course.yaml` and use `wiki.split_rules` when present. Interpret the value as the course’s explicit concept-boundary instruction. With `default` or absent split rules, use broad concept pages and create a separate page when a concept grows beyond roughly 200 lines or six content `##` sections, excluding Sources.
 
-Split by independent purpose or mechanism, never merely by lecture, week, file, or
-slide-deck boundary. Named examples stay inside the owning concept unless they have
-their own purpose, lifecycle, constraints, and failure modes.
+Split concepts by independent purpose or mechanism. Keep named examples with their owning concept. Give an example its own page when it has an independent purpose, lifecycle, constraints, and failure modes.

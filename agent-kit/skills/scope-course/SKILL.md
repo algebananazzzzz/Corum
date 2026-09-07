@@ -1,105 +1,52 @@
 ---
 name: scope-course
-description: Use when an accepted Corum capture run must be mapped read-only into conditional Jira, wiki, and source-ingestion plans.
+description: Use when a selected Corum capture manifest needs structured Jira and wiki plans for its enabled workflows.
 ---
 
 # Scope Course Changes
 
-Map one supplied `corum sync ... --json` course manifest to an executable plan.
-This skill is read-only: do not call Jira, edit files, create issues, author pages,
-or invent information missing from the capture.
+Turn one selected `corum sync ... --json` manifest into structured Jira and wiki plans. This skill reads the manifest and course material, then returns the plan JSON. Read [error handling](references/error-handling.md) when a required input or prior result needs follow-up.
 
-## Read conditionally
+## 1. Read the current run
 
-Always read the selected course manifest, `courses/{{COURSE}}/course.yaml`, and
-only successful current-run changes under `courses/{{COURSE}}/raw/`. Treat
-manifest failures as unknown captures: copy their stable ID, source, raw path when
-known, and error to `unresolved_capture`, but do not scope or ingest unseen
-contents. Carry every successful change's manifest `id` and exact `raw_path`
-through all evidence and source-ingestion records; never reconstruct either from
-a title or summary.
+Read the selected manifest, `courses/{{COURSE}}/course.yaml`, and the successful current-run sources under `courses/{{COURSE}}/raw/`. Carry each source’s manifest `id`, exact `raw_path`, provenance label, and page range through the plan. Record unsuccessful captures in `unresolved_capture` with their ID, source, path, and error.
 
-| Effective service | Inputs |
-| --- | --- |
-| Jira enabled | `.config/corum/corum.yaml` Jira conventions, course epic, `state/jira.json`, and [Jira planning](references/jira-board.md) |
-| Jira disabled | None: do not read Jira files, configuration, credentials, or network state |
-| Wiki enabled | `state/wiki.json`, wiki index/pages, configured split rule, and changed raw sources |
-| Wiki disabled | None: do not read wiki state, pages, templates, or raw content for wiki planning |
+## 2. Establish workflow states
 
-An enabled Jira cache is a caller-owned precondition. If `state/jira.json` is
-absent, return `status: error` with code `jira_cache_missing` and its exact path;
-the caller must run the exact empty-plan workflow before retrying. Never reconcile
-or call Jira from this skill.
+`effective_features.jira` and `effective_features.wiki` decide whether the Jira and wiki workflows are enabled or disabled for the selected manifest.
 
-When the manifest carries a reconciled Jira `partial` or `failed` result, use its
-`applied` and `failures` as prior-write evidence and the refreshed complete cache
-as authoritative state. Produce a new minimal plan. Never reproduce an old action
-merely because it failed to return a key; return an error for manual reconciliation
-when the cache cannot disambiguate an uncertain create.
+| Workflow | Enabled inputs | Disabled result | | --- | --- | --- | | Jira | Workspace Jira settings, course epic, `state/jira.json`, and [Jira planning](references/jira-board.md) | `status: disabled`, `plan: null`, and empty evidence | | Wiki | `state/wiki.json`, wiki pages and index, course split rule, and captured sources | `status: disabled` with empty concept, ingestion, and ignored lists |
 
-When wiki is enabled for the first time, absence of both `state/wiki.json` and
-`wiki/` is an empty initial wiki. For any unreadable required enabled input, return
-only `status: error` with a stable code and exact path. A disabled service's absent
-files are expected and never errors.
+An enabled wiki with no state or pages begins as an empty wiki. An enabled Jira workflow uses the reconciled Jira cache supplied by `sync-course`.
 
-## Decide Jira actions
+## 3. Plan Jira actions
 
-Create only required actionable work, required sessions, or required dated
-milestones with no matching cached issue. Update a matching issue only when an
-owned value differs. Transition only when an effective configured transition is
-needed. Optional work, unknown attendance, lecture files, and recordings produce
-no Jira action unless they establish a separate obligation.
+Create Jira actions for required work, required sessions, required dated milestones, and changed course obligations. Use the matching cached issue to produce an update or transition for a changed owned value. Read [Jira planning](references/jira-board.md) for issue types, dates, details, and labels.
 
-The `plan.actions` array is the exact `corum jira apply` payload. Each item is one
-member of this closed union; extra fields are forbidden:
+Build `plan.actions` as the exact `corum jira apply` payload. Use one of these shapes for each action:
 
-- `create`: `action` plus `issue` only.
-- `update`: `action`, `key`, and `set` only.
-- `transition`: `action`, `key`, and `transition` only.
+| Action | Fields | | --- | --- | | `create` | `action`, `issue` | | `update` | `action`, `key`, `set` | | `transition` | `action`, `key`, `transition` |
 
-Put source IDs, raw-relative paths, display titles, reasons, and before/after
-detail in the parallel `evidence` array keyed by `action_index`, never inside an
-action. Each action must be executable without rereading raw content.
+Put source IDs, raw paths, display titles, reasons, and before/after detail in `evidence`, keyed by `action_index`. Each action and its evidence together show the course change and its source.
 
-## Decide wiki actions and ingestion
+## 4. Plan wiki actions
 
-- **Create:** the source teaches a distinct configured-split concept absent from
-  the wiki.
-- **Enrich:** an existing concept lacks substantive knowledge introduced by the
-  source.
-- **No Action:** the source is administrative, duplicate, or adds no knowledge.
+Create a wiki action when a source teaches a distinct concept. Enrich a wiki action when an existing concept gains substantive knowledge. Record administrative or duplicate sources as `ignored` with their reason.
 
-Scope concepts rather than lectures. One source may support several concepts and
-several sources may support one concept. Give every source its manifest ID, exact
-raw-relative path, stable provenance label, and exact PDF range. A concept action
-states knowledge to cover and evidence ranges, not draft prose.
+Scope concepts around learner questions. A source can support several concepts, and several sources can support one concept. Each concept action identifies its page, source paths, provenance labels, page ranges, coverage, and reason.
 
-For every successfully read, ingestion-eligible source provide one outcome:
+For each ingestion-eligible source, record one outcome: `ready` with its page and index dependencies, `skipped` with its page ranges and reason, or `ignored` with its administrative reason. Completed ingestion follows successful page, index, provenance, and review work.
 
-- `ready`: manifest ID, exact raw-relative path, nonblank provenance label or
-  justified `null`, and every page/index dependency that must succeed first.
-- `skipped`: manifest ID, path, label, page ranges, and deliberate index reason.
-- `ignored`: manifest ID, path, administrative reason, and no wiki-state change.
+## 5. Return the plan
 
-`state/wiki.json` owns only `version: 2` and `ingested`. Never invent page IDs,
-remote IDs, versions, or content hashes. A source becomes ingested only after all
-planned pages, index edits, provenance checks, and wiki review succeed.
-
-## Return JSON
-
-Return only valid JSON with this structure:
+Return valid JSON in this shape:
 
 ```json
 {
   "status": "ok",
   "course": "{{COURSE}}",
   "unresolved_capture": [
-    {
-      "id": "{{FAILURE_ID}}",
-      "source": "{{SOURCE}}",
-      "path": "{{RAW_PATH_OR_NULL}}",
-      "error": "{{CAPTURE_ERROR}}"
-    }
+    {"id":"{{FAILURE_ID}}","source":"{{SOURCE}}","path":"{{RAW_PATH_OR_NULL}}","error":"{{CAPTURE_ERROR}}"}
   ],
   "jira": {
     "status": "enabled",
@@ -108,65 +55,22 @@ Return only valid JSON with this structure:
       "course": "{{COURSE}}",
       "epic": "{{EPIC_KEY}}",
       "actions": [
-        {
-          "action": "create",
-          "issue": {
-            "type": "Task",
-            "parent": "{{EPIC_KEY}}",
-            "summary": "{{COURSE}} {{SUMMARY}}",
-            "description": "{{EXACT_DETAILS}}",
-            "due": "{{YYYY-MM-DD}}",
-            "labels": ["assessment"]
-          }
-        },
-        {
-          "action": "update",
-          "key": "{{ISSUE_KEY}}",
-          "set": {"due": "{{YYYY-MM-DD}}"}
-        },
-        {
-          "action": "transition",
-          "key": "{{ISSUE_KEY}}",
-          "transition": "{{CONFIGURED_TRANSITION_NAME}}"
-        }
+        {"action":"create","issue":{"type":"Task","parent":"{{EPIC_KEY}}","summary":"{{COURSE}} {{SUMMARY}}","description":"{{DETAILS}}","due":"{{YYYY-MM-DD}}","labels":["assessment"]}},
+        {"action":"update","key":"{{ISSUE_KEY}}","set":{"due":"{{YYYY-MM-DD}}"}},
+        {"action":"transition","key":"{{ISSUE_KEY}}","transition":"{{TRANSITION_NAME}}"}
       ]
     },
     "evidence": [
-      {
-        "action_index": 0,
-        "source_ids": ["{{CHANGE_ID}}"],
-        "sources": ["{{SOURCE_PATH}}"],
-        "reason": "{{WHY_REQUIRED}}"
-      }
+      {"action_index":0,"source_ids":["{{CHANGE_ID}}"],"sources":["{{SOURCE_PATH}}"],"reason":"{{REASON}}"}
     ]
   },
   "wiki": {
     "status": "enabled",
     "concepts": [
-      {
-        "action": "enrich",
-        "page": "wiki/concepts/{{CONCEPT}}.md",
-        "sources": [
-          {
-            "id": "{{CHANGE_ID}}",
-            "path": "{{SOURCE_PATH}}",
-            "label": "{{LABEL}}",
-            "pages": "p3-18"
-          }
-        ],
-        "coverage": ["{{KNOWLEDGE}}"],
-        "reason": "{{WHY_MISSING}}"
-      }
+      {"action":"enrich","page":"wiki/concepts/{{CONCEPT}}.md","sources":[{"id":"{{CHANGE_ID}}","path":"{{SOURCE_PATH}}","label":"{{LABEL}}","pages":"p3-18"}],"coverage":["{{KNOWLEDGE}}"],"reason":"{{REASON}}"}
     ],
     "ingestion": {
-      "ready": [
-        {
-          "id": "{{CHANGE_ID}}",
-          "path": "{{SOURCE_PATH}}",
-          "value": "{{LABEL}}",
-          "after": ["wiki/concepts/{{CONCEPT}}.md", "wiki/index.md"]
-        }
-      ],
+      "ready": [{"id":"{{CHANGE_ID}}","path":"{{SOURCE_PATH}}","value":"{{LABEL}}","after":["wiki/concepts/{{CONCEPT}}.md","wiki/index.md"]}],
       "skipped": []
     },
     "ignored": []
@@ -174,8 +78,4 @@ Return only valid JSON with this structure:
 }
 ```
 
-For a disabled service, return `status: disabled`, `plan: null`, and empty
-`evidence` for Jira, or empty `concepts`, `ingestion.ready`,
-`ingestion.skipped`, and `ignored` arrays for wiki. Use empty arrays for an enabled
-section with no actions. Consolidate repeated targets while keeping exact closed
-Jira action shapes.
+Use empty arrays for an enabled workflow with no planned actions. Consolidate repeated Jira and wiki targets while preserving every source record.

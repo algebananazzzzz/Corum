@@ -5,60 +5,24 @@ description: Use when a wiki page needs an editable packet layout, topology, spa
 
 # Draw.io Diagrams
 
-Create a rendered SVG for Obsidian and an adjacent editable source from the same
-graph model. This skill owns diagram mechanics; the active authoring or sync skill
-still owns factual content and source-ingestion decisions.
+Create an SVG for Obsidian and an adjacent editable source from the same graph model. This skill manages diagram mechanics; `authoring-wiki` and `sync-course` manage factual content and source coverage.
 
 ## Choose the format
 
-| Need | Format |
-| --- | --- |
-| Exact widths, spatial nesting, or manual editing | Draw.io |
-| Protocol exchange, state machine, or branching process | Mermaid |
-| Facts without meaningful spatial structure | Table |
-| Photo, illustration, or bitmap | Image generation |
+| Need | Format | | --- | --- | | Exact widths, spatial nesting, or manual editing | Draw.io | | Protocol exchange, state machine, or branching process | Mermaid | | Facts without spatial structure | Table | | Photo, illustration, or bitmap | Image generation |
 
-## Preserve the editable pair
+## Maintain the editable pair
 
-| File | Role |
-| --- | --- |
-| `name.svg` | Rendered file embedded in Markdown |
-| `name.svg.xml` | Canonical editable source recognized by the plugin |
+| File | Role | | --- | --- | | `name.svg` | Rendered file embedded in Markdown | | `name.svg.xml` | Canonical editable source recognized by the plugin |
 
-- Inspect both files before editing; sidecars may contain compressed graph models.
-- Never rebuild an existing pair merely to change labels. Preserve geometry and style.
-- Never hand-author SVG and sidecar as independent layouts. Export the SVG from the
-  final graph model through the plugin or a Draw.io exporter.
-- Update source and SVG in one operation. Close a stale editor without saving before
-  reopening an externally changed pair.
-- Read [Obsidian pair format](references/obsidian-format.md) for compressed sources,
-  safe editing, and plugin recognition.
+Inspect both files before editing. Use one graph model for the editable source and export the SVG from that model through the plugin or a Draw.io exporter. Update the source and SVG together. Read [Obsidian pair format](references/obsidian-format.md) for compressed sources, safe editing, and plugin recognition.
 
 ## Draw the content
 
-- Use sharp 90-degree corners for boxes, cells, and connector turns.
-- Put field names and widths inside boxes.
-- Put only high-value constants in one compact legend line.
-- Name payloads by their contents.
-- When a layer palette helps, use blue for link, purple for network, orange or yellow
-  for transport, green for payload, and gray for neutral overhead.
-- Use colons or sentences instead of em dashes; en dashes remain valid for ranges.
-- Embed the SVG directly as `![[courses/{{COURSE}}/wiki/assets/name.svg]]`.
-- Self-created diagrams need no image attribution; factual sources remain on the page.
+- Use sharp 90-degree corners for boxes, cells, and connector turns. - Put field names and widths inside boxes. - Put high-value constants in one compact legend line. - Name payloads by their contents. - Use blue for link, purple for network, orange or yellow for transport, green for payload, and gray for neutral overhead when a layer palette helps. - Use colons or sentences for explanations and en dashes for ranges. - Embed the SVG as `![[courses/{{COURSE}}/wiki/assets/name.svg]]`. - Record factual sources on the owning page.
 
-## Work safely
+## Verify the pair
 
-1. Inspect the Markdown, SVG, and sidecar.
-2. Edit the owning concept before a derived reference.
-3. Preserve unrelated cells and user edits.
-4. Remove a replaced raster only after proving nothing else embeds it.
-5. Verify both files exist, are parseable XML, and contain matching visible labels.
-   If an XML validator is available, use it on both files.
-6. Render and visually inspect the final SVG.
-7. Do not call the pair complete unless the SVG came from the final sidecar and the
-   source/render comparison passes. If no exporter exists, report that a plugin save
-   remains needed.
-8. Use `linting-wiki` after changing the owning page.
+1. Inspect the Markdown, SVG, and sidecar. 2. Edit the owning concept before derived references. 3. Preserve unrelated cells and user edits. 4. Remove a replaced raster after confirming its embeds have moved to the SVG. 5. Confirm both files exist, parse as XML, and share matching visible labels. Run an XML validator when available. 6. Render and visually inspect the final SVG. 7. Complete the pair when the SVG comes from the final sidecar and the source/render comparison succeeds. 8. Invoke `linting-wiki` after changing the owning page.
 
-Stop if the source and SVG do not contain the same label. Edit through the plugin or
-another Draw.io-compatible editor instead of forcing drift with text substitution.
+Reconcile label differences through the plugin or another Draw.io-compatible editor.
