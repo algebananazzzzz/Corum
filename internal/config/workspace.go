@@ -2,6 +2,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -55,9 +56,7 @@ func WorkspacePath(root string) string {
 	return filepath.Join(ProjectDir(root), "corum.yaml")
 }
 
-// EnsureProjectDir creates the private project-local configuration directory
-// and installs a guard for credential files without replacing an existing
-// project-specific ignore file.
+// EnsureProjectDir creates private configuration storage without replacing an existing gitignore.
 func EnsureProjectDir(root string) error {
 	dir := ProjectDir(root)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -75,9 +74,8 @@ func EnsureProjectDir(root string) error {
 	return os.WriteFile(guard, []byte(projectGitignore), 0o600)
 }
 
-// MigrateWorkspace moves a valid v2 root-level corum.yaml into the
-// project-local configuration directory. It refuses ambiguous layouts and
-// validates before changing the filesystem.
+// MigrateWorkspace moves valid v2 root configuration into project-local storage.
+// It refuses ambiguous layouts and validates before writing.
 func MigrateWorkspace(root string) (bool, error) {
 	legacy := filepath.Join(root, "corum.yaml")
 	current := WorkspacePath(root)
@@ -124,7 +122,7 @@ func loadWorkspaceFile(path string) (Workspace, error) {
 	if err := decodeFile(path, &workspace); err != nil {
 		return Workspace{}, err
 	}
-	if err := validateWorkspace(workspace); err != nil {
+	if err := ValidateWorkspace(workspace); err != nil {
 		return Workspace{}, err
 	}
 	return workspace, nil
@@ -166,7 +164,7 @@ func decodeFile(path string, target any) error {
 	if err := rejectVersionOne(&node); err != nil {
 		return err
 	}
-	decoder := yaml.NewDecoder(bytesReader(data))
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(target); err != nil {
 		return err

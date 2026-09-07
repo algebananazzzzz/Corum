@@ -102,14 +102,98 @@ func TestInitializeCreatesOnlyExpectedTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
+		".agents", ".agents/skills", ".claude", ".claude/skills", ".codex", ".codex/skills",
 		".config", ".config/corum", ".config/corum/.gitignore", ".config/corum/corum.yaml",
-		".corum", ".corum/toolkit-version", "AGENTS.md", "courses",
+		".corum", ".corum/toolkit-version", "AGENTS.md", "CLAUDE.md", "courses",
 		"skills", "skills/example", "skills/example/SKILL.md",
 		"templates", "templates/template.md", "templates/wiki", "templates/wiki/index.md",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("initialized tree = %#v, want %#v", got, want)
 	}
+}
+
+func assertToolkitLinks(t *testing.T, root, label string) {
+	t.Helper()
+	for path, target := range map[string]string{
+		"AGENTS.md":      "CLAUDE.md",
+		".claude/skills": "../skills",
+		".codex/skills":  "../skills",
+		".agents/skills": "../skills",
+	} {
+		got, err := os.Readlink(filepath.Join(root, path))
+		if err != nil || got != target {
+			t.Fatalf("Readlink(%s) = %q, %v; want %q", path, got, err, target)
+		}
+	}
+	assertFileContent(t, filepath.Join(root, "AGENTS.md"), label+" agents")
+	for _, directory := range []string{".claude", ".codex", ".agents"} {
+		assertFileContent(t, filepath.Join(root, directory, "skills/example/SKILL.md"), label+" skill")
+	}
+}
+
+func TestToolkitLinksSurviveVaultMove(t *testing.T) {
+	root := initializedVault(t, "old")
+	moved := filepath.Join(t.TempDir(), "moved vault")
+	if err := os.Rename(root, moved); err != nil {
+		t.Fatal(err)
+	}
+	assertToolkitLinks(t, moved, "old")
+}
+
+func TestSyncToolkitRepairsLegacyLayoutAtSameVersion(t *testing.T) {
+	root := initializedVault(t, "old")
+	for _, path := range []string{"AGENTS.md", "CLAUDE.md", ".claude/skills", ".codex/skills", ".agents/skills"} {
+		if err := os.Remove(filepath.Join(root, path)); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("legacy agents"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	settings := filepath.Join(root, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings, []byte("preserve"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SyncToolkit(root, testAssets("old"), "old"); err != nil {
+		t.Fatal(err)
+	}
+	assertToolkitLinks(t, root, "old")
+	assertFileContent(t, settings, "preserve")
+}
+
+func TestToolkitFailureRestoresLinks(t *testing.T) {
+	for failAt := 1; failAt <= 16; failAt++ {
+		root := initializedVault(t, "old")
+		if err := syncToolkit(root, testAssets("new"), "new", failRenameAt(failAt)); err == nil {
+			t.Fatalf("rename %d did not fail", failAt)
+		}
+		assertToolkitLinks(t, root, "old")
+		assertToolkitVersion(t, root, "old")
+	}
+}
+
+func TestSyncToolkitRejectsAgentDirectorySymlink(t *testing.T) {
+	root := initializedVault(t, "old")
+	outside := t.TempDir()
+	if err := os.Rename(filepath.Join(root, ".claude"), filepath.Join(root, ".claude-saved")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, ".claude")); err != nil {
+		t.Fatal(err)
+	}
+	if err := SyncToolkit(root, testAssets("new"), "new"); err == nil {
+		t.Fatal("SyncToolkit accepted a symlinked agent directory")
+	}
+	entries, err := os.ReadDir(outside)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("external directory changed: %v, %v", entries, err)
+	}
+	assertToolkitVersion(t, root, "old")
+	assertFileContent(t, filepath.Join(root, "CLAUDE.md"), "old agents")
 }
 
 func TestInitializedConfigurationConformsToV2BlockSchema(t *testing.T) {
@@ -294,7 +378,7 @@ func TestToolkitKeepsRecoveryBackupAcrossAnotherFailedSync(t *testing.T) {
 
 func TestToolkitReportsRollbackRemovalFailureAndRetainsBackup(t *testing.T) {
 	root := initializedVault(t, "old")
-	agents := filepath.Join(root, "AGENTS.md")
+	agents := filepath.Join(root, "CLAUDE.md")
 	originalRemoveAll := removeAll
 	removeAll = func(path string) error {
 		if path == agents {
@@ -312,7 +396,7 @@ func TestToolkitReportsRollbackRemovalFailureAndRetainsBackup(t *testing.T) {
 		t.Fatal(readErr)
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), toolkitTemporaryPrefix+"backup-") && strings.Contains(entry.Name(), "AGENTS.md") {
+		if strings.HasPrefix(entry.Name(), toolkitTemporaryPrefix+"backup-") && strings.Contains(entry.Name(), "CLAUDE.md") {
 			assertFileContent(t, filepath.Join(root, ".corum", entry.Name()), "old agents")
 			return
 		}

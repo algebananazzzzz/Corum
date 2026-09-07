@@ -174,6 +174,20 @@ func TestInstalledBinary(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(vault, "corum.yaml")); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("unexpected root configuration: %v", err)
 		}
+		for path, target := range map[string]string{
+			"AGENTS.md": "CLAUDE.md", ".claude/skills": "../skills",
+			".codex/skills": "../skills", ".agents/skills": "../skills",
+		} {
+			got, err := os.Readlink(filepath.Join(vault, path))
+			if err != nil || got != target {
+				t.Fatalf("Readlink(%s) = %q, %v; want %q", path, got, err, target)
+			}
+		}
+		for _, directory := range []string{".claude", ".codex", ".agents"} {
+			if _, err := os.Stat(filepath.Join(vault, directory, "skills", "sync-course", "SKILL.md")); err != nil {
+				t.Fatalf("discover sync-course via %s: %v", directory, err)
+			}
+		}
 
 		result := runBinary(binary, environment, "", "", "doctor", vault)
 		mustSucceed(t, result)

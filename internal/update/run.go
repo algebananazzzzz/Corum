@@ -14,14 +14,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/algebananazzzzz/Corum/internal/lockfile"
 	"github.com/minio/selfupdate"
 )
 
 const ReexecEnv = "CORUM_UPDATE_REEXEC"
 
-// ContinuationArg replaces "update" in the argv of a re-executed process after
-// an explicit self-update, so the new process reports the outcome instead of
-// performing a second metadata check.
+// ContinuationArg lets the updated process report success without checking again.
 const ContinuationArg = "update-continuation"
 
 // Options supplies process and platform state to the updater. The zero values
@@ -128,9 +127,6 @@ func Run(ctx context.Context, options Options) (Outcome, error) {
 	return outcome, nil
 }
 
-// explicitUpdateContinuationArgs swaps the "update" argv slot for the
-// continuation slot so the re-executed process does not re-run the explicit
-// update check.
 func explicitUpdateContinuationArgs(args []string) []string {
 	result := make([]string, len(args))
 	copy(result, args)
@@ -151,7 +147,7 @@ func installRelease(ctx context.Context, options Options, release Release) (bool
 	if !acquired {
 		return false, nil
 	}
-	defer lock.release()
+	defer lock.Close()
 
 	name := AssetName(release.Tag, options.GOOS, options.GOARCH)
 	archiveURL, ok := release.Assets[name]
@@ -251,32 +247,13 @@ func setEnv(environment []string, key, value string) []string {
 	return append(result, prefix+value)
 }
 
-type fileLock struct {
-	file *os.File
-}
-
-func acquireLock(path string) (*fileLock, bool) {
+func acquireLock(path string) (*lockfile.Lock, bool) {
 	if path == "" || path == "." {
 		return nil, false
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, false
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, false
-	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		file.Close()
-		return nil, false
-	}
-	return &fileLock{file: file}, true
-}
-
-func (lock *fileLock) release() {
-	if lock == nil || lock.file == nil {
-		return
-	}
-	_ = syscall.Flock(int(lock.file.Fd()), syscall.LOCK_UN)
-	_ = lock.file.Close()
+	lock, err := lockfile.TryAcquire(path)
+	return lock, err == nil
 }

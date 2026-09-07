@@ -1,20 +1,23 @@
-name: CI (branch)
+name: CI
 
 on:
   push:
     branches-ignore:
+      - main
+  pull_request:
+    branches:
       - main
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-branch-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
-    name: Static + Unit
+    name: Format + Vet + Race + Build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -26,8 +29,14 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
+      - name: Format
+        run: test -z "$(gofmt -l .)"
+
       - name: Vet
         run: go vet ./...
 
       - name: Test
-        run: go test ./...
+        run: go test -race ./...
+
+      - name: Build
+        run: CGO_ENABLED=0 go build ./cmd/corum

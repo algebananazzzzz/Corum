@@ -42,6 +42,21 @@ func TestDryRunDoesNotWriteFiles(t *testing.T) {
 	}
 }
 
+func TestAtomicJSONPreservesStateOnEncodingFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	before := []byte("{\"version\":2}\n")
+	if err := os.WriteFile(path, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicJSON(path, make(chan int)); err == nil {
+		t.Fatal("atomicJSON accepted an unsupported JSON value")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != string(before) {
+		t.Fatalf("state = %q, %v; want %q", got, err, before)
+	}
+}
+
 func TestDisabledSyncNeedsNoClient(t *testing.T) {
 	root, workspace, course := initializedCanvasVault(t)
 	workspace.Canvas = nil

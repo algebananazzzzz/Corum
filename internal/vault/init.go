@@ -15,8 +15,8 @@ import (
 // Initialize creates a new, empty v2 vault. Configuration and embedded assets
 // are fully checked before the target directory is created.
 func Initialize(root string, workspace config.Workspace, assets fs.FS, toolkitVersion string) error {
-	if err := validateWorkspaceForInit(workspace); err != nil {
-		return err
+	if err := config.ValidateWorkspace(workspace); err != nil {
+		return fmt.Errorf("validate workspace: %w", err)
 	}
 	payload, err := collectToolkit(assets, toolkitVersion)
 	if err != nil {
@@ -56,17 +56,7 @@ func Initialize(root string, workspace config.Workspace, assets fs.FS, toolkitVe
 	if err := os.MkdirAll(filepath.Join(root, "courses"), 0o755); err != nil {
 		return err
 	}
-	if err := installPayload(root, payload); err != nil {
-		return err
-	}
-	return nil
-}
-
-func validateWorkspaceForInit(value config.Workspace) error {
-	if err := config.ValidateWorkspace(value); err != nil {
-		return fmt.Errorf("validate workspace: %w", err)
-	}
-	return nil
+	return installPayload(root, payload)
 }
 
 // WriteWorkspace atomically replaces only the project-local corum.yaml after
@@ -79,7 +69,16 @@ func WriteWorkspace(root string, workspace config.Workspace) error {
 	if err != nil {
 		return err
 	}
-	path := config.WorkspacePath(root)
+	if err := config.EnsureProjectDir(root); err != nil {
+		return err
+	}
+	return writeConfigAtomic(config.WorkspacePath(root), data)
+}
+
+func writeConfigAtomic(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 	file, err := os.CreateTemp(filepath.Dir(path), ".corum-*.yaml")
 	if err != nil {
 		return err

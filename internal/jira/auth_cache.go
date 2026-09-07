@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
+	"syscall"
 
 	"golang.org/x/oauth2"
 )
@@ -237,12 +237,8 @@ func checkPrivateFile(info os.FileInfo) error {
 }
 
 func checkPrivateOwnership(info os.FileInfo) error {
-	// The released binary targets POSIX platforms. On those systems, reject a
-	// cache owned by another account before it is read.
-	if runtime.GOOS != "windows" {
-		if uid, ok := fileUID(info); ok && uid != os.Getuid() {
-			return errors.New("Jira authentication cache has unsafe ownership")
-		}
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok && int(stat.Uid) != os.Getuid() {
+		return errors.New("Jira authentication cache has unsafe ownership")
 	}
 	return nil
 }

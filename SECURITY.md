@@ -59,7 +59,8 @@ Keep initialized vaults private and outside this public repository. Corum owns a
 may replace these exact vault paths during initialization or a verified release
 rollout:
 
-- `AGENTS.md`
+- `CLAUDE.md` and its `AGENTS.md` symlink
+- `.claude/skills`, `.codex/skills`, and `.agents/skills` symlinks to `../skills`
 - `skills/`
 - `templates/`
 - `.corum/toolkit-version`

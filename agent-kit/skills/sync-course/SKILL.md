@@ -10,7 +10,7 @@ results. This is the only workflow approval point.
 
 ## 0. Resume an interrupted Jira result safely
 
-Before starting a new Canvas capture, inspect `state/latest-run.json` only for an
+Before starting a new Canvas capture, inspect `courses/{{COURSE}}/state/latest-run.json` only for an
 enabled Jira stage whose `retry_safe` is false. This is an interrupted run, not
 new work. If `reconciliation_required` is true, refresh the configured epic with
 the exact empty v2 Jira plan from step 3. Continue only when its JSON reports

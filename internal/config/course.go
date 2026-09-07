@@ -55,7 +55,7 @@ func LoadCourse(root, code string) (Course, error) {
 	if err := decodeFile(path, &course); err != nil {
 		return Course{}, fmt.Errorf("load course %q: %w", code, err)
 	}
-	if err := validateCourse(course); err != nil {
+	if err := ValidateCourse(course); err != nil {
 		return Course{}, fmt.Errorf("load course %q: %w", code, err)
 	}
 	if course.Code != code {

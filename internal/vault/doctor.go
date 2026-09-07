@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 
 	"github.com/algebananazzzzz/Corum/internal/config"
 )
@@ -27,7 +26,6 @@ func Validate(root string) (config.Workspace, []config.Course, error) {
 	if err != nil && !os.IsNotExist(err) {
 		return config.Workspace{}, nil, err
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	courses := make([]config.Course, 0)
 	codes := map[string]struct{}{}
 	for _, entry := range entries {

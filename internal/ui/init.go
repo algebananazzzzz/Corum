@@ -6,31 +6,93 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"strings"
 
+	"charm.land/huh/v2"
 	"github.com/algebananazzzzz/Corum/internal/config"
 	"github.com/algebananazzzzz/Corum/internal/jira"
 	"github.com/algebananazzzzz/Corum/internal/vault"
 )
 
-// InitDependencies drives the purely local, deterministic vault wizard. It
-// never opens a browser or stores credentials; authentication is a separate
-// step (corum auth).
 type InitDependencies struct {
 	Prompts        Prompter
 	Assets         fs.FS
 	ToolkitVersion string
-	Output         io.Writer
 	Initialize     func(string, config.Workspace, fs.FS, string) error
 }
 
 var initializeVault = vault.Initialize
+
+type initAnswers struct {
+	root        string
+	timezone    string
+	term        string
+	canvasURL   string
+	wikiEnabled bool
+	confirmed   bool
+}
+
+func (a initAnswers) workspace() config.Workspace {
+	workspace := config.Workspace{
+		Version:   2,
+		Workspace: config.WorkspaceDetails{Timezone: a.timezone, Term: a.term},
+		Canvas:    &config.CanvasWorkspace{URL: a.canvasURL},
+		Calendar:  config.Calendar{Timetable: "Timetable.md", Term: "Term_Calendar.md"},
+	}
+	if a.wikiEnabled {
+		workspace.Wiki = &config.WikiWorkspace{}
+	}
+	return workspace
+}
+
+func newInitScreen(root string) (*Screen, *initAnswers) {
+	answers := &initAnswers{
+		root: root, timezone: "Asia/Singapore", term: "AY2026/27 Semester 1",
+		canvasURL: "https://canvas.example.edu", wikiEnabled: true, confirmed: true,
+	}
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewInput().Title("Vault path").Validate(nonblank).Value(&answers.root),
+		huh.NewInput().Title("Workspace timezone").Value(&answers.timezone),
+		huh.NewInput().Title("Academic term").Validate(nonblank).Value(&answers.term),
+		huh.NewInput().Title("Canvas URL").Value(&answers.canvasURL),
+		huh.NewConfirm().Title("Enable wiki authoring?").Value(&answers.wikiEnabled),
+		huh.NewConfirm().Title("Create this vault?").Validate(func(confirmed bool) error {
+			if !confirmed {
+				return errors.New("confirmation is required")
+			}
+			return config.ValidateWorkspace(answers.workspace())
+		}).Value(&answers.confirmed),
+	))
+	return NewScreen("Corum Setup", form), answers
+}
+
+func nonblank(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return errors.New("required")
+	}
+	return nil
+}
+
+func RunInitFullscreen(root string, assets fs.FS, toolkitVersion string, in io.Reader, out io.Writer) error {
+	screen, answers := newInitScreen(root)
+	if err := RunScreen("Corum Setup", screen.form, in, out); err != nil {
+		return err
+	}
+	if !answers.confirmed {
+		return ErrCancelled
+	}
+	workspace := answers.workspace()
+	if err := config.ValidateWorkspace(workspace); err != nil {
+		return err
+	}
+	return initializeVault(answers.root, workspace, assets, toolkitVersion)
+}
 
 func DefaultInitDependencies(in io.Reader, out io.Writer, assets fs.FS, toolkitVersion string) InitDependencies {
 	return InitDependencies{
 		Prompts:        NewHuhPrompter(in, out),
 		Assets:         assets,
 		ToolkitVersion: toolkitVersion,
-		Output:         out,
 		Initialize:     initializeVault,
 	}
 }
@@ -73,10 +135,7 @@ func RunInit(ctx context.Context, proposedRoot string, deps InitDependencies) (e
 	if err := config.ValidateWorkspace(workspace); err != nil {
 		return err
 	}
-	if deps.Output != nil {
-		fmt.Fprintln(deps.Output, initSummary(workspace))
-	}
-	confirmed, err := deps.Prompts.Confirm("Create this vault?", true)
+	confirmed, err := deps.Prompts.Confirm(initSummary(workspace)+"\n\nCreate this vault?", true)
 	if err != nil {
 		return promptError(err)
 	}
@@ -95,20 +154,25 @@ func initSummary(workspace config.Workspace) string {
 
 // JiraAuthDependencies drives the interactive Jira authentication flow.
 type JiraAuthDependencies struct {
-	Prompts      Prompter
-	Output       io.Writer
-	OpenJira     func(context.Context) (JiraSession, error)
-	SnapshotAuth func() (func() error, error)
-	Write        func(string, config.Workspace) error
+	Prompts           Prompter
+	OpenJira          func(context.Context) (JiraSession, error)
+	SnapshotAuth      func() (func() error, error)
+	Write             func(string, config.Workspace) error
+	Loading           LoadingRunner
+	AuthorizationURLs <-chan string
 }
 
 func DefaultJiraAuthDependencies(in io.Reader, out io.Writer, root string) JiraAuthDependencies {
-	init := DefaultInitDependencies(in, out, nil, "")
+	urls := make(chan string, 1)
 	return JiraAuthDependencies{
-		Prompts: init.Prompts,
-		Output:  out,
+		Prompts: NewHuhPrompter(in, out),
 		OpenJira: func(ctx context.Context) (JiraSession, error) {
-			session, err := jira.Open(ctx, jira.OpenOptions{Interactive: true, ForceReauth: true, CachePath: jiraProjectCachePath(root), Out: out})
+			session, err := jira.Open(ctx, jira.OpenOptions{Interactive: true, ForceReauth: true, CachePath: jiraProjectCachePath(root), Out: io.Discard, AuthorizationURL: func(url string) {
+				select {
+				case urls <- url:
+				default:
+				}
+			}})
 			if err != nil {
 				return nil, err
 			}
@@ -122,6 +186,10 @@ func DefaultJiraAuthDependencies(in io.Reader, out io.Writer, root string) JiraA
 			return snapshot.Restore, nil
 		},
 		Write: vault.WriteWorkspace,
+		Loading: func(ctx context.Context, message string, task func(context.Context) error) error {
+			return runLoading(ctx, "Jira Authentication", message, in, out, task)
+		},
+		AuthorizationURLs: urls,
 	}
 }
 
@@ -130,9 +198,8 @@ func jiraProjectCachePath(root string) string {
 	return path
 }
 
-// RunJiraAuth authenticates (always fresh) and selects a Jira project, then
-// changes only .config/corum/corum.yaml after confirmation. The preceding
-// cache is restored on failure.
+// RunJiraAuth starts fresh OAuth and confirms a Jira project before saving configuration.
+// The previous credential cache is restored on failure.
 func RunJiraAuth(ctx context.Context, root string, deps JiraAuthDependencies) (err error) {
 	if deps.Prompts == nil || deps.OpenJira == nil || deps.SnapshotAuth == nil || deps.Write == nil {
 		return fmt.Errorf("interactive Jira authentication is unavailable")
@@ -156,12 +223,17 @@ func RunJiraAuth(ctx context.Context, root string, deps JiraAuthDependencies) (e
 			}
 		}
 	}()
-	session, err := deps.OpenJira(ctx)
+	var session JiraSession
+	err = runLoadingTask(deps.Loading, ctx, "Complete Jira authentication in your browser…", func(ctx context.Context) error {
+		var openErr error
+		session, openErr = deps.OpenJira(ctx)
+		return openErr
+	})
 	if err != nil {
 		return promptError(err)
 	}
 	defer session.Close()
-	selection, err := selectJira(ctx, session, deps.Prompts)
+	selection, err := selectJiraWithLoading(ctx, session, deps.Prompts, deps.Loading)
 	if err != nil {
 		return promptError(err)
 	}
@@ -169,10 +241,7 @@ func RunJiraAuth(ctx context.Context, root string, deps JiraAuthDependencies) (e
 	if err := config.ValidateWorkspace(workspace); err != nil {
 		return err
 	}
-	if deps.Output != nil {
-		fmt.Fprintln(deps.Output, "Jira configured for project "+selection.Project+" (auth stored in .config/corum).")
-	}
-	confirmed, err := deps.Prompts.Confirm("Save Jira configuration?", true)
+	confirmed, err := deps.Prompts.Confirm("Jira project "+selection.Project+" selected.\n\nSave this configuration?", true)
 	if err != nil {
 		return promptError(err)
 	}

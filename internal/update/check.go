@@ -42,7 +42,7 @@ func readCache(path string) (cache, bool) {
 
 func writeCache(path string, value cache) error {
 	if path == "" {
-		return errorsNoCacheDir()
+		return fmt.Errorf("could not determine update cache directory")
 	}
 	data, err := json.Marshal(value)
 	if err != nil {
@@ -74,8 +74,4 @@ func writeCache(path string, value cache) error {
 		return err
 	}
 	return os.Rename(temporaryPath, path)
-}
-
-func errorsNoCacheDir() error {
-	return fmt.Errorf("could not determine update cache directory")
 }

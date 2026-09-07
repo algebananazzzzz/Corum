@@ -66,7 +66,16 @@ func SelectJira(ctx context.Context, session *jira.RovoSession, prompts Prompter
 }
 
 func selectJira(ctx context.Context, session JiraSession, prompts Prompter) (config.JiraWorkspace, error) {
-	resources, err := session.Resources(ctx)
+	return selectJiraWithLoading(ctx, session, prompts, nil)
+}
+
+func selectJiraWithLoading(ctx context.Context, session JiraSession, prompts Prompter, loading LoadingRunner) (config.JiraWorkspace, error) {
+	var resources []Resource
+	err := runLoadingTask(loading, ctx, "Loading Jira sites…", func(ctx context.Context) error {
+		var loadErr error
+		resources, loadErr = session.Resources(ctx)
+		return loadErr
+	})
 	if err != nil {
 		return config.JiraWorkspace{}, err
 	}
@@ -85,7 +94,12 @@ func selectJira(ctx context.Context, session JiraSession, prompts Prompter) (con
 	if resource.CloudID == "" {
 		return config.JiraWorkspace{}, fmt.Errorf("selected Jira site has no cloud ID")
 	}
-	projects, err := session.Projects(ctx, resource.CloudID)
+	var projects []Project
+	err = runLoadingTask(loading, ctx, "Loading Jira projects…", func(ctx context.Context) error {
+		var loadErr error
+		projects, loadErr = session.Projects(ctx, resource.CloudID)
+		return loadErr
+	})
 	if err != nil {
 		return config.JiraWorkspace{}, err
 	}

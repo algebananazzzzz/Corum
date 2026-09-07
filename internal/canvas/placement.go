@@ -92,8 +92,8 @@ func within(root, target string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func atomicWriteFile(target string, data []byte, mode os.FileMode) error {
-	temporary, err := os.CreateTemp(filepath.Dir(target), ".canvas-write-*")
+func atomicWriteFile(target string, data []byte, mode os.FileMode, pattern string) error {
+	temporary, err := os.CreateTemp(filepath.Dir(target), pattern)
 	if err != nil {
 		return err
 	}

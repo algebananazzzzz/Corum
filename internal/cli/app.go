@@ -35,6 +35,7 @@ func RunProcess(ctx context.Context, argv []string, in io.Reader, out, errOut io
 		argv = []string{"corum"}
 	}
 	args := argv[1:]
+	fullscreen := isTerminal(in) && fullscreenCommand(args)
 	explicitUpdate := len(args) == 1 && args[0] == "update"
 	if !explicitUpdate && os.Getenv(update.ReexecEnv) != "1" {
 		outcome, err := maybeUpdate(ctx, update.Options{
@@ -43,9 +44,9 @@ func RunProcess(ctx context.Context, argv []string, in io.Reader, out, errOut io
 			Args:    argv,
 			Env:     os.Environ(),
 		})
-		if err != nil {
+		if err != nil && !fullscreen {
 			fmt.Fprintf(errOut, "warning: automatic update check failed: %v\n", err)
-		} else if outcome.Warning != "" {
+		} else if outcome.Warning != "" && !fullscreen {
 			fmt.Fprintf(errOut, "warning: %s\n", outcome.Warning)
 		}
 	}
@@ -54,7 +55,7 @@ func RunProcess(ctx context.Context, argv []string, in io.Reader, out, errOut io
 			root, err := filepath.Abs(path)
 			if err == nil {
 				if _, _, validateErr := vault.Validate(root); validateErr == nil {
-					if syncErr := syncVaultToolkit(root, corum.Assets, buildinfo.Version); syncErr != nil {
+					if syncErr := syncVaultToolkit(root, corum.Assets, buildinfo.Version); syncErr != nil && !fullscreen {
 						fmt.Fprintf(errOut, "warning: toolkit update failed for %s: %v\n", root, syncErr)
 					}
 				}
@@ -66,7 +67,6 @@ func RunProcess(ctx context.Context, argv []string, in io.Reader, out, errOut io
 
 // Run dispatches the complete local Corum command surface.
 func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
-	_ = in
 	if len(args) == 1 && args[0] == "--help" {
 		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum auth [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira status [PATH] | corum jira logout [PATH] | corum jira apply COURSE [--dry-run]")
 		return 0
@@ -117,16 +117,15 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			fmt.Fprintln(errOut, ui.NonTTYGuidance("init"))
 			return 2
 		}
-		deps := ui.DefaultInitDependencies(in, out, corum.Assets, buildinfo.Version)
-		if err := ui.RunInit(ctx, root, deps); err != nil {
+		if err := ui.RunInitFullscreen(root, corum.Assets, buildinfo.Version, in, out); err != nil {
 			if errors.Is(err, ui.ErrCancelled) {
-				fmt.Fprintln(errOut, "setup cancelled")
-			} else {
-				fmt.Fprintln(errOut, "could not initialize vault")
+				_ = ui.ShowNotice("Corum Setup", "Setup cancelled.", in, out)
+				return 1
 			}
+			_ = ui.ShowError("Corum Setup", "Could not initialize vault.", err, in, out)
 			return 1
 		}
-		fmt.Fprintln(out, "vault initialized")
+		_ = ui.ShowNotice("Corum Setup", "Vault initialized.", in, out)
 		return 0
 	}
 	if code, handled := runAuth(ctx, args, in, out, errOut); handled {
@@ -264,8 +263,12 @@ func runAuth(ctx context.Context, args []string, in io.Reader, out, errOut io.Wr
 		fmt.Fprintln(errOut, "interactive authentication requires a terminal")
 		return 2, true
 	}
-	fail := func() (int, bool) {
-		fmt.Fprintln(errOut, "authentication failed")
+	fail := func(title, message string, err error) (int, bool) {
+		if err == nil {
+			_ = ui.ShowNotice(title, message, in, out)
+		} else {
+			_ = ui.ShowError(title, message, err, in, out)
+		}
 		return 1, true
 	}
 	switch target {
@@ -273,36 +276,31 @@ func runAuth(ctx context.Context, args []string, in io.Reader, out, errOut io.Wr
 		deps := ui.DefaultCanvasAuthDependencies(in, out, root)
 		if err := ui.RunCanvasAuth(ctx, deps); err != nil {
 			if errors.Is(err, ui.ErrCancelled) {
-				fmt.Fprintln(errOut, "Canvas authentication cancelled")
-			} else {
-				fmt.Fprintln(errOut, err)
+				return fail("Canvas Authentication", "Canvas authentication cancelled.", nil)
 			}
-			return fail()
+			return fail("Canvas Authentication", "Canvas authentication failed.", err)
 		}
-		fmt.Fprintln(out, "Canvas authenticated")
+		_ = ui.ShowNotice("Canvas Authentication", "Canvas authenticated.", in, out)
 		return 0, true
 	case "jira":
 		deps := ui.DefaultJiraAuthDependencies(in, out, root)
-		if err := ui.RunJiraAuth(ctx, root, deps); err != nil {
+		if err := ui.RunJiraAuthFullscreen(ctx, root, deps, in, out); err != nil {
 			if errors.Is(err, ui.ErrCancelled) {
-				fmt.Fprintln(errOut, "Jira authentication cancelled")
-			} else {
-				fmt.Fprintln(errOut, "could not configure Jira")
+				return fail("Jira Authentication", "Jira authentication cancelled.", nil)
 			}
-			return fail()
+			return fail("Jira Authentication", "Could not configure Jira.", err)
 		}
-		fmt.Fprintln(out, "Jira configured")
+		_ = ui.ShowNotice("Jira Authentication", "Jira configured.", in, out)
 		return 0, true
 	default:
-		deps := ui.DefaultAuthDependencies(in, out, root, corum.Assets, buildinfo.Version)
+		deps := ui.DefaultAuthDependencies(in, out, root)
 		if err := ui.RunAuth(ctx, root, deps); err != nil {
 			if errors.Is(err, ui.ErrCancelled) {
-				fmt.Fprintln(errOut, "authentication cancelled")
-			} else {
-				fmt.Fprintln(errOut, err)
+				return fail("Corum Authentication", "Authentication cancelled.", nil)
 			}
-			return fail()
+			return fail("Corum Authentication", "Authentication failed.", err)
 		}
+		_ = ui.ShowNotice("Corum Authentication", "Authentication complete.", in, out)
 		return 0, true
 	}
 }
@@ -416,10 +414,7 @@ func runCanvasSync(ctx context.Context, args []string, out, errOut io.Writer) (i
 	return 0, true
 }
 
-// flushSyncResults writes the accumulated per-course results. JSON mode emits
-// one complete run manifest per course; text mode emits one concise line per
-// course. Completed course results are preserved even when a later course
-// fails.
+// flushSyncResults preserves completed course results even when a later course fails.
 func flushSyncResults(jsonOutput bool, out io.Writer, workspace config.Workspace, courses []config.Course, results []canvas.StageResult) error {
 	if jsonOutput {
 		manifests := make([]any, 0, len(results))
@@ -488,6 +483,22 @@ func commandVaultPath(args []string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func fullscreenCommand(args []string) bool {
+	if _, ok := interactiveInitRoot(args); ok {
+		return true
+	}
+	if len(args) == 0 || args[0] != "auth" {
+		return false
+	}
+	if len(args) == 1 {
+		return true
+	}
+	if len(args) == 2 {
+		return args[1] != "--help"
+	}
+	return len(args) == 3 && (args[1] == "jira" || args[1] == "canvas")
 }
 
 func runJiraApply(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) (int, bool) {

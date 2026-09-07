@@ -483,7 +483,7 @@ func captureModules(ctx context.Context, courseDir string, courseID int, seen ma
 			target, err = SafeDestination(filepath.Join(courseDir, "raw"), "modules.md")
 		}
 		if err == nil {
-			err = atomicWriteFile(target, []byte(content+strings.Join(lines, "\n")), 0644)
+			err = atomicWriteFile(target, []byte(content+strings.Join(lines, "\n")), 0o644, ".canvas-write-*")
 		}
 		if err != nil {
 			return changes, nil, updates, err
@@ -562,7 +562,7 @@ func writeBody(courseDir, relative string, fields map[string]any, body, origin s
 	if err != nil {
 		return err
 	}
-	return atomicWriteFile(target, []byte(frontmatter+markdown), 0644)
+	return atomicWriteFile(target, []byte(frontmatter+markdown), 0o644, ".canvas-write-*")
 }
 func first(values ...string) string {
 	for _, value := range values {

@@ -54,6 +54,27 @@ func TestCredentialPathRequiresProjectRoot(t *testing.T) {
 	}
 }
 
+func TestSaveCredentialReplacesWithPrivateFile(t *testing.T) {
+	root := t.TempDir()
+	path, _ := CredentialPathFor(root)
+	if err := SaveCredential(root, "old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveCredential(root, "new"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("credential mode = %o, want 600", info.Mode().Perm())
+	}
+}
+
 func TestSaveCredentialUsesPrivateModesAndGitignore(t *testing.T) {
 	root := t.TempDir()
 	path, _ := CredentialPathFor(root)
@@ -80,7 +101,11 @@ func TestCoursesListsAuthenticatedCourses(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write([]byte(`[{"id":7,"course_code":"CS3103","name":"Algorithms","is_enrolled":true},{"id":8,"course_code":"CS1010","name":"Intro","is_enrolled":false}]`))
+		if r.URL.Query().Get("enrollment_state") != "active" || r.URL.Query().Get("include[]") != "concluded" {
+			http.Error(w, "missing current-course filters", http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"id":7,"course_code":"CS3103","name":"Algorithms","concluded":false},{"id":8,"course_code":"CS1010","name":"Intro","concluded":true},{"id":9}]`))
 	}))
 	defer server.Close()
 	client, err := NewClient(server.URL, "token")
@@ -92,7 +117,7 @@ func TestCoursesListsAuthenticatedCourses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(courses) != 2 || courses[0].ID != "7" || courses[0].CourseCode != "CS3103" || courses[0].Name != "Algorithms" {
+	if len(courses) != 1 || courses[0].ID != "7" || courses[0].CourseCode != "CS3103" || courses[0].Name != "Algorithms" || !courses[0].Current {
 		t.Fatalf("courses = %#v", courses)
 	}
 }

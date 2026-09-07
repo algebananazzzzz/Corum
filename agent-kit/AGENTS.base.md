@@ -37,7 +37,11 @@ manual import of user-owned content.
     corum.yaml
     canvas.json
     auth.json
-AGENTS.md
+CLAUDE.md
+AGENTS.md -> CLAUDE.md
+.claude/skills -> ../skills
+.codex/skills -> ../skills
+.agents/skills -> ../skills
 skills/
 templates/
 courses/
@@ -61,6 +65,11 @@ courses/
 
 All state documents use `version: 2`.
 
+Run Corum commands from the vault root. Resolve `skills/`, `templates/`, and
+`courses/` from that root, never from an agent's skill-discovery directory.
+Bare `raw/`, `wiki/`, `state/`, and `course.yaml` paths in skills are relative to
+`courses/{{COURSE}}/`. Resolve Markdown reference links relative to their skill.
+
 - `canvas.json` records capture ledgers and capture time; Corum owns it.
 - `jira.json` is only a normalized Jira issue cache; Corum owns it and the epic
   remains in `course.yaml`.
@@ -76,9 +85,10 @@ An optional state file may be absent when its service has never been enabled.
 
 ## Toolkit ownership
 
-Corum owns and may replace the complete `AGENTS.md`, `skills/`, and `templates/`
-paths plus `.corum/toolkit-version`. Do not store personal instructions or files
-there. Toolkit refreshes do not replace `.config/corum/corum.yaml`, `courses/`,
+Corum owns `CLAUDE.md`, `AGENTS.md`, the three skill links, `skills/`, `templates/`,
+and `.corum/toolkit-version`. Do not store personal instructions or files there.
+Other files in `.claude/`, `.codex/`, and `.agents/` are user-owned.
+Toolkit refreshes do not replace `.config/corum/corum.yaml`, `courses/`,
 raw captures, wiki pages, state, calendars, changelogs, or credentials.
 
 ## Service isolation and secrets

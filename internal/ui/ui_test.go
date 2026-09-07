@@ -60,6 +60,31 @@ func (p *scriptedPrompts) Select(string, []Choice) (int, error) {
 	}
 	return answer.(int), nil
 }
+func (p *scriptedPrompts) MultiSelect(string, []Choice) ([]int, error) {
+	answer, err := p.next()
+	if err != nil {
+		return nil, err
+	}
+	return answer.([]int), nil
+}
+
+func TestCourseChoicesAreReadableAndPreselectTrackedCourses(t *testing.T) {
+	courses := []canvas.CourseInfo{
+		{ID: "7", CourseCode: "CS3103", Name: "Computer Networks Practice", Current: true},
+		{ID: "8", Name: "Student Essentials", Current: true},
+	}
+
+	choices := courseChoices(courses, map[string]bool{"7": true})
+	if got, want := choices[0].Label, "CS3103  Computer Networks Practice  · ID 7"; got != want {
+		t.Fatalf("first label = %q, want %q", got, want)
+	}
+	if !choices[0].Selected {
+		t.Fatal("tracked course was not preselected")
+	}
+	if choices[1].Selected || !strings.Contains(choices[1].Label, "Course") || !strings.Contains(choices[1].Label, "Student Essentials") {
+		t.Fatalf("second choice = %+v", choices[1])
+	}
+}
 
 type fakeJira struct {
 	resources []Resource
@@ -164,6 +189,7 @@ func TestJiraAuthWritesProjectSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	prompts := &scriptedPrompts{answers: []any{0, 0, true}}
+	var loadingMessages []string
 	deps := JiraAuthDependencies{
 		Prompts: prompts,
 		OpenJira: func(context.Context) (JiraSession, error) {
@@ -171,9 +197,16 @@ func TestJiraAuthWritesProjectSelection(t *testing.T) {
 		},
 		SnapshotAuth: func() (func() error, error) { return func() error { return nil }, nil },
 		Write:        vault.WriteWorkspace,
+		Loading: func(ctx context.Context, message string, task func(context.Context) error) error {
+			loadingMessages = append(loadingMessages, message)
+			return task(ctx)
+		},
 	}
 	if err := RunJiraAuth(context.Background(), root, deps); err != nil {
 		t.Fatal(err)
+	}
+	if got, want := strings.Join(loadingMessages, ","), "Complete Jira authentication in your browser…,Loading Jira sites…,Loading Jira projects…"; got != want {
+		t.Fatalf("loading messages = %q, want %q", got, want)
 	}
 	updated, err := config.LoadWorkspace(root)
 	if err != nil || updated.Jira == nil || updated.Jira.Project != "TODO" || updated.Jira.CloudID != "cloud" {
@@ -245,7 +278,7 @@ func TestJiraAuthJoinsRollbackError(t *testing.T) {
 	}
 }
 
-func TestCanvasAuthSavesTokenAndListsCourses(t *testing.T) {
+func TestCanvasAuthSavesTokenAndTracksSelectedCourses(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "vault")
 	workspace := config.Workspace{Version: 2, Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "Term"}, Canvas: &config.CanvasWorkspace{URL: "https://canvas.example.edu"}, Calendar: config.Calendar{Timetable: "Timetable.md", Term: "Term.md"}}
@@ -253,19 +286,27 @@ func TestCanvasAuthSavesTokenAndListsCourses(t *testing.T) {
 		t.Fatal(err)
 	}
 	var saved string
-	prompts := &scriptedPrompts{answers: []any{"tok-123"}}
-	var out strings.Builder
+	var loadedToken string
+	var loadingMessage string
+	prompts := &scriptedPrompts{answers: []any{"tok-123", []int{0}}}
 	deps := CanvasAuthDependencies{
 		Prompts: prompts,
-		Output:  &out,
 		Root:    root,
-		Load:    func(config.Workspace, string) (*canvas.Client, error) { return &canvas.Client{}, nil },
+		Load: func(_ config.Workspace, token string) (*canvas.Client, error) {
+			loadedToken = token
+			return &canvas.Client{}, nil
+		},
 		Save: func(token string) error {
 			saved = token
 			return canvas.SaveCredential(root, token)
 		},
+		Clear: func() error { _, err := canvas.ClearCredential(root); return err },
 		Courses: func(context.Context, *canvas.Client) ([]canvas.CourseInfo, error) {
-			return []canvas.CourseInfo{{ID: "7", CourseCode: "CS3103", Name: "Algorithms"}}, nil
+			return []canvas.CourseInfo{{ID: "7", CourseCode: "CS3103", Name: "Algorithms", Current: true}}, nil
+		},
+		Loading: func(ctx context.Context, message string, task func(context.Context) error) error {
+			loadingMessage = message
+			return task(ctx)
 		},
 	}
 	if err := RunCanvasAuth(context.Background(), deps); err != nil {
@@ -274,11 +315,18 @@ func TestCanvasAuthSavesTokenAndListsCourses(t *testing.T) {
 	if saved != "tok-123" {
 		t.Fatalf("saved token = %q", saved)
 	}
+	if loadedToken != "tok-123" {
+		t.Fatalf("client token = %q", loadedToken)
+	}
+	if loadingMessage != "Loading Canvas courses…" {
+		t.Fatalf("loading message = %q", loadingMessage)
+	}
 	if token, err := canvas.LoadCredential(root); err != nil || token != "tok-123" {
 		t.Fatalf("LoadCredential = %q, %v", token, err)
 	}
-	if !strings.Contains(out.String(), "CS3103") || !strings.Contains(out.String(), "(id 7)") {
-		t.Fatalf("course listing = %q", out.String())
+	course, err := config.LoadCourse(root, "CS3103")
+	if err != nil || course.Canvas == nil || course.Canvas.ID != 7 || len(course.Canvas.Sources) != 6 {
+		t.Fatalf("tracked course = %+v, %v", course, err)
 	}
 	// A credential file must exist project-local with a gitignore guard.
 	if _, err := os.Stat(filepath.Join(root, ".config", "corum", "canvas.json")); err != nil {
@@ -296,19 +344,107 @@ func TestCanvasAuthRefusesInvalidToken(t *testing.T) {
 	if err := vault.Initialize(root, workspace, uiAssets(), "test"); err != nil {
 		t.Fatal(err)
 	}
-	var out strings.Builder
 	deps := CanvasAuthDependencies{
 		Prompts: &scriptedPrompts{answers: []any{"bad-token"}},
-		Output:  &out,
 		Root:    root,
 		Load:    func(config.Workspace, string) (*canvas.Client, error) { return &canvas.Client{}, nil },
 		Save:    func(token string) error { return canvas.SaveCredential(root, token) },
+		Clear:   func() error { _, err := canvas.ClearCredential(root); return err },
 		Courses: func(context.Context, *canvas.Client) ([]canvas.CourseInfo, error) {
 			return nil, errors.New("401 Unauthorized")
 		},
 	}
 	if err := RunCanvasAuth(context.Background(), deps); err == nil || !strings.Contains(err.Error(), "401 Unauthorized") {
 		t.Fatalf("RunCanvasAuth() = %v, want the token rejection", err)
+	}
+}
+
+func TestCanvasAuthCancellationDoesNotPersistNewToken(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	root := filepath.Join(t.TempDir(), "vault")
+	workspace := config.Workspace{Version: 2, Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "Term"}, Canvas: &config.CanvasWorkspace{URL: "https://canvas.example.edu"}, Calendar: config.Calendar{Timetable: "Timetable.md", Term: "Term.md"}}
+	if err := vault.Initialize(root, workspace, uiAssets(), "test"); err != nil {
+		t.Fatal(err)
+	}
+	saved := false
+	deps := CanvasAuthDependencies{
+		Prompts: &scriptedPrompts{answers: []any{"new-token", ErrCancelled}},
+		Root:    root,
+		Load:    func(config.Workspace, string) (*canvas.Client, error) { return &canvas.Client{}, nil },
+		Save:    func(string) error { saved = true; return nil },
+		Clear:   func() error { return nil },
+		Courses: func(context.Context, *canvas.Client) ([]canvas.CourseInfo, error) {
+			return []canvas.CourseInfo{{ID: "7", CourseCode: "CS3103", Name: "Algorithms", Current: true}}, nil
+		},
+	}
+	if err := RunCanvasAuth(context.Background(), deps); !errors.Is(err, ErrCancelled) {
+		t.Fatalf("RunCanvasAuth() = %v", err)
+	}
+	if saved {
+		t.Fatal("cancelled auth persisted the new token")
+	}
+}
+
+func TestCanvasAuthClearsNewTokenWhenCourseUpdateFails(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	root := filepath.Join(t.TempDir(), "vault")
+	workspace := config.Workspace{Version: 2, Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "Term"}, Canvas: &config.CanvasWorkspace{URL: "https://canvas.example.edu"}, Calendar: config.Calendar{Timetable: "Timetable.md", Term: "Term.md"}}
+	if err := vault.Initialize(root, workspace, uiAssets(), "test"); err != nil {
+		t.Fatal(err)
+	}
+	saved, cleared := false, false
+	deps := CanvasAuthDependencies{
+		Prompts: &scriptedPrompts{answers: []any{"new-token", []int{0}}},
+		Root:    root,
+		Load:    func(config.Workspace, string) (*canvas.Client, error) { return &canvas.Client{}, nil },
+		Save:    func(string) error { saved = true; return nil },
+		Clear:   func() error { cleared = true; return nil },
+		Courses: func(context.Context, *canvas.Client) ([]canvas.CourseInfo, error) {
+			return []canvas.CourseInfo{{ID: "999999999999999999999999", CourseCode: "CS3103", Name: "Algorithms", Current: true}}, nil
+		},
+	}
+	if err := RunCanvasAuth(context.Background(), deps); err == nil {
+		t.Fatal("RunCanvasAuth() succeeded")
+	}
+	if !saved || !cleared {
+		t.Fatalf("saved = %v, cleared = %v", saved, cleared)
+	}
+}
+
+func TestCanvasAuthLeavesTrackingUntouchedWhenNoCurrentCoursesExist(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	root := filepath.Join(t.TempDir(), "vault")
+	workspace := config.Workspace{Version: 2, Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "Term"}, Canvas: &config.CanvasWorkspace{URL: "https://canvas.example.edu"}, Calendar: config.Calendar{Timetable: "Timetable.md", Term: "Term.md"}}
+	if err := vault.Initialize(root, workspace, uiAssets(), "test"); err != nil {
+		t.Fatal(err)
+	}
+	writePath := filepath.Join(root, "courses", "OLD", "course.yaml")
+	if err := os.MkdirAll(filepath.Dir(writePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before := []byte("version: 2\ncode: OLD\ncanvas:\n  id: 7\n  sources: [assignments]\n")
+	if err := os.WriteFile(writePath, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := canvas.SaveCredential(root, "token"); err != nil {
+		t.Fatal(err)
+	}
+	deps := CanvasAuthDependencies{
+		Prompts: &scriptedPrompts{answers: []any{"token"}},
+		Root:    root,
+		Load:    func(config.Workspace, string) (*canvas.Client, error) { return &canvas.Client{}, nil },
+		Save:    func(string) error { return errors.New("unexpected credential save") },
+		Clear:   func() error { return errors.New("unexpected credential clear") },
+		Courses: func(context.Context, *canvas.Client) ([]canvas.CourseInfo, error) {
+			return []canvas.CourseInfo{{ID: "7", CourseCode: "OLD", Name: "Old Course", Current: false}}, nil
+		},
+	}
+	if err := RunCanvasAuth(context.Background(), deps); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(writePath)
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("course changed: %q, %v", after, err)
 	}
 }
 
@@ -319,27 +455,21 @@ func TestRunAuthSkipsDisabledJira(t *testing.T) {
 	if err := vault.Initialize(root, workspace, uiAssets(), "test"); err != nil {
 		t.Fatal(err)
 	}
-	var out strings.Builder
 	deps := AuthDependencies{
 		Prompts: &scriptedPrompts{answers: []any{false}},
-		Output:  &out,
 		Canvas: CanvasAuthDependencies{
-			Prompts: &scriptedPrompts{answers: []any{"tok"}},
-			Output:  &out,
+			Prompts: &scriptedPrompts{answers: []any{"tok", []int{0}}},
 			Root:    root,
 			Load:    func(config.Workspace, string) (*canvas.Client, error) { return &canvas.Client{}, nil },
 			Save:    func(token string) error { return canvas.SaveCredential(root, token) },
+			Clear:   func() error { _, err := canvas.ClearCredential(root); return err },
 			Courses: func(context.Context, *canvas.Client) ([]canvas.CourseInfo, error) {
-				return []canvas.CourseInfo{{ID: "1", CourseCode: "CS101", Name: "Intro"}}, nil
+				return []canvas.CourseInfo{{ID: "1", CourseCode: "CS101", Name: "Intro", Current: true}}, nil
 			},
 		},
-		HasJira: func(ws config.Workspace) bool { return ws.Jira != nil },
 	}
 	if err := RunAuth(context.Background(), root, deps); err != nil {
 		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), "Jira skipped") {
-		t.Fatalf("output = %q", out.String())
 	}
 }
 

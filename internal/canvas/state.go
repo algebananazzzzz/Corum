@@ -153,32 +153,11 @@ func readState(path string, selected []string) (CanvasState, error) {
 	return state, nil
 }
 func atomicJSON(path string, value any) error {
-	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
+	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
 	}
-	name := temporary.Name()
-	defer os.Remove(name)
-	encoder := json.NewEncoder(temporary)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(value); err == nil {
-		err = temporary.Sync()
-	}
-	if closeErr := temporary.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return err
-	}
-	if err = os.Rename(name, path); err != nil {
-		return err
-	}
-	directory, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer directory.Close()
-	return directory.Sync()
+	return atomicWriteFile(path, append(data, '\n'), 0o600, ".canvas-write-*")
 }
 func writeState(path string, state CanvasState, zone string) error {
 	state.Version = 2

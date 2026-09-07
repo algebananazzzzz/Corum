@@ -50,11 +50,15 @@ corum init --defaults ~/Corum
 ```
 
 The vault receives `.config/corum/corum.yaml`, `.config/corum/.gitignore`,
-`AGENTS.md`, `skills/`, `templates/`, an empty `courses/` directory, and
+`CLAUDE.md`, `skills/`, `templates/`, an empty `courses/` directory, and
 `.corum/toolkit-version`. Corum keeps no global vault registry; release builds
 refresh only the toolkit belonging to the project used by the current command.
 
-Corum owns and may replace the complete `AGENTS.md`, `skills/`, and `templates/`
+`AGENTS.md` links to `CLAUDE.md`. Each of `.claude/skills`, `.codex/skills`, and
+`.agents/skills` links to `../skills`. These relative links survive moving the
+vault; toolkit refresh also repairs missing links in existing vaults.
+
+Corum owns and may replace `CLAUDE.md`, these links, `skills/`, and `templates/`
 paths plus `.corum/toolkit-version`. Keep personal instructions and files outside
 those paths. Toolkit refreshes never replace `.config/corum/corum.yaml`,
 `courses/`, captured sources, wiki pages, state, calendars, or credentials.
@@ -73,8 +77,12 @@ corum jira logout [path]
 ```
 
 The Canvas flow stores your API token in the vault, validates it against the
-configured origin, and prints the courses the token can access (with the
-numeric `id` you put in `course.yaml`). For automation you can keep exporting
+configured origin, and opens a searchable checklist containing only current,
+identifiable courses. Existing tracked courses are preselected. Selecting a new
+course creates its `course.yaml` with every Canvas source enabled; deselecting a
+current course removes only its `canvas` block. Course files, captured data,
+state, Jira, wiki, and tracked courses absent from the current Canvas response
+are left untouched. For automation you can keep exporting
 `CORUM_CANVAS_TOKEN` instead; it takes precedence over the stored token.
 
 Jira uses Atlassian browser OAuth only. There is no email/API-token mode, Rovo
@@ -123,8 +131,9 @@ Omit a service block to disable that service. Jira browser login writes only the
 selected non-secret `cloud_id` and project. URLs must be credential-free HTTPS
 origins, and `workspace.timezone` must be an IANA time zone.
 
-Create `courses/COURSE/course.yaml` with static course identity and the service
-blocks enabled for that course:
+Canvas authentication can create course configuration for you. You can also
+create `courses/COURSE/course.yaml` manually with static course identity and the
+service blocks enabled for that course:
 
 ```yaml
 version: 2

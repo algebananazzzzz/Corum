@@ -28,14 +28,15 @@ var LoginRequired = errors.New("Jira session is missing or revoked; run corum au
 // OpenOptions permits the CLI and tests to choose interaction without exposing
 // the internal OAuth record.
 type OpenOptions struct {
-	Endpoint    string
-	CachePath   string
-	Interactive bool
-	ForceReauth bool
-	Out         io.Writer
-	BrowserOpen func(string) error
-	Timeout     time.Duration
-	HTTPClient  *http.Client
+	Endpoint         string
+	CachePath        string
+	Interactive      bool
+	ForceReauth      bool
+	Out              io.Writer
+	BrowserOpen      func(string) error
+	AuthorizationURL func(string)
+	Timeout          time.Duration
+	HTTPClient       *http.Client
 }
 
 func (o OpenOptions) endpoint() string {
@@ -85,7 +86,7 @@ func Open(ctx context.Context, options OpenOptions) (*RovoSession, error) {
 		if opener == nil {
 			opener = defaultBrowserOpen
 		}
-		callback, err = newLoopbackCallback(out, opener, timeout)
+		callback, err = newLoopbackCallback(out, opener, options.AuthorizationURL, timeout)
 		if err != nil {
 			return nil, fmt.Errorf("start Jira authorization: %w", err)
 		}
@@ -188,9 +189,7 @@ func newOAuthHandler(ctx context.Context, record authRecord, cached bool, callba
 	return auth.NewAuthorizationCodeHandler(config)
 }
 
-// newAllToolsOAuthHandler builds a second official SDK handler from the
-// bootstrap session. Reusing the dynamic bootstrap handler can invoke the
-// one-shot callback again when the expanded endpoint challenges the client.
+// Reusing the bootstrap handler could invoke its one-shot callback again.
 func newAllToolsOAuthHandler(record authRecord, initial oauth2.TokenSource, client *http.Client, cacheTransaction *authCacheTransaction) (*auth.AuthorizationCodeHandler, error) {
 	if record.ClientID == "" || record.Token == nil || initial == nil {
 		return nil, LoginRequired

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"bytes"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -20,9 +19,7 @@ var (
 	transitionRE = regexp.MustCompile(`^[0-9]+$`)
 )
 
-func bytesReader(data []byte) *bytes.Reader { return bytes.NewReader(data) }
-
-func validateWorkspace(value Workspace) error {
+func ValidateWorkspace(value Workspace) error {
 	if value.Version != 2 {
 		return fmt.Errorf("unsupported configuration version %d (only version 2 is supported)", value.Version)
 	}
@@ -62,10 +59,7 @@ func validateWorkspace(value Workspace) error {
 	return nil
 }
 
-// ValidateWorkspace checks an in-memory v2 workspace before it is written.
-func ValidateWorkspace(value Workspace) error { return validateWorkspace(value) }
-
-func validateCourse(value Course) error {
+func ValidateCourse(value Course) error {
 	if value.Version != 2 {
 		return fmt.Errorf("unsupported configuration version %d (only version 2 is supported)", value.Version)
 	}

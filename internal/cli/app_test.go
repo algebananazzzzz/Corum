@@ -28,6 +28,30 @@ func TestRunVersionPrintsBuildVersion(t *testing.T) {
 	}
 }
 
+func TestFullscreenCommandOnlyMatchesInteractiveFlows(t *testing.T) {
+	for _, args := range [][]string{
+		{"init"},
+		{"init", "/tmp/vault"},
+		{"auth"},
+		{"auth", "canvas"},
+		{"auth", "jira", "/tmp/vault"},
+	} {
+		if !fullscreenCommand(args) {
+			t.Fatalf("fullscreenCommand(%q) = false", args)
+		}
+	}
+	for _, args := range [][]string{
+		{"init", "--defaults", "/tmp/vault"},
+		{"auth", "--help"},
+		{"doctor"},
+		{"sync", "--all"},
+	} {
+		if fullscreenCommand(args) {
+			t.Fatalf("fullscreenCommand(%q) = true", args)
+		}
+	}
+}
+
 func TestRunRejectsUnknownCommand(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := Run(context.Background(), []string{"unknown"}, nil, &out, &errOut); code != 2 {

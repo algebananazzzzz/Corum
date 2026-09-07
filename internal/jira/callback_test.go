@@ -11,7 +11,7 @@ import (
 )
 
 func TestCallbackOnlyAcceptsExactPathAndReturnsCodeFields(t *testing.T) {
-	callback, err := newLoopbackCallback(io.Discard, func(string) error { return nil }, time.Second)
+	callback, err := newLoopbackCallback(io.Discard, func(string) error { return nil }, nil, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestCallbackOnlyAcceptsExactPathAndReturnsCodeFields(t *testing.T) {
 }
 
 func TestCallbackProviderErrorAndTimeoutAreRedacted(t *testing.T) {
-	callback, err := newLoopbackCallback(io.Discard, func(string) error { return nil }, 20*time.Millisecond)
+	callback, err := newLoopbackCallback(io.Discard, func(string) error { return nil }, nil, 20*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestCallbackProviderErrorAndTimeoutAreRedacted(t *testing.T) {
 }
 
 func TestCallbackProviderErrorIsRedacted(t *testing.T) {
-	callback, err := newLoopbackCallback(io.Discard, func(string) error { return nil }, time.Second)
+	callback, err := newLoopbackCallback(io.Discard, func(string) error { return nil }, nil, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestCallbackProviderErrorIsRedacted(t *testing.T) {
 }
 
 func TestCallbackFirstResultWins(t *testing.T) {
-	callback, err := newLoopbackCallback(io.Discard, func(string) error { return nil }, time.Second)
+	callback, err := newLoopbackCallback(io.Discard, func(string) error { return nil }, nil, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

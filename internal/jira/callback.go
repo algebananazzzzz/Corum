@@ -28,6 +28,7 @@ type loopbackCallback struct {
 	once     sync.Once
 	out      io.Writer
 	opener   func(string) error
+	onURL    func(string)
 	timeout  time.Duration
 }
 
@@ -36,12 +37,12 @@ type callbackOutcome struct {
 	err    error
 }
 
-func newLoopbackCallback(out io.Writer, opener func(string) error, timeout time.Duration) (*loopbackCallback, error) {
+func newLoopbackCallback(out io.Writer, opener func(string) error, onURL func(string), timeout time.Duration) (*loopbackCallback, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("start OAuth callback: %w", err)
 	}
-	c := &loopbackCallback{listener: listener, result: make(chan callbackOutcome, 1), out: out, opener: opener, timeout: timeout}
+	c := &loopbackCallback{listener: listener, result: make(chan callbackOutcome, 1), out: out, opener: opener, onURL: onURL, timeout: timeout}
 	c.server = &http.Server{Handler: http.HandlerFunc(c.serveHTTP)}
 	go func() { _ = c.server.Serve(listener) }()
 	return c, nil
@@ -67,6 +68,9 @@ func (c *loopbackCallback) finish(outcome callbackOutcome) { c.once.Do(func() { 
 
 func (c *loopbackCallback) Fetch(ctx context.Context, authorizationURL string) (*authorizationResult, error) {
 	fmt.Fprintf(c.out, "Open this URL to connect Atlassian:\n%s\n", authorizationURL)
+	if c.onURL != nil {
+		c.onURL(authorizationURL)
+	}
 	if c.opener != nil {
 		_ = c.opener(authorizationURL)
 	}

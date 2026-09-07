@@ -23,9 +23,7 @@ const maxPaginationPages = 200
 // so transport errors never leak the user-specific secret.
 var verifierParamRE = regexp.MustCompile(`[?&]?verifier=[^&"'\s)]*`)
 
-// redactTransportError returns an error whose message carries no verifier
-// secrets. The concrete URL is never re-parsed, so a malformed error cannot
-// panic.
+// Redact text directly: transport errors may contain malformed URLs.
 func redactTransportError(err error) error {
 	if err == nil {
 		return nil
@@ -77,22 +75,29 @@ type CourseInfo struct {
 	CourseCode string `json:"course_code"`
 	Name       string `json:"name"`
 	Current    bool   `json:"current"`
-	Conclusion string `json:"conclusion_date"`
 }
 
-// Courses lists the courses the authenticated token can access.
+// Courses lists current, identifiable courses the authenticated token can
+// access. The enrollment filter respects section, course, and term dates.
 func (c *Client) Courses(ctx context.Context) ([]CourseInfo, error) {
-	raw, err := c.GetAll(ctx, "/api/v1/courses", url.Values{})
+	query := url.Values{"enrollment_state": {"active"}, "include[]": {"concluded"}}
+	raw, err := c.GetAll(ctx, "/api/v1/courses", query)
 	if err != nil {
 		return nil, err
 	}
 	records := make([]CourseInfo, 0, len(raw))
 	for _, record := range raw {
+		courseID := id(record)
+		name := str(record, "name")
+		code := str(record, "course_code")
+		if courseID == "" || (name == "" && code == "") || record["concluded"] == true {
+			continue
+		}
 		records = append(records, CourseInfo{
-			ID:         id(record),
-			Name:       str(record, "name"),
-			CourseCode: str(record, "course_code"),
-			Current:    record["is_enrolled"] == true || record["current"] == true,
+			ID:         courseID,
+			Name:       name,
+			CourseCode: code,
+			Current:    true,
 		})
 	}
 	return records, nil

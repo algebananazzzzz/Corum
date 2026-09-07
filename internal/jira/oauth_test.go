@@ -159,7 +159,7 @@ func TestOAuthForceReauthIgnoresValidCachedToken(t *testing.T) {
 func TestOAuthSecondAuthorizationFailsClosedWithoutAnotherBrowser(t *testing.T) {
 	fixture := newFreshOAuthMCPServer(t)
 	var browserCalls int
-	callback, err := newLoopbackCallback(io.Discard, callbackBrowser(t, &browserCalls), time.Second)
+	callback, err := newLoopbackCallback(io.Discard, callbackBrowser(t, &browserCalls), nil, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

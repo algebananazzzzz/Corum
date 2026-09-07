@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-)
 
-// The Canvas token is a credential, so it lives only in a private, ignored
-// project-local directory. The CORUM_CANVAS_TOKEN environment variable always
-// takes precedence for automation.
+	"github.com/algebananazzzzz/Corum/internal/config"
+)
 
 const credentialVersion = 1
 
@@ -27,26 +25,7 @@ func CredentialPathFor(root string) (string, error) {
 	if root == "" {
 		return "", errors.New("Canvas credential requires a project root")
 	}
-	return filepath.Join(root, ".config", "corum", "canvas.json"), nil
-}
-
-// ensureCredentialDir creates the private credential directory and a gitignore
-// guard so credentials are never committed.
-func ensureCredentialDir(path string) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create Canvas credential directory: %w", err)
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return fmt.Errorf("secure Canvas credential directory: %w", err)
-	}
-	guard := filepath.Join(dir, ".gitignore")
-	if _, err := os.Stat(guard); err != nil {
-		if err := os.WriteFile(guard, []byte("/auth.json\n/canvas.json\n/.auth-*.json\n"), 0o600); err != nil {
-			return fmt.Errorf("write Canvas credential guard: %w", err)
-		}
-	}
-	return nil
+	return filepath.Join(config.ProjectDir(root), "canvas.json"), nil
 }
 
 // LoadCredential returns the effective Canvas token: environment first, then
@@ -93,24 +72,14 @@ func SaveCredential(root, token string) error {
 	if err != nil {
 		return err
 	}
-	if err := ensureCredentialDir(path); err != nil {
+	if err := config.EnsureProjectDir(root); err != nil {
 		return err
 	}
 	data, err := json.Marshal(credentialFile{Version: credentialVersion, Token: token})
 	if err != nil {
 		return err
 	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return fmt.Errorf("write Canvas credential: %w", err)
-	}
-	if _, err := file.Write(data); err == nil {
-		err = file.Sync()
-	}
-	if closeErr := file.Close(); err == nil {
-		err = closeErr
-	}
-	return err
+	return atomicWriteFile(path, data, 0o600, ".auth-*.json")
 }
 
 // ClearCredential removes the credential at the effective path.

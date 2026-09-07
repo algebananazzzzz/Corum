@@ -14,11 +14,16 @@ import (
 
 const toolkitTemporaryPrefix = ".corum-toolkit-"
 
-// toolkitLockName serializes toolkit transactions per vault. A process
-// holding it owns every transaction path in the vault.
 const toolkitLockName = ".toolkit.lock"
 
 var removeAll = os.RemoveAll
+
+var toolkitLinks = []struct{ path, target string }{
+	{"AGENTS.md", "CLAUDE.md"},
+	{".claude/skills", "../skills"},
+	{".codex/skills", "../skills"},
+	{".agents/skills", "../skills"},
+}
 
 type assetFile struct {
 	path string
@@ -45,7 +50,25 @@ func SyncToolkit(root string, assets fs.FS, version string) error {
 
 func toolkitIsCurrent(root, version string) bool {
 	data, err := os.ReadFile(filepath.Join(root, ".corum", "toolkit-version"))
-	return err == nil && string(data) == version+"\n"
+	if err != nil || string(data) != version+"\n" {
+		return false
+	}
+	for _, link := range toolkitLinks {
+		path := filepath.Join(root, link.path)
+		if parent := filepath.Dir(path); parent != filepath.Clean(root) {
+			if info, err := os.Lstat(parent); err != nil || !info.IsDir() {
+				return false
+			}
+		}
+		target, err := os.Readlink(path)
+		if err != nil || target != link.target {
+			return false
+		}
+		if _, err := os.Stat(path); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func syncToolkit(root string, assets fs.FS, version string, rename func(string, string) error) error {
@@ -62,29 +85,43 @@ func syncToolkit(root string, assets fs.FS, version string, rename func(string, 
 	if err != nil {
 		return err
 	}
-	// The per-vault lock guarantees no live Corum process owns a transaction
-	// path, so every remaining stage/backup directory is stale and removable.
+	// Under the lock, stale stages are disposable; backups may still be needed for recovery.
 	if err := cleanToolkitTemporaryFiles(root, false); err != nil {
 		return err
 	}
 	id := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
 	stageRoot := filepath.Join(corumDir, toolkitTemporaryPrefix+"stage-"+id)
+	defer removeAll(stageRoot)
 	if err := installPayload(stageRoot, payload); err != nil {
 		return err
 	}
-	defer removeAll(stageRoot)
-	items := []struct{ name string }{{"AGENTS.md"}, {"skills"}, {"templates"}, {".corum/toolkit-version"}}
+	items := []string{"CLAUDE.md", "skills", "templates"}
+	for _, link := range toolkitLinks {
+		items = append(items, link.path)
+	}
+	items = append(items, ".corum/toolkit-version")
 	replacements := make([]replacement, 0, len(items))
 	for _, item := range items {
-		name := strings.ReplaceAll(item.name, "/", "-")
+		parent := filepath.Dir(filepath.Join(root, item))
+		if info, err := os.Lstat(parent); err == nil {
+			if parent != filepath.Clean(root) && !info.IsDir() {
+				return fmt.Errorf("toolkit parent %s must be a directory, not a symlink or file", parent)
+			}
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		name := strings.ReplaceAll(item, "/", "-")
 		replacements = append(replacements, replacement{
-			target: filepath.Join(root, filepath.FromSlash(item.name)),
-			stage:  filepath.Join(stageRoot, filepath.FromSlash(item.name)),
+			target: filepath.Join(root, filepath.FromSlash(item)),
+			stage:  filepath.Join(stageRoot, filepath.FromSlash(item)),
 			backup: filepath.Join(corumDir, toolkitTemporaryPrefix+"backup-"+id+"-"+name),
 		})
 	}
 	for index := range replacements {
 		item := &replacements[index]
+		if err := os.MkdirAll(filepath.Dir(item.target), 0o755); err != nil {
+			return rollbackResult(err, rollback(replacements, rename))
+		}
 		if _, err := os.Lstat(item.target); err == nil {
 			if err := rename(item.target, item.backup); err != nil {
 				return rollbackResult(fmt.Errorf("backup %s: %w", item.target, err), rollback(replacements, rename))
@@ -161,7 +198,7 @@ func collectToolkit(assets fs.FS, version string) ([]assetFile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read embedded AGENTS.md: %w", err)
 	}
-	payload = append(payload, assetFile{path: "AGENTS.md", data: agents, mode: 0o644})
+	payload = append(payload, assetFile{path: "CLAUDE.md", data: agents, mode: 0o644})
 	for _, source := range []string{"agent-kit/skills", "agent-kit/templates"} {
 		err := fs.WalkDir(assets, source, func(item string, entry fs.DirEntry, err error) error {
 			if err != nil {
@@ -198,6 +235,15 @@ func installPayload(root string, payload []assetFile) error {
 		}
 		if err := os.WriteFile(target, file.data, mode); err != nil {
 			return err
+		}
+	}
+	for _, link := range toolkitLinks {
+		target := filepath.Join(root, link.path)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		if err := os.Symlink(link.target, target); err != nil {
+			return fmt.Errorf("link %s: %w", target, err)
 		}
 	}
 	return nil
