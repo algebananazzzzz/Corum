@@ -226,9 +226,6 @@ func validateConfiguration(workspace config.Workspace, course config.Course, pla
 	if !config.Effective(workspace, course).Jira || workspace.Jira == nil || course.Jira == nil {
 		return nil, &ValidationError{Message: fmt.Sprintf("Jira is disabled for %s", course.Code)}
 	}
-	if workspace.Version != 2 || course.Version != 2 {
-		return nil, &ValidationError{Message: "Jira requires version 2 configuration"}
-	}
 	if requireCloud && !planIdentifierRE.MatchString(workspace.Jira.CloudID) {
 		return nil, &ValidationError{Message: "configured Jira cloud ID has invalid syntax"}
 	}
@@ -270,8 +267,7 @@ func validateConfiguration(workspace config.Workspace, course config.Course, pla
 	return workspace.Jira, nil
 }
 
-// ValidatePlan verifies a complete plan and its selected v2 configuration
-// without opening OAuth or calling Jira.
+// ValidatePlan verifies a complete plan and its selected configuration without opening OAuth or calling Jira.
 func ValidatePlan(workspace config.Workspace, course config.Course, plan Plan, requireCloud bool) error {
 	_, err := validateConfiguration(workspace, course, plan, requireCloud)
 	return err

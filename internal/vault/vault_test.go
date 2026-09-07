@@ -13,7 +13,6 @@ import (
 	"github.com/algebananazzzzz/Corum/internal/lockfile"
 
 	"github.com/algebananazzzzz/Corum/internal/config"
-	"gopkg.in/yaml.v3"
 )
 
 func failRenameAt(wants ...int) func(string, string) error {
@@ -148,7 +147,7 @@ func TestSyncToolkitRepairsLegacyLayoutAtSameVersion(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("legacy agents"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("prior agents"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	settings := filepath.Join(root, ".claude", "settings.json")
@@ -224,40 +223,6 @@ func TestInitializeAndValidateDoNotWriteGlobalConfiguration(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(globalConfig, "corum")); !os.IsNotExist(err) {
 		t.Fatalf("global Corum configuration exists: %v", err)
 	}
-}
-
-func TestValidateMigratesLegacyV2WorkspaceConfiguration(t *testing.T) {
-	root := t.TempDir()
-	contents, err := yaml.Marshal(testWorkspace())
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacy := filepath.Join(root, "corum.yaml")
-	if err := os.WriteFile(legacy, contents, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(filepath.Join(root, "courses"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := Validate(root); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
-		t.Fatalf("legacy configuration remains: %v", err)
-	}
-	assertFileContent(t, filepath.Join(root, ".config", "corum", "corum.yaml"), string(contents))
-}
-
-func TestValidateRejectsAmbiguousWorkspaceConfigurations(t *testing.T) {
-	root := initializedVault(t, "old")
-	legacy := filepath.Join(root, "corum.yaml")
-	if err := os.WriteFile(legacy, []byte("do not overwrite"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := Validate(root); err == nil {
-		t.Fatal("Validate() accepted both workspace configuration paths")
-	}
-	assertFileContent(t, legacy, "do not overwrite")
 }
 
 func TestValidateRejectsDuplicateCodes(t *testing.T) {

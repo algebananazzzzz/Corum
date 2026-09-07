@@ -12,8 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Initialize creates a new, empty v2 vault. Configuration and embedded assets
-// are fully checked before the target directory is created.
+// Initialize creates a new, empty vault. Configuration and embedded assets are fully checked before the target directory is created.
 func Initialize(root string, workspace config.Workspace, assets fs.FS, toolkitVersion string) error {
 	if err := config.ValidateWorkspace(workspace); err != nil {
 		return fmt.Errorf("validate workspace: %w", err)
@@ -59,8 +58,7 @@ func Initialize(root string, workspace config.Workspace, assets fs.FS, toolkitVe
 	return installPayload(root, payload)
 }
 
-// WriteWorkspace atomically replaces only the project-local corum.yaml after
-// validating v2 data.
+// WriteWorkspace atomically replaces the project-local corum.yaml after validation.
 func WriteWorkspace(root string, workspace config.Workspace) error {
 	if err := config.ValidateWorkspace(workspace); err != nil {
 		return fmt.Errorf("validate workspace: %w", err)

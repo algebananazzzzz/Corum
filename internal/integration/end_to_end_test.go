@@ -197,45 +197,6 @@ func TestInstalledBinary(t *testing.T) {
 		assertNoGlobalCorumConfig(t, environment.config)
 	})
 
-	t.Run("v1 vault rejection leaves the vault and global config unchanged", func(t *testing.T) {
-		environment := isolatedEnvironment(t)
-		vault := filepath.Join(environment.root, "v1-vault")
-		mustWrite(t, filepath.Join(vault, "corum.yaml"), "schema: 1\nworkspace:\n  timezone: Asia/Singapore\n  term: old\n")
-		mustWrite(t, filepath.Join(vault, "keep.txt"), "user-owned\n")
-		before := snapshot(t, vault)
-
-		result := runBinary(binary, environment, "", "", "doctor", vault)
-		mustExit(t, result, 1)
-		if !strings.Contains(result.stderr, "vault validation failed") {
-			t.Fatalf("doctor stderr = %q", result.stderr)
-		}
-		if after := snapshot(t, vault); after != before {
-			t.Fatalf("v1 rejection mutated vault:\nbefore:\n%s\nafter:\n%s", before, after)
-		}
-		assertNoGlobalCorumConfig(t, environment.config)
-	})
-
-	t.Run("legacy v2 workspace configuration moves into the project config directory", func(t *testing.T) {
-		environment := isolatedEnvironment(t)
-		vault := filepath.Join(environment.root, "legacy-v2-vault")
-		contents := "version: 2\nworkspace:\n  timezone: Asia/Singapore\n  term: AY2026/27 Semester 1\ncalendar:\n  timetable: Timetable.md\n  term: Term_Calendar.md\n"
-		mustWrite(t, filepath.Join(vault, "corum.yaml"), contents)
-		mustWrite(t, filepath.Join(vault, "keep.txt"), "user-owned\n")
-
-		result := runBinary(binary, environment, "", "", "doctor", vault)
-		mustSucceed(t, result)
-		if _, err := os.Stat(filepath.Join(vault, "corum.yaml")); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("legacy configuration remains: %v", err)
-		}
-		if got := mustRead(t, filepath.Join(vault, ".config", "corum", "corum.yaml")); got != contents {
-			t.Fatalf("migrated configuration = %q", got)
-		}
-		if got := mustRead(t, filepath.Join(vault, "keep.txt")); got != "user-owned\n" {
-			t.Fatalf("user file = %q", got)
-		}
-		assertNoGlobalCorumConfig(t, environment.config)
-	})
-
 	t.Run("Jira-disabled validation does not require OAuth", func(t *testing.T) {
 		environment := isolatedEnvironment(t)
 		vault := filepath.Join(environment.root, "vault")

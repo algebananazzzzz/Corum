@@ -21,7 +21,7 @@ var (
 
 func ValidateWorkspace(value Workspace) error {
 	if value.Version != 2 {
-		return fmt.Errorf("unsupported configuration version %d (only version 2 is supported)", value.Version)
+		return fmt.Errorf("configuration format is invalid")
 	}
 	if value.Workspace.Timezone == "" || value.Workspace.Term == "" {
 		return fmt.Errorf("workspace timezone and term are required")
@@ -61,7 +61,7 @@ func ValidateWorkspace(value Workspace) error {
 
 func ValidateCourse(value Course) error {
 	if value.Version != 2 {
-		return fmt.Errorf("unsupported configuration version %d (only version 2 is supported)", value.Version)
+		return fmt.Errorf("configuration format is invalid")
 	}
 	if !courseCodeRE.MatchString(value.Code) {
 		return fmt.Errorf("course code is invalid")

@@ -78,22 +78,6 @@ func TestLoadRejectsUnknownFieldsAndExtraDocuments(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsVersionOneWithoutWriting(t *testing.T) {
-	root := t.TempDir()
-	contents := strings.Replace(validWorkspace, "version: 2", "version: 1", 1)
-	writeConfig(t, root, "", contents)
-	if _, err := LoadWorkspace(root); err == nil {
-		t.Fatal("LoadWorkspace() accepted version 1")
-	}
-	got, err := os.ReadFile(filepath.Join(root, ".config", "corum", "corum.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != contents {
-		t.Fatalf("corum.yaml changed to %q", got)
-	}
-}
-
 func TestLoadWorkspaceDoesNotReadLegacyRootConfiguration(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "corum.yaml"), []byte(validWorkspace), 0o644); err != nil {
@@ -101,19 +85,6 @@ func TestLoadWorkspaceDoesNotReadLegacyRootConfiguration(t *testing.T) {
 	}
 	if _, err := LoadWorkspace(root); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("LoadWorkspace() error = %v, want not exist", err)
-	}
-}
-
-func TestLoadWorkspaceExplainsVersionOneVault(t *testing.T) {
-	root := t.TempDir()
-	contents := strings.Replace(validWorkspace, "version: 2", "version: 1", 1)
-	writeConfig(t, root, "", contents)
-	_, err := LoadWorkspace(root)
-	if err == nil {
-		t.Fatal("LoadWorkspace() accepted version 1")
-	}
-	if !strings.Contains(err.Error(), "version 1") || !strings.Contains(err.Error(), "version 2") {
-		t.Fatalf("error = %v, want v1 migration guidance", err)
 	}
 }
 

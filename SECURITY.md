@@ -68,10 +68,7 @@ rollout:
 Do not store personal changes inside those paths. Everything else is user-owned,
 including `.config/corum/corum.yaml`, `courses/`, raw captures, wiki pages and
 assets, course state, calendars, changelogs, and credentials. Corum must preserve user-owned
-paths when updating the toolkit. It refuses to initialize a nonempty directory
-and rejects v1 configuration before modifying that vault. For an existing v2
-vault, it atomically moves root `corum.yaml` to `.config/corum/corum.yaml`; it
-refuses to choose when both paths exist.
+paths when updating the toolkit. It preserves the project-local workspace configuration at `.config/corum/corum.yaml`.
 
 Wiki prose is authored by an LLM operating through the installed skills, never by
 Corum code. Review the single combined Jira/wiki plan before allowing mutations.

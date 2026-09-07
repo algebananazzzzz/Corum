@@ -28,8 +28,7 @@ type WikiCourse struct {
 	SplitRules string `yaml:"split_rules"`
 }
 
-// Services is the per-course service set after workspace and course blocks are
-// intersected. A service has no separate feature switch in v2.
+// Services is the per-course service set after workspace and course blocks are intersected.
 type Services struct {
 	Canvas bool
 	Jira   bool
