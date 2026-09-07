@@ -4,7 +4,11 @@ Read this when the Jira workflow is enabled.
 
 ## Issue types
 
-| Type | Means | | --- | --- | | `Task` | Finish required work by a deadline | | `Session` | Attend a required or graded session | | `Milestone` | Reach or attend a required one-off date |
+| Type | Means |
+| --- | --- |
+| `Task` | Finish required work by a deadline |
+| `Session` | Attend a required or graded session |
+| `Milestone` | Reach or attend a required one-off date |
 
 Place required work on the board. Assessed submissions, explicit administrative obligations, mandatory or graded sessions, and required milestones qualify. Keep optional items, sessions with unknown attendance, lecture files, and recordings in their course-source context. A source with a separate required obligation creates its matching board action.
 

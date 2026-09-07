@@ -11,17 +11,32 @@ The LLM authors the wiki’s educational prose. Deterministic scripts identify d
 
 ## Choose the target
 
-| Target | Reader | Outcome | | --- | --- | --- | | Explainer | New to the material | Learn progressively | | Concept | Prerequisites known | Understand one concept completely | | Reference | Concepts mastered | Retrieve essential facts quickly | | Course guide | Enrolled student | Retrieve course conventions, schedule, milestones, and policies |
+| Target | Reader | Outcome |
+| --- | --- | --- |
+| Explainer | New to the material | Learn progressively |
+| Concept | Prerequisites known | Understand one concept completely |
+| Reference | Concepts mastered | Retrieve essential facts quickly |
+| Course guide | Enrolled student | Retrieve course conventions, schedule, milestones, and policies |
 
 Use one tier per page. Start wiki pages with the matching template under `templates/wiki/` and start course guides with `templates/Conventions and Milestones.md`. Replace each template’s authoring callout with page content.
 
 ## Shared standard
 
-- **Accuracy:** preserve course facts and verify researched claims. - **Scope:** organize around the reader's need, not source order. - **Language:** use concise connective prose that serves the tier. - **Structure:** give each block one purpose and use the simplest fitting block. - **Ownership:** link or embed knowledge from its owning page. - **Location:** store pages and figures below `courses/{{COURSE}}/wiki/`. - **Provenance:** give source-backed sections exact `%% {{label}} p{{range}} %%` markers and keep the source list in frontmatter.
+- **Accuracy:** preserve course facts and verify researched claims.
+- **Scope:** organize around the reader's need, not source order.
+- **Language:** use concise connective prose that serves the tier.
+- **Structure:** give each block one purpose and use the simplest fitting block.
+- **Ownership:** link or embed knowledge from its owning page.
+- **Location:** store pages and figures below `courses/{{COURSE}}/wiki/`.
+- **Provenance:** give source-backed sections exact `%% {{label}} p{{range}} %%` markers and keep the source list in frontmatter.
 
 ## Sources and research
 
-| Source | Role | | --- | --- | | Captured course source | Scope, terminology, emphasis, assessed knowledge | | Reputable secondary source | Framing, boundaries, explanation order, examples | | Primary or official source | Exact behavior, registered values, disputed claims |
+| Source | Role |
+| --- | --- |
+| Captured course source | Scope, terminology, emphasis, assessed knowledge |
+| Reputable secondary source | Framing, boundaries, explanation order, examples |
+| Primary or official source | Exact behavior, registered values, disputed claims |
 
 Treat a successfully captured course source as trustworthy by default. Compare a concept’s treatment with one reputable secondary source, synthesize an original structure, and use primary sources for precise claims, conflicting accounts, and essential gaps. Cite researched claims where they appear and state meaningful conflicts.
 
@@ -62,4 +77,9 @@ A course guide is complete when students can quickly find the course convention,
 
 ## Final review
 
-| Tier | Required proof | | --- | --- | | Explainer | Progressive sections, beginner-safe language, checkpoint after each section | | Concept | Concept-centered synthesis, researched gaps, coherent depth, exact provenance | | Reference | Severe compression, rapid lookup, backlink to every contributing concept | | Course guide | Current grading, rhythm, milestones, policies, and open items in the course template |
+| Tier | Required proof |
+| --- | --- |
+| Explainer | Progressive sections, beginner-safe language, checkpoint after each section |
+| Concept | Concept-centered synthesis, researched gaps, coherent depth, exact provenance |
+| Reference | Severe compression, rapid lookup, backlink to every contributing concept |
+| Course guide | Current grading, rhythm, milestones, policies, and open items in the course template |

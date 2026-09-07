@@ -4,7 +4,13 @@ This vault contains course wikis under `courses/{{COURSE}}/wiki/`. Use the cours
 
 ## Wiki workflows
 
-| Skill | Use when | | --- | --- | | `sync-course` | Synchronizing or reconciling a course wiki | | `scope-course` | Identifying the course material and wiki work for a synchronization | | `authoring-wiki` | Creating or revising an explainer, concept, reference page, or course guide | | `linting-wiki` | Reviewing coverage, links, index consistency, provenance, or writing quality | | `drawio-diagrams` | Creating or editing a wiki diagram and its editable Draw.io source |
+| Skill | Use when |
+| --- | --- |
+| `sync-course` | Synchronizing or reconciling a course wiki |
+| `scope-course` | Identifying the course material and wiki work for a synchronization |
+| `authoring-wiki` | Creating or revising an explainer, concept, reference page, or course guide |
+| `linting-wiki` | Reviewing coverage, links, index consistency, provenance, or writing quality |
+| `drawio-diagrams` | Creating or editing a wiki diagram and its editable Draw.io source |
 
 ## Course wiki structure
 

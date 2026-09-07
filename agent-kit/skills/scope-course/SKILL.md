@@ -15,7 +15,10 @@ Read the selected manifest, `courses/{{COURSE}}/course.yaml`, and the successful
 
 `effective_features.jira` and `effective_features.wiki` decide whether the Jira and wiki workflows are enabled or disabled for the selected manifest.
 
-| Workflow | Enabled inputs | Disabled result | | --- | --- | --- | | Jira | Workspace Jira settings, course epic, `state/jira.json`, and [Jira planning](references/jira-board.md) | `status: disabled`, `plan: null`, and empty evidence | | Wiki | `state/wiki.json`, wiki pages and index, course split rule, and captured sources | `status: disabled` with empty concept, ingestion, and ignored lists |
+| Workflow | Enabled inputs | Disabled result |
+| --- | --- | --- |
+| Jira | Workspace Jira settings, course epic, `state/jira.json`, and [Jira planning](references/jira-board.md) | `status: disabled`, `plan: null`, and empty evidence |
+| Wiki | `state/wiki.json`, wiki pages and index, course split rule, and captured sources | `status: disabled` with empty concept, ingestion, and ignored lists |
 
 An enabled wiki with no state or pages begins as an empty wiki. An enabled Jira workflow uses the reconciled Jira cache supplied by `sync-course`.
 
@@ -25,7 +28,11 @@ Create Jira actions for required work, required sessions, required dated milesto
 
 Build `plan.actions` as the exact `corum jira apply` payload. Use one of these shapes for each action:
 
-| Action | Fields | | --- | --- | | `create` | `action`, `issue` | | `update` | `action`, `key`, `set` | | `transition` | `action`, `key`, `transition` |
+| Action | Fields |
+| --- | --- |
+| `create` | `action`, `issue` |
+| `update` | `action`, `key`, `set` |
+| `transition` | `action`, `key`, `transition` |
 
 Put source IDs, raw paths, display titles, reasons, and before/after detail in `evidence`, keyed by `action_index`. Each action and its evidence together show the course change and its source.
 

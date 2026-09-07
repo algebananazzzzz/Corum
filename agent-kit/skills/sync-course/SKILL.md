@@ -21,7 +21,10 @@ Select the requested course from the JSON result. The selected manifest supplies
 
 `effective_features.jira` and `effective_features.wiki` decide whether the Jira and wiki workflows are enabled or disabled for the current run. A configuration change takes effect through a fresh capture, which creates a new manifest snapshot.
 
-| Service | Enabled workflow | Disabled workflow | | --- | --- | --- | | Jira | Scope and apply Jira actions. | Omit Jira actions from the plan and preserve prior Jira records. | | Wiki | Scope, author, review, and record wiki work. | Omit wiki actions from the plan and preserve prior wiki records. |
+| Service | Enabled workflow | Disabled workflow |
+| --- | --- | --- |
+| Jira | Scope and apply Jira actions. | Omit Jira actions from the plan and preserve prior Jira records. |
+| Wiki | Scope, author, review, and record wiki work. | Omit wiki actions from the plan and preserve prior wiki records. |
 
 Jira uses the configured workspace and course Jira settings. Wiki uses the existing course wiki and its state, or initializes an empty wiki when no wiki pages or state exist.
 
@@ -47,11 +50,15 @@ Present Jira Changes and Wiki Changes together. Jira rows include the action, ta
 
 ### Jira Changes
 
-| Action | Target | Planned change | Source evidence | | --- | --- | --- | --- | | Create | `{{ISSUE_SUMMARY}}` | Create a task for {{ASSIGNMENT}} due {{DATE_TIME}}. | `{{SOURCE_PATH}}` — `{{REASON}}` |
+| Action | Target | Planned change | Source evidence |
+| --- | --- | --- | --- |
+| Create | `{{ISSUE_SUMMARY}}` | Create a task for {{ASSIGNMENT}} due {{DATE_TIME}}. | `{{SOURCE_PATH}}` — `{{REASON}}` |
 
 ### Wiki Changes
 
-| Action | Target | Planned change | Source evidence | | --- | --- | --- | --- | | Enrich | `{{CONCEPT}}` | Add a section on {{COVERAGE}}. | `{{SOURCE_PATH}}` — `{{LABEL}}`, `{{PAGES}}` |
+| Action | Target | Planned change | Source evidence |
+| --- | --- | --- | --- |
+| Enrich | `{{CONCEPT}}` | Add a section on {{COVERAGE}}. | `{{SOURCE_PATH}}` — `{{LABEL}}`, `{{PAGES}}` |
 
 Ask one combined approval question that states the Jira action count and wiki page count:
 

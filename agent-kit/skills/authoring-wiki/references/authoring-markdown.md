@@ -4,7 +4,19 @@ The syntax contract is [Markdown conventions](markdown-conventions.md). This gui
 
 ## Quick reference
 
-| Knowledge shape | Block | | --- | --- | | One concept and meaning | `**Term** — definition` | | Unordered family | Bulleted list with bold starters | | Ordered mechanism | Numbered list | | Repeated comparison dimensions | Table | | Actor messages or state changes | Mermaid process diagram | | Spatial structure or packet layout | Editable Draw.io pair | | Command and observation | `[!tool]` | | Worked application | `[!example]` | | Outside-course evidence | `[!research]` with source on first line | | Likely harmful mistake | `[!warning]` | | Irreducible visual evidence | `[!figure]` with caption |
+| Knowledge shape | Block |
+| --- | --- |
+| One concept and meaning | `**Term** — definition` |
+| Unordered family | Bulleted list with bold starters |
+| Ordered mechanism | Numbered list |
+| Repeated comparison dimensions | Table |
+| Actor messages or state changes | Mermaid process diagram |
+| Spatial structure or packet layout | Editable Draw.io pair |
+| Command and observation | `[!tool]` |
+| Worked application | `[!example]` |
+| Outside-course evidence | `[!research]` with source on first line |
+| Likely harmful mistake | `[!warning]` |
+| Irreducible visual evidence | `[!figure]` with caption |
 
 ## Selection rules
 
