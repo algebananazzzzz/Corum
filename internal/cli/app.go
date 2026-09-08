@@ -80,7 +80,7 @@ func RunProcess(ctx context.Context, argv []string, in io.Reader, out, errOut io
 // Run dispatches the complete local Corum command surface.
 func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
 	if len(args) == 1 && args[0] == "--help" {
-		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum auth [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira status [PATH] | corum jira logout [PATH] | corum jira ensure-epic COURSE | corum jira apply COURSE [--dry-run]")
+		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira status [PATH] | corum jira logout [PATH] | corum jira ensure-epic COURSE | corum jira apply COURSE [--dry-run]")
 		return 0
 	}
 	if len(args) == 1 && args[0] == "update" {
@@ -157,7 +157,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		_ = ui.ShowNotice("Corum Setup", "Vault initialized.", in, out)
 		return 0
 	}
-	if code, handled := runAuth(ctx, args, in, out, errOut); handled {
+	if code, handled := runConfigure(ctx, args, in, out, errOut); handled {
 		return code
 	}
 	if len(args) == 1 || len(args) == 2 {
@@ -227,7 +227,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		session, err := jira.Open(ctx, jira.OpenOptions{Interactive: false, CachePath: jiraCacheFor(root), Out: errOut})
 		if err != nil {
 			if err == jira.LoginRequired {
-				fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum auth jira")
+				fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum configure jira")
 			} else {
 				fmt.Fprintln(errOut, "could not connect to Atlassian")
 			}
@@ -250,7 +250,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, label)
 		return 0
 	}
-	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum auth [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira status [PATH] | corum jira logout [PATH] | corum jira ensure-epic COURSE | corum jira apply COURSE [--dry-run]")
+	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira status [PATH] | corum jira logout [PATH] | corum jira ensure-epic COURSE | corum jira apply COURSE [--dry-run]")
 	return 2
 }
 
@@ -260,14 +260,14 @@ func jiraCacheFor(root string) string {
 	return path
 }
 
-// runAuth handles corum auth [PATH] and the special corum auth jira/canvas
+// runConfigure handles corum configure [PATH] and the special corum configure jira/canvas
 // flows.
-func runAuth(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) (int, bool) {
-	if len(args) < 1 || args[0] != "auth" {
+func runConfigure(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) (int, bool) {
+	if len(args) < 1 || args[0] != "configure" {
 		return 0, false
 	}
 	if len(args) == 2 && args[1] == "--help" {
-		fmt.Fprintln(out, "usage: corum auth [PATH] | corum auth jira [PATH] | corum auth canvas [PATH]")
+		fmt.Fprintln(out, "usage: corum configure [PATH] | corum configure jira [PATH] | corum configure canvas [PATH]")
 		return 0, true
 	}
 	path := "."
@@ -332,11 +332,11 @@ func runAuth(ctx context.Context, args []string, in io.Reader, out, errOut io.Wr
 		deps := ui.DefaultAuthDependencies(in, out, root)
 		if err := ui.RunAuth(ctx, root, deps); err != nil {
 			if errors.Is(err, ui.ErrCancelled) {
-				return fail("Corum Authentication", "Authentication cancelled.", nil)
+				return fail("Corum Configuration", "Configuration cancelled.", nil)
 			}
-			return fail("Corum Authentication", "Authentication failed.", err)
+			return fail("Corum Configuration", "Configuration failed.", err)
 		}
-		_ = ui.ShowNotice("Corum Authentication", "Authentication complete.", in, out)
+		_ = ui.ShowNotice("Corum Configuration", "Configuration complete.", in, out)
 		return 0, true
 	}
 }
@@ -495,7 +495,7 @@ func commandVaultPath(args []string) (string, bool) {
 		if len(args) == 2 {
 			return args[1], true
 		}
-	case "auth":
+	case "configure":
 		if len(args) == 1 {
 			return ".", true
 		}
@@ -532,7 +532,7 @@ func fullscreenCommand(args []string) bool {
 	if _, ok := interactiveInitRoot(args); ok {
 		return true
 	}
-	if len(args) == 0 || args[0] != "auth" {
+	if len(args) == 0 || args[0] != "configure" {
 		return false
 	}
 	if len(args) == 1 {
@@ -606,7 +606,7 @@ func runJiraEnsureEpic(ctx context.Context, args []string, out, errOut io.Writer
 			}
 		}
 		if errors.Is(err, jira.LoginRequired) {
-			fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum auth jira")
+			fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum configure jira")
 		} else {
 			fmt.Fprintln(errOut, "could not connect to Atlassian")
 		}
@@ -696,7 +696,7 @@ func runJiraApply(ctx context.Context, args []string, in io.Reader, out, errOut 
 	session, err := openJiraSession(ctx, jira.OpenOptions{Interactive: false, CachePath: jiraCacheFor(root), Out: errOut})
 	if err != nil {
 		if errors.Is(err, jira.LoginRequired) {
-			fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum auth jira")
+			fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum configure jira")
 		} else {
 			fmt.Fprintln(errOut, "could not connect to Atlassian")
 		}

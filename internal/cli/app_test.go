@@ -35,9 +35,9 @@ func TestFullscreenCommandOnlyMatchesInteractiveFlows(t *testing.T) {
 	for _, args := range [][]string{
 		{"init"},
 		{"init", "/tmp/vault"},
-		{"auth"},
-		{"auth", "canvas"},
-		{"auth", "jira", "/tmp/vault"},
+		{"configure"},
+		{"configure", "canvas"},
+		{"configure", "jira", "/tmp/vault"},
 	} {
 		if !fullscreenCommand(args) {
 			t.Fatalf("fullscreenCommand(%q) = false", args)
@@ -45,7 +45,7 @@ func TestFullscreenCommandOnlyMatchesInteractiveFlows(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"init", "--defaults", "/tmp/vault"},
-		{"auth", "--help"},
+		{"configure", "--help"},
 		{"doctor"},
 		{"sync", "--all"},
 	} {
@@ -59,6 +59,16 @@ func TestRunRejectsUnknownCommand(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := Run(context.Background(), []string{"unknown"}, nil, &out, &errOut); code != 2 {
 		t.Fatalf("Run code = %d", code)
+	}
+}
+
+func TestRunRejectsRenamedAuthCommand(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), []string{"auth", "--help"}, nil, &out, &errOut); code != 2 {
+		t.Fatalf("auth command code = %d, want 2", code)
+	}
+	if !strings.Contains(errOut.String(), "corum configure") {
+		t.Fatalf("usage does not direct users to configure: %q", errOut.String())
 	}
 }
 
@@ -164,17 +174,17 @@ func TestRunJiraStatusWithoutPathRequiresCurrentProject(t *testing.T) {
 	}
 }
 
-func TestRunAuthJiraRejectsInvalidVaultBeforeTTY(t *testing.T) {
+func TestRunConfigureJiraRejectsInvalidVaultBeforeTTY(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := Run(context.Background(), []string{"auth", "jira", "/nonexistent/corum-vault"}, nil, &out, &errOut); code != 1 {
-		t.Fatalf("auth jira code = %d, stderr = %q", code, errOut.String())
+	if code := Run(context.Background(), []string{"configure", "jira", "/nonexistent/corum-vault"}, nil, &out, &errOut); code != 1 {
+		t.Fatalf("configure jira code = %d, stderr = %q", code, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "vault validation failed") {
 		t.Fatalf("stderr = %q", errOut.String())
 	}
 }
 
-func TestRunAuthRequiresTerminalWithoutVault(t *testing.T) {
+func TestRunConfigureRequiresTerminalWithoutVault(t *testing.T) {
 	// A valid vault path is required; a non-terminal stdin must be refused
 	// before any prompt with a deterministic message.
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -183,8 +193,8 @@ func TestRunAuthRequiresTerminalWithoutVault(t *testing.T) {
 		t.Fatalf("init code = %d", code)
 	}
 	var out, errOut bytes.Buffer
-	if code := Run(context.Background(), []string{"auth", root}, nil, &out, &errOut); code != 2 {
-		t.Fatalf("auth code = %d, stderr = %q", code, errOut.String())
+	if code := Run(context.Background(), []string{"configure", root}, nil, &out, &errOut); code != 2 {
+		t.Fatalf("configure code = %d, stderr = %q", code, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "terminal") {
 		t.Fatalf("stderr = %q", errOut.String())

@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"charm.land/huh/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // ErrCancelled is returned for an explicit cancellation, Ctrl-C, or EOF.
@@ -57,7 +58,7 @@ func (p HuhPrompter) Password(label, defaultValue string) (string, error) {
 
 func (p HuhPrompter) Confirm(label string, defaultValue bool) (bool, error) {
 	value := defaultValue
-	if err := p.run(huh.NewConfirm().Title(label).Value(&value)); err != nil {
+	if err := p.run(huh.NewConfirm().Title(label).WithButtonAlignment(lipgloss.Left).Value(&value)); err != nil {
 		return false, promptError(err)
 	}
 	return value, nil

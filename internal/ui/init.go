@@ -30,12 +30,11 @@ var (
 )
 
 type initAnswers struct {
-	root        string
-	timezone    string
-	term        string
-	canvasURL   string
-	wikiEnabled bool
-	confirmed   bool
+	root      string
+	timezone  string
+	term      string
+	canvasURL string
+	confirmed bool
 }
 
 func (a initAnswers) workspace() config.Workspace {
@@ -45,16 +44,13 @@ func (a initAnswers) workspace() config.Workspace {
 		Canvas:    &config.CanvasWorkspace{URL: a.canvasURL},
 		Calendar:  config.Calendar{Timetable: "Timetable.md", Term: "Term_Calendar.md"},
 	}
-	if a.wikiEnabled {
-		workspace.Wiki = &config.WikiWorkspace{}
-	}
 	return workspace
 }
 
 func newInitScreen(root string) (*Screen, *initAnswers) {
 	answers := &initAnswers{
 		root: root, timezone: "Asia/Singapore", term: "AY2026/27 Semester 1",
-		canvasURL: "https://canvas.example.edu", wikiEnabled: true, confirmed: true,
+		canvasURL: "https://canvas.nus.edu.sg", confirmed: true,
 	}
 	form := huh.NewForm(huh.NewGroup(
 		huh.NewInput().Title("Vault path").Validate(nonblank).Value(&answers.root),
@@ -64,7 +60,6 @@ func newInitScreen(root string) (*Screen, *initAnswers) {
 			huh.NewOption("AY2026/27 Semester 2", "AY2026/27 Semester 2"),
 		).Value(&answers.term),
 		huh.NewInput().Title("Canvas URL").Value(&answers.canvasURL),
-		huh.NewConfirm().Title("Enable wiki authoring?").WithButtonAlignment(lipgloss.Left).Value(&answers.wikiEnabled),
 		huh.NewConfirm().Title("Create this vault?").Validate(func(confirmed bool) error {
 			if !confirmed {
 				return errors.New("confirmation is required")
@@ -136,18 +131,11 @@ func RunInit(ctx context.Context, proposedRoot string, deps InitDependencies) (e
 	if err != nil {
 		return promptError(err)
 	}
-	wikiEnabled, err := deps.Prompts.Confirm("Enable wiki authoring?", true)
-	if err != nil {
-		return promptError(err)
-	}
 	workspace := config.Workspace{
 		Version:   2,
 		Workspace: config.WorkspaceDetails{Timezone: timezone, Term: term},
 		Canvas:    &config.CanvasWorkspace{URL: canvasURL},
 		Calendar:  config.Calendar{Timetable: "Timetable.md", Term: "Term_Calendar.md"},
-	}
-	if wikiEnabled {
-		workspace.Wiki = &config.WikiWorkspace{}
 	}
 	if err := config.ValidateWorkspace(workspace); err != nil {
 		return err
@@ -170,10 +158,7 @@ func selectedSetupChoice(label string, choices []Choice, index int) (string, err
 }
 
 func initSummary(workspace config.Workspace) string {
-	if workspace.Wiki != nil {
-		return "Configuration ready: Canvas configured; Jira disabled; wiki enabled. Run corum auth to authenticate."
-	}
-	return "Configuration ready: Canvas configured; Jira disabled; wiki disabled. Run corum auth to authenticate."
+	return "Configuration ready: Canvas configured; Jira and wiki disabled. Run corum configure to connect services."
 }
 
 // JiraAuthDependencies drives the interactive Jira authentication flow.

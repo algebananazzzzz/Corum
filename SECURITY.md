@@ -35,13 +35,13 @@ All configuration is stored project-locally in `<vault>/.config/corum/`.
 `corum.yaml` contains non-secret workspace settings; credential files use
 `0600` modes within the `0700` directory and are excluded by its gitignore.
 
-- `corum auth canvas` (or the combined `corum auth`) stores the Canvas API token
+- `corum configure canvas` (or the combined `corum configure`) stores the Canvas API token
   at `<vault>/.config/corum/canvas.json`. It is read only for enabled,
   non-dry-run Canvas operations. For automation you can keep supplying
   `CORUM_CANVAS_TOKEN` through the environment instead; it takes precedence over
   the stored token.
 - Jira uses Atlassian browser OAuth only. Corum does not accept Jira email/API
-  tokens and never stores credentials in YAML, Markdown, or state. `corum auth
+  tokens and never stores credentials in YAML, Markdown, or state. `corum configure
   jira` writes the OAuth record to `<vault>/.config/corum/auth.json`.
 - Commands without an explicit vault path use the current project. Corum never
   reads or writes a global configuration directory. The only global Corum data

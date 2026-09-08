@@ -13,7 +13,7 @@ import (
 const credentialVersion = 1
 
 // ErrNoCredential means no Canvas token is stored or supplied.
-var ErrNoCredential = errors.New("no Canvas token found; run corum auth canvas")
+var ErrNoCredential = errors.New("no Canvas token found; run corum configure canvas")
 
 type credentialFile struct {
 	Version int    `json:"version"`

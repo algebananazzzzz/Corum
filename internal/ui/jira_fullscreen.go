@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/algebananazzzzz/Corum/internal/config"
 )
 
@@ -232,7 +233,7 @@ func (s *jiraAuthScreen) selectionForm() *huh.Form {
 	}
 	return huh.NewForm(huh.NewGroup(
 		huh.NewSelect[int]().Title("Jira project").Options(choices...).Value(&s.selected),
-		huh.NewConfirm().Title("Save this Jira configuration?").Value(&s.confirmed),
+		huh.NewConfirm().Title("Save this Jira configuration?").WithButtonAlignment(lipgloss.Left).Value(&s.confirmed),
 	)).WithShowHelp(false).WithShowErrors(false).WithWidth(s.formWidth())
 }
 

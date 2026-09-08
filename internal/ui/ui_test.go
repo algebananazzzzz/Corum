@@ -120,7 +120,7 @@ func testDependencies(prompts Prompter) InitDependencies {
 func TestLocalInitializationIsDeterministic(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "vault")
-	prompts := &scriptedPrompts{answers: []any{root, 0, 1, "https://canvas.nus.edu.sg", true, true}}
+	prompts := &scriptedPrompts{answers: []any{root, 0, 1, "https://canvas.nus.edu.sg", true}}
 	if err := RunInit(context.Background(), root, testDependencies(prompts)); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestLocalInitializationIsDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if workspace.Jira != nil || workspace.Wiki == nil {
+	if workspace.Jira != nil || workspace.Wiki != nil {
 		t.Fatalf("workspace = %+v", workspace)
 	}
 	if workspace.Workspace.Timezone != "Asia/Singapore" || workspace.Workspace.Term != "AY2026/27 Semester 2" || workspace.Canvas.URL != "https://canvas.nus.edu.sg" {
@@ -146,7 +146,7 @@ func TestLocalInitializationIsDeterministic(t *testing.T) {
 func TestInitNeverOpensJira(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "vault")
-	prompts := &scriptedPrompts{answers: []any{root, 0, 0, "https://canvas.nus.edu.sg", true, true}}
+	prompts := &scriptedPrompts{answers: []any{root, 0, 0, "https://canvas.nus.edu.sg", true}}
 	if err := RunInit(context.Background(), root, testDependencies(prompts)); err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestInvalidInitAnswersWriteNothing(t *testing.T) {
 
 func TestCancelledInitWritesNothing(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "vault")
-	prompts := &scriptedPrompts{answers: []any{root, 0, 0, "https://canvas.nus.edu.sg", true, false}}
+	prompts := &scriptedPrompts{answers: []any{root, 0, 0, "https://canvas.nus.edu.sg", false}}
 	err := RunInit(context.Background(), root, testDependencies(prompts))
 	if !errors.Is(err, ErrCancelled) {
 		t.Fatalf("RunInit error = %v", err)
@@ -457,7 +457,7 @@ func TestCanvasAuthLeavesTrackingUntouchedWhenNoCurrentCoursesExist(t *testing.T
 	}
 }
 
-func TestRunAuthSkipsDisabledJira(t *testing.T) {
+func TestRunAuthConfiguresDisabledServices(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "vault")
 	workspace := config.Workspace{Version: 2, Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "Term"}, Canvas: &config.CanvasWorkspace{URL: "https://canvas.example.edu"}, Calendar: config.Calendar{Timetable: "Timetable.md", Term: "Term.md"}}
@@ -465,7 +465,7 @@ func TestRunAuthSkipsDisabledJira(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps := AuthDependencies{
-		Prompts: &scriptedPrompts{answers: []any{false}},
+		Prompts: &scriptedPrompts{answers: []any{false, true}},
 		Canvas: CanvasAuthDependencies{
 			Prompts: &scriptedPrompts{answers: []any{"tok", []int{0}}},
 			Root:    root,
@@ -479,6 +479,13 @@ func TestRunAuthSkipsDisabledJira(t *testing.T) {
 	}
 	if err := RunAuth(context.Background(), root, deps); err != nil {
 		t.Fatal(err)
+	}
+	updated, err := config.LoadWorkspace(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Jira != nil || updated.Wiki == nil {
+		t.Fatalf("workspace = %+v", updated)
 	}
 }
 

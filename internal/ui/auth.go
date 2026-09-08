@@ -184,7 +184,7 @@ func DefaultAuthDependencies(in io.Reader, out io.Writer, root string) AuthDepen
 	}
 }
 
-// RunAuth authenticates Canvas, then Jira, restoring a failed service's previous state.
+// RunAuth configures Canvas, Jira, and optional wiki authoring, restoring a failed service's previous state.
 func RunAuth(ctx context.Context, root string, deps AuthDependencies) (err error) {
 	if deps.Prompts == nil {
 		return fmt.Errorf("interactive authentication is unavailable")
@@ -213,6 +213,22 @@ func RunAuth(ctx context.Context, root string, deps AuthDependencies) (err error
 		}
 		if enable {
 			if err := runJira(ctx, root, deps.Jira); err != nil {
+				return err
+			}
+		}
+	}
+	workspace, err = config.LoadWorkspace(root)
+	if err != nil {
+		return err
+	}
+	if workspace.Wiki == nil {
+		enable, err := deps.Prompts.Confirm("Enable wiki authoring?", true)
+		if err != nil {
+			return promptError(err)
+		}
+		if enable {
+			workspace.Wiki = &config.WikiWorkspace{}
+			if err := vault.WriteWorkspace(root, workspace); err != nil {
 				return err
 			}
 		}

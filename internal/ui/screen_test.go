@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestScreenRendersOdysseyStyleFullscreenFrame(t *testing.T) {
@@ -39,29 +40,41 @@ func TestInitScreenKeepsTheWizardInOneFullscreenForm(t *testing.T) {
 	_ = screen.Init()
 	view := screen.View()
 
-	for _, want := range []string{"Vault path", "Workspace timezone", "Asia/Singapore", "Academic term", "AY2026/27 Semester 1", "AY2026/27 Semester 2", "Canvas URL", "Enable wiki authoring?", "Create this vault?"} {
+	for _, want := range []string{"Vault path", "Workspace timezone", "Asia/Singapore", "Academic term", "AY2026/27 Semester 1", "AY2026/27 Semester 2", "Canvas URL", "https://canvas.nus.edu.sg", "Create this vault?"} {
 		if !strings.Contains(view.Content, want) {
 			t.Fatalf("init form missing %q:\n%s", want, view.Content)
 		}
+	}
+	if strings.Contains(view.Content, "Enable wiki authoring?") {
+		t.Fatalf("init form still configures wiki:\n%s", view.Content)
 	}
 }
 
 func TestInitScreenAlignsConfirmationButtons(t *testing.T) {
 	screen, _ := newInitScreen("/tmp/corum")
 	_ = screen.Init()
-	view := screen.View().Content
+	view := ansi.Strip(screen.View().Content)
 
-	var positions []int
+	buttonStart := -1
+	fieldStart := -1
 	for _, line := range strings.Split(view, "\n") {
 		if index := strings.Index(line, "Yes"); index >= 0 {
-			positions = append(positions, index)
+			if buttonStart >= 0 {
+				t.Fatalf("more than one confirmation row:\n%s", view)
+			}
+			buttonStart = index
+		}
+		if index := strings.Index(line, "> https://canvas.nus.edu.sg"); index >= 0 {
+			fieldStart = index
 		}
 	}
-	if len(positions) != 2 {
-		t.Fatalf("confirmation rows = %d, want 2:\n%s", len(positions), view)
+	if buttonStart < 0 || fieldStart < 0 {
+		t.Fatalf("could not locate confirmation button and Canvas field:\n%s", view)
 	}
-	if positions[0] != positions[1] {
-		t.Fatalf("confirmation buttons start at columns %d and %d, want alignment:\n%s", positions[0], positions[1], view)
+	// The first two columns of a Huh button are its visual padding. Its outer
+	// edge must align with ordinary field controls rather than being centered.
+	if buttonStart != fieldStart+2 {
+		t.Fatalf("confirmation button text starts at column %d, want %d for a left-aligned button:\n%s", buttonStart, fieldStart+2, view)
 	}
 }
 

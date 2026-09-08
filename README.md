@@ -20,11 +20,11 @@ Install Corum, create a vault, and connect the services you want to use:
 curl -fsSL https://raw.githubusercontent.com/algebananazzzzz/Corum/main/install.sh | sh
 corum init
 cd path-to-vault
-corum auth
+corum configure
 corum doctor
 ```
 
-`corum auth` connects Canvas and can connect Jira. Your vault contains the agent instructions, custom skills, course sources, wiki pages, and local workflow records.
+`corum configure` connects Canvas and Jira, and can enable wiki authoring. Your vault contains the agent instructions, custom skills, course sources, wiki pages, and local workflow records.
 
 Open an LLM coding agent in the vault directory after setup. Corum provides the skills and course context; you describe the outcome you want in plain language.
 
