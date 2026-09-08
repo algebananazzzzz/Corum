@@ -215,6 +215,15 @@ func normalizeChildren(raw []map[string]any, project, epic string) ([]IssueState
 	return result, nil
 }
 
+// normalizeJiraTimestamp rewrites Jira's compact numeric offset (+0800) into
+// RFC 3339 form (+08:00) so time.Parse can read it.
+func normalizeJiraTimestamp(value string) string {
+	if len(value) >= 5 && (value[len(value)-4] == '+' || value[len(value)-4] == '-') && !strings.Contains(value, ":") {
+		return value[:len(value)-4] + ":" + value[len(value)-3:]
+	}
+	return value
+}
+
 func normalizeRemoteIssue(raw map[string]any, project, epic string, requireParent bool) (IssueState, error) {
 	key, ok := raw["key"].(string)
 	if !ok {
@@ -284,6 +293,7 @@ func normalizeRemoteIssue(raw map[string]any, project, epic string, requireParen
 		if !ok {
 			return IssueState{}, &ValidationError{Message: "Jira issue response has invalid updated timestamp"}
 		}
+		text = normalizeJiraTimestamp(text)
 		parsed, parseErr := time.Parse(time.RFC3339Nano, text)
 		if parseErr != nil {
 			return IssueState{}, &ValidationError{Message: "Jira issue response updated timestamp must include an offset"}

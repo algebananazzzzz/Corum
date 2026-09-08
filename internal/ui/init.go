@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"charm.land/huh/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/algebananazzzzz/Corum/internal/config"
 	"github.com/algebananazzzzz/Corum/internal/jira"
 	"github.com/algebananazzzzz/Corum/internal/vault"
@@ -22,6 +23,11 @@ type InitDependencies struct {
 }
 
 var initializeVault = vault.Initialize
+
+var (
+	setupTimezones = []Choice{{Label: "Asia/Singapore"}}
+	setupTerms     = []Choice{{Label: "AY2026/27 Semester 1"}, {Label: "AY2026/27 Semester 2"}}
+)
 
 type initAnswers struct {
 	root        string
@@ -52,16 +58,19 @@ func newInitScreen(root string) (*Screen, *initAnswers) {
 	}
 	form := huh.NewForm(huh.NewGroup(
 		huh.NewInput().Title("Vault path").Validate(nonblank).Value(&answers.root),
-		huh.NewInput().Title("Workspace timezone").Value(&answers.timezone),
-		huh.NewInput().Title("Academic term").Validate(nonblank).Value(&answers.term),
+		huh.NewSelect[string]().Title("Workspace timezone").Options(huh.NewOption("Asia/Singapore", "Asia/Singapore")).Value(&answers.timezone),
+		huh.NewSelect[string]().Title("Academic term").Options(
+			huh.NewOption("AY2026/27 Semester 1", "AY2026/27 Semester 1"),
+			huh.NewOption("AY2026/27 Semester 2", "AY2026/27 Semester 2"),
+		).Value(&answers.term),
 		huh.NewInput().Title("Canvas URL").Value(&answers.canvasURL),
-		huh.NewConfirm().Title("Enable wiki authoring?").Value(&answers.wikiEnabled),
+		huh.NewConfirm().Title("Enable wiki authoring?").WithButtonAlignment(lipgloss.Left).Value(&answers.wikiEnabled),
 		huh.NewConfirm().Title("Create this vault?").Validate(func(confirmed bool) error {
 			if !confirmed {
 				return errors.New("confirmation is required")
 			}
 			return config.ValidateWorkspace(answers.workspace())
-		}).Value(&answers.confirmed),
+		}).WithButtonAlignment(lipgloss.Left).Value(&answers.confirmed),
 	))
 	return NewScreen("Corum Setup", form), answers
 }
@@ -107,15 +116,23 @@ func RunInit(ctx context.Context, proposedRoot string, deps InitDependencies) (e
 	if err != nil {
 		return promptError(err)
 	}
-	timezone, err := deps.Prompts.Input("Workspace timezone", "Asia/Singapore")
+	timezoneIndex, err := deps.Prompts.Select("Workspace timezone", setupTimezones)
 	if err != nil {
 		return promptError(err)
 	}
-	term, err := deps.Prompts.Input("Academic term", "AY2026/27 Semester 1")
+	timezone, err := selectedSetupChoice("workspace timezone", setupTimezones, timezoneIndex)
+	if err != nil {
+		return err
+	}
+	termIndex, err := deps.Prompts.Select("Academic term", setupTerms)
 	if err != nil {
 		return promptError(err)
 	}
-	canvasURL, err := deps.Prompts.Input("Canvas URL", "https://canvas.example.edu")
+	term, err := selectedSetupChoice("academic term", setupTerms, termIndex)
+	if err != nil {
+		return err
+	}
+	canvasURL, err := deps.Prompts.Input("Canvas URL", "https://canvas.nus.edu.sg")
 	if err != nil {
 		return promptError(err)
 	}
@@ -143,6 +160,13 @@ func RunInit(ctx context.Context, proposedRoot string, deps InitDependencies) (e
 		return ErrCancelled
 	}
 	return deps.Initialize(root, workspace, deps.Assets, deps.ToolkitVersion)
+}
+
+func selectedSetupChoice(label string, choices []Choice, index int) (string, error) {
+	if index < 0 || index >= len(choices) {
+		return "", fmt.Errorf("invalid %s selection", label)
+	}
+	return choices[index].Label, nil
 }
 
 func initSummary(workspace config.Workspace) string {

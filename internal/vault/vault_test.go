@@ -41,10 +41,27 @@ func testWorkspace() config.Workspace {
 
 func testAssets(label string) fs.FS {
 	return fstest.MapFS{
-		"agent-kit/AGENTS.base.md":          &fstest.MapFile{Data: []byte(label + " agents")},
-		"agent-kit/skills/example/SKILL.md": &fstest.MapFile{Data: []byte(label + " skill")},
-		"agent-kit/templates/template.md":   &fstest.MapFile{Data: []byte(label + " template")},
-		"agent-kit/templates/wiki/index.md": &fstest.MapFile{Data: []byte(label + " index")},
+		"agent-kit/AGENTS.base.md":                          &fstest.MapFile{Data: []byte(label + " agents")},
+		"agent-kit/skills/example/SKILL.md":                 &fstest.MapFile{Data: []byte(label + " skill")},
+		"agent-kit/templates/template.md":                   &fstest.MapFile{Data: []byte(label + " template")},
+		"agent-kit/templates/wiki/index.md":                 &fstest.MapFile{Data: []byte(label + " index")},
+		"agent-kit/assets/calendar/ay2026_27_semester_1.md": &fstest.MapFile{Data: []byte(label + " semester one")},
+		"agent-kit/assets/calendar/ay2026_27_semester_2.md": &fstest.MapFile{Data: []byte(label + " semester two")},
+	}
+}
+
+func TestInitializeCopiesSelectedCalendar(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "vault")
+	workspace := testWorkspace()
+	workspace.Workspace.Term = "AY2026/27 Semester 2"
+	workspace.Calendar.Term = "Term_Calendar.md"
+
+	if err := Initialize(root, workspace, testAssets("calendar"), "test"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "Term_Calendar.md"))
+	if err != nil || string(got) != "calendar semester two" {
+		t.Fatalf("selected calendar = %q, %v", got, err)
 	}
 }
 

@@ -17,6 +17,10 @@ func Initialize(root string, workspace config.Workspace, assets fs.FS, toolkitVe
 	if err := config.ValidateWorkspace(workspace); err != nil {
 		return fmt.Errorf("validate workspace: %w", err)
 	}
+	calendar, err := selectedCalendarAsset(workspace, assets)
+	if err != nil {
+		return err
+	}
 	payload, err := collectToolkit(assets, toolkitVersion)
 	if err != nil {
 		return err
@@ -55,7 +59,31 @@ func Initialize(root string, workspace config.Workspace, assets fs.FS, toolkitVe
 	if err := os.MkdirAll(filepath.Join(root, "courses"), 0o755); err != nil {
 		return err
 	}
+	if calendar != nil {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, workspace.Calendar.Term)), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(root, workspace.Calendar.Term), calendar, 0o644); err != nil {
+			return err
+		}
+	}
 	return installPayload(root, payload)
+}
+
+func selectedCalendarAsset(workspace config.Workspace, assets fs.FS) ([]byte, error) {
+	assetByTerm := map[string]string{
+		"AY2026/27 Semester 1": "agent-kit/assets/calendar/ay2026_27_semester_1.md",
+		"AY2026/27 Semester 2": "agent-kit/assets/calendar/ay2026_27_semester_2.md",
+	}
+	asset, ok := assetByTerm[workspace.Workspace.Term]
+	if !ok {
+		return nil, nil
+	}
+	data, err := fs.ReadFile(assets, asset)
+	if err != nil {
+		return nil, fmt.Errorf("read calendar asset: %w", err)
+	}
+	return data, nil
 }
 
 // WriteWorkspace atomically replaces the project-local corum.yaml after validation.

@@ -100,9 +100,11 @@ func (j fakeJira) Close() error { return nil }
 
 func uiAssets() fs.FS {
 	return fstest.MapFS{
-		"agent-kit/AGENTS.base.md":          &fstest.MapFile{Data: []byte("agents")},
-		"agent-kit/skills/example/SKILL.md": &fstest.MapFile{Data: []byte("skill")},
-		"agent-kit/templates/template.md":   &fstest.MapFile{Data: []byte("template")},
+		"agent-kit/AGENTS.base.md":                          &fstest.MapFile{Data: []byte("agents")},
+		"agent-kit/skills/example/SKILL.md":                 &fstest.MapFile{Data: []byte("skill")},
+		"agent-kit/templates/template.md":                   &fstest.MapFile{Data: []byte("template")},
+		"agent-kit/assets/calendar/ay2026_27_semester_1.md": &fstest.MapFile{Data: []byte("semester one")},
+		"agent-kit/assets/calendar/ay2026_27_semester_2.md": &fstest.MapFile{Data: []byte("semester two")},
 	}
 }
 
@@ -118,7 +120,7 @@ func testDependencies(prompts Prompter) InitDependencies {
 func TestLocalInitializationIsDeterministic(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "vault")
-	prompts := &scriptedPrompts{answers: []any{root, "Asia/Singapore", "Term", "https://canvas.example.edu", true, true}}
+	prompts := &scriptedPrompts{answers: []any{root, 0, 1, "https://canvas.nus.edu.sg", true, true}}
 	if err := RunInit(context.Background(), root, testDependencies(prompts)); err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +131,13 @@ func TestLocalInitializationIsDeterministic(t *testing.T) {
 	if workspace.Jira != nil || workspace.Wiki == nil {
 		t.Fatalf("workspace = %+v", workspace)
 	}
+	if workspace.Workspace.Timezone != "Asia/Singapore" || workspace.Workspace.Term != "AY2026/27 Semester 2" || workspace.Canvas.URL != "https://canvas.nus.edu.sg" {
+		t.Fatalf("workspace defaults = %+v", workspace)
+	}
+	calendar, err := os.ReadFile(filepath.Join(root, "Term_Calendar.md"))
+	if err != nil || string(calendar) != "semester two" {
+		t.Fatalf("selected calendar = %q, %v", calendar, err)
+	}
 	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); err != nil {
 		t.Fatalf("toolkit not installed: %v", err)
 	}
@@ -137,7 +146,7 @@ func TestLocalInitializationIsDeterministic(t *testing.T) {
 func TestInitNeverOpensJira(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "vault")
-	prompts := &scriptedPrompts{answers: []any{root, "Asia/Singapore", "Term", "https://canvas.example.edu", true, true}}
+	prompts := &scriptedPrompts{answers: []any{root, 0, 0, "https://canvas.nus.edu.sg", true, true}}
 	if err := RunInit(context.Background(), root, testDependencies(prompts)); err != nil {
 		t.Fatal(err)
 	}
@@ -153,8 +162,8 @@ func TestInitNeverOpensJira(t *testing.T) {
 
 func TestInvalidInitAnswersWriteNothing(t *testing.T) {
 	for name, answers := range map[string][]any{
-		"timezone": {"Asia/NotAZone", "Term", "https://canvas.example.edu", true},
-		"origin":   {"Asia/Singapore", "Term", "http://canvas.example.edu", true},
+		"timezone": {-1},
+		"origin":   {0, 0, "http://canvas.nus.edu.sg", true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := filepath.Join(t.TempDir(), "vault")
@@ -171,7 +180,7 @@ func TestInvalidInitAnswersWriteNothing(t *testing.T) {
 
 func TestCancelledInitWritesNothing(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "vault")
-	prompts := &scriptedPrompts{answers: []any{root, "Asia/Singapore", "Term", "https://canvas.example.edu", true, false}}
+	prompts := &scriptedPrompts{answers: []any{root, 0, 0, "https://canvas.nus.edu.sg", true, false}}
 	err := RunInit(context.Background(), root, testDependencies(prompts))
 	if !errors.Is(err, ErrCancelled) {
 		t.Fatalf("RunInit error = %v", err)

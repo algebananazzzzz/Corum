@@ -645,7 +645,7 @@ func defaultWorkspace() config.Workspace {
 	return config.Workspace{
 		Version:   2,
 		Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "AY2026/27 Semester 1"},
-		Canvas:    &config.CanvasWorkspace{URL: "https://canvas.example.edu"},
+		Canvas:    &config.CanvasWorkspace{URL: "https://canvas.nus.edu.sg"},
 		Wiki:      &config.WikiWorkspace{},
 		Calendar:  config.Calendar{Timetable: "Timetable.md", Term: "Term_Calendar.md"},
 	}
