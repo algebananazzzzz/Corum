@@ -113,6 +113,53 @@ func (c *JiraClient) EnsureEpic(ctx context.Context, project, summary string) (E
 	return EpicResult{Key: key, Created: true}, nil
 }
 
+// ReconcileEpic finds a previously requested Epic without permitting a second
+// create. It is used after an uncertain create outcome.
+func (c *JiraClient) ReconcileEpic(ctx context.Context, project, summary string) (EpicResult, error) {
+	if err := validateProjectKey(project, "Jira project key"); err != nil {
+		return EpicResult{}, err
+	}
+	if strings.TrimSpace(summary) == "" {
+		return EpicResult{}, &ValidationError{Message: "Jira epic summary is required"}
+	}
+	quotedProject, _ := json.Marshal(project)
+	quotedSummary, _ := json.Marshal(summary)
+	arguments := map[string]any{
+		"cloudId":               c.cloudID,
+		"jql":                   "project = " + string(quotedProject) + " AND issuetype = \"Epic\" AND summary = " + string(quotedSummary),
+		"maxResults":            2,
+		"view":                  "full",
+		"responseContentFormat": "markdown",
+	}
+	var raw any
+	if err := c.session.CallJSON(ctx, "searchJiraIssuesUsingJql", arguments, &raw); err != nil {
+		return EpicResult{}, fmt.Errorf("could not reconcile Jira epic")
+	}
+	page, err := responseObject(raw, "Jira epic search result")
+	if err != nil {
+		return EpicResult{}, err
+	}
+	values, ok := page["issues"].([]any)
+	if !ok {
+		return EpicResult{}, fmt.Errorf("Atlassian returned invalid Jira epic search results")
+	}
+	if len(values) == 0 {
+		return EpicResult{}, fmt.Errorf("%w; wait for Jira and retry", ErrReconciliationRequired)
+	}
+	if len(values) > 1 {
+		return EpicResult{}, &ValidationError{Message: "configured Jira project has ambiguous matching course epics"}
+	}
+	issue, ok := values[0].(map[string]any)
+	if !ok {
+		return EpicResult{}, fmt.Errorf("Atlassian returned invalid Jira epic search results")
+	}
+	key, err := validateExactEpic(issue, project, summary)
+	if err != nil {
+		return EpicResult{}, err
+	}
+	return EpicResult{Key: key}, nil
+}
+
 func validateExactEpic(issue map[string]any, project, summary string) (string, error) {
 	key, _ := issue["key"].(string)
 	if err := validateIssueKey(key, "Jira epic response key"); err != nil {

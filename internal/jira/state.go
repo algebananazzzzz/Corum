@@ -2,6 +2,7 @@ package jira
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,6 +29,69 @@ type JiraState struct {
 	Version      int          `json:"version"`
 	ReconciledAt *string      `json:"reconciled_at"`
 	Issues       []IssueState `json:"issues"`
+}
+
+type epicProvisioningState struct {
+	Version int    `json:"version"`
+	Summary string `json:"summary"`
+}
+
+// BeginEpicProvisioning records an Epic mutation barrier before a create can
+// be attempted. Its boolean result means a prior uncertain attempt must be
+// reconciled without creating another Epic.
+func BeginEpicProvisioning(root string, course config.Course, summary string) (bool, error) {
+	path, err := epicProvisioningPath(root, course)
+	if err != nil {
+		return false, err
+	}
+	state, err := readEpicProvisioning(path)
+	if err == nil {
+		if state.Summary != summary {
+			return false, fmt.Errorf("Jira epic provisioning state does not match the selected course")
+		}
+		return true, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	if err := atomicWriteJSON(path, epicProvisioningState{Version: 1, Summary: summary}); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+// ClearEpicProvisioning removes the completed Epic mutation barrier.
+func ClearEpicProvisioning(root string, course config.Course) error {
+	path, err := epicProvisioningPath(root, course)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func epicProvisioningPath(root string, course config.Course) (string, error) {
+	cachePath, _, err := statePaths(root, course)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(cachePath), "jira-epic.json"), nil
+}
+
+func readEpicProvisioning(path string) (epicProvisioningState, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return epicProvisioningState{}, err
+	}
+	var state epicProvisioningState
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&state); err != nil || state.Version != 1 || strings.TrimSpace(state.Summary) == "" {
+		return epicProvisioningState{}, fmt.Errorf("Jira epic provisioning state is invalid")
+	}
+	return state, nil
 }
 
 type manifestApplied struct {

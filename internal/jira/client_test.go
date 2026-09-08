@@ -106,6 +106,20 @@ func TestJiraClientEnsureEpic(t *testing.T) {
 	})
 }
 
+func TestJiraClientReconcileEpicNeverCreatesAfterAnUncertainAttempt(t *testing.T) {
+	caller := &fakeJSONCaller{responses: map[string][]any{
+		"searchJiraIssuesUsingJql": []any{map[string]any{"data": map[string]any{"issues": []any{}}}},
+	}}
+	client, _ := newJiraClient(caller, "cloud-1")
+	_, err := client.ReconcileEpic(context.Background(), "STUDY", "CS3103 — Computer Networks")
+	if !errors.Is(err, ErrReconciliationRequired) {
+		t.Fatalf("ReconcileEpic error = %v", err)
+	}
+	if len(caller.calls) != 1 || caller.calls[0].name != "searchJiraIssuesUsingJql" {
+		t.Fatalf("calls = %#v", caller.calls)
+	}
+}
+
 func TestJiraClientMapsExactRovoArgumentsAndPagination(t *testing.T) {
 	ctx := context.Background()
 	caller := &fakeJSONCaller{responses: map[string][]any{

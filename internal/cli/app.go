@@ -24,10 +24,13 @@ import (
 var (
 	openJiraSession  = jira.Open
 	makeJiraClient   = jira.NewJiraClient
-	ensureCourseEpic = func(ctx context.Context, session *jira.RovoSession, workspace config.Workspace, course config.Course) (jira.EpicResult, error) {
+	ensureCourseEpic = func(ctx context.Context, session *jira.RovoSession, workspace config.Workspace, course config.Course, reconcile bool) (jira.EpicResult, error) {
 		client, err := makeJiraClient(session, workspace.Jira.CloudID)
 		if err != nil {
 			return jira.EpicResult{}, err
+		}
+		if reconcile {
+			return client.ReconcileEpic(ctx, workspace.Jira.Project, course.Code+" — "+course.Canvas.Name)
 		}
 		return client.EnsureEpic(ctx, workspace.Jira.Project, course.Code+" — "+course.Canvas.Name)
 	}
@@ -573,6 +576,10 @@ func runJiraEnsureEpic(ctx context.Context, args []string, out, errOut io.Writer
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
 	if course.Jira != nil {
+		if err := jira.ClearEpicProvisioning(root, course); err != nil {
+			fmt.Fprintln(errOut, "could not clear Jira epic provisioning state")
+			return 1, true
+		}
 		if err := encoder.Encode(ensuredEpicOutput{Course: course.Code, Epic: course.Jira.Epic}); err != nil {
 			fmt.Fprintln(errOut, "could not write Jira epic result")
 			return 1, true
@@ -581,6 +588,11 @@ func runJiraEnsureEpic(ctx context.Context, args []string, out, errOut io.Writer
 	}
 	if course.Canvas == nil || strings.TrimSpace(course.Canvas.Name) == "" {
 		fmt.Fprintln(errOut, "Jira epic initialization requires a Canvas course name")
+		return 1, true
+	}
+	reconcile, err := jira.BeginEpicProvisioning(root, course, course.Code+" — "+course.Canvas.Name)
+	if err != nil {
+		fmt.Fprintln(errOut, "could not record Jira epic provisioning state")
 		return 1, true
 	}
 	session, err := openJiraSession(ctx, jira.OpenOptions{Interactive: false, CachePath: jiraCacheFor(root), Out: errOut})
@@ -593,7 +605,7 @@ func runJiraEnsureEpic(ctx context.Context, args []string, out, errOut io.Writer
 		return 1, true
 	}
 	defer session.Close()
-	result, err := ensureCourseEpic(ctx, session, workspace, course)
+	result, err := ensureCourseEpic(ctx, session, workspace, course, reconcile)
 	if err != nil {
 		fmt.Fprintln(errOut, "could not initialize Jira epic")
 		return 1, true
@@ -601,6 +613,10 @@ func runJiraEnsureEpic(ctx context.Context, args []string, out, errOut io.Writer
 	course.Jira = &config.JiraCourse{Epic: result.Key}
 	if err := vault.WriteCourse(root, course); err != nil {
 		fmt.Fprintln(errOut, "could not save Jira epic configuration")
+		return 1, true
+	}
+	if err := jira.ClearEpicProvisioning(root, course); err != nil {
+		fmt.Fprintln(errOut, "could not clear Jira epic provisioning state")
 		return 1, true
 	}
 	if err := encoder.Encode(ensuredEpicOutput{Course: course.Code, Epic: result.Key, Created: result.Created}); err != nil {

@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -360,23 +361,42 @@ func TestRunJiraEnsureEpic(t *testing.T) {
 		openJiraSession = oldOpen
 	})
 	openJiraSession = func(context.Context, jira.OpenOptions) (*jira.RovoSession, error) { return nil, nil }
-	ensureCourseEpic = func(_ context.Context, _ *jira.RovoSession, workspace config.Workspace, course config.Course) (jira.EpicResult, error) {
+	var calls []bool
+	ensureCourseEpic = func(_ context.Context, _ *jira.RovoSession, workspace config.Workspace, course config.Course, reconcile bool) (jira.EpicResult, error) {
 		if workspace.Jira.Project != "STUDY" || course.Code != "CS3103" {
 			t.Fatalf("ensure input = %+v, %+v", workspace, course)
 		}
-		return jira.EpicResult{Key: "STUDY-1", Created: true}, nil
+		calls = append(calls, reconcile)
+		if !reconcile {
+			return jira.EpicResult{}, &jira.MutationError{Message: "outcome unknown", State: jira.WriteUnknown}
+		}
+		return jira.EpicResult{Key: "STUDY-1"}, nil
 	}
 
 	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), []string{"jira", "ensure-epic", "CS3103"}, nil, &out, &errOut); code != 1 {
+		t.Fatalf("first code = %d, stderr = %q", code, errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "courses", "CS3103", "state", "jira-epic.json")); err != nil {
+		t.Fatalf("missing provisioning barrier: %v", err)
+	}
+	out.Reset()
+	errOut.Reset()
 	if code := Run(context.Background(), []string{"jira", "ensure-epic", "CS3103"}, nil, &out, &errOut); code != 0 {
-		t.Fatalf("code = %d, stderr = %q", code, errOut.String())
+		t.Fatalf("reconciliation code = %d, stderr = %q", code, errOut.String())
 	}
 	var result map[string]any
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result["course"] != "CS3103" || result["epic"] != "STUDY-1" || result["created"] != true {
+	if result["course"] != "CS3103" || result["epic"] != "STUDY-1" || result["created"] != false {
 		t.Fatalf("result = %#v", result)
+	}
+	if !reflect.DeepEqual(calls, []bool{false, true}) {
+		t.Fatalf("ensure calls = %#v", calls)
+	}
+	if _, err := os.Stat(filepath.Join(root, "courses", "CS3103", "state", "jira-epic.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("provisioning barrier = %v", err)
 	}
 	stored, err := config.LoadCourse(root, "CS3103")
 	if err != nil || stored.Jira == nil || stored.Jira.Epic != "STUDY-1" {
