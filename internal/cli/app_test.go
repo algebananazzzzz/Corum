@@ -15,7 +15,9 @@ import (
 	"github.com/algebananazzzzz/Corum/internal/buildinfo"
 	"github.com/algebananazzzzz/Corum/internal/canvas"
 	"github.com/algebananazzzzz/Corum/internal/config"
+	"github.com/algebananazzzzz/Corum/internal/jira"
 	"github.com/algebananazzzzz/Corum/internal/update"
+	"github.com/algebananazzzzz/Corum/internal/vault"
 )
 
 func TestRunVersionPrintsBuildVersion(t *testing.T) {
@@ -332,5 +334,52 @@ func TestRunJiraApplyDryRunEchoesPlanWithoutOAuth(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "courses", "CS3103", "state")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("dry-run state=%v", err)
+	}
+}
+
+func TestRunJiraEnsureEpic(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "vault")
+	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("init code = %d", code)
+	}
+	workspace, err := config.LoadWorkspace(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace.Jira = &config.JiraWorkspace{CloudID: "cloud-1", Project: "STUDY"}
+	if err := vault.WriteWorkspace(root, workspace); err != nil {
+		t.Fatal(err)
+	}
+	writeCourse(t, root, "CS3103", "version: 2\ncode: CS3103\ncanvas:\n  id: 1\n  name: Computer Networks\n  sources: [assignments]\n")
+	t.Chdir(root)
+
+	oldEnsure := ensureCourseEpic
+	oldOpen := openJiraSession
+	t.Cleanup(func() {
+		ensureCourseEpic = oldEnsure
+		openJiraSession = oldOpen
+	})
+	openJiraSession = func(context.Context, jira.OpenOptions) (*jira.RovoSession, error) { return nil, nil }
+	ensureCourseEpic = func(_ context.Context, _ *jira.RovoSession, workspace config.Workspace, course config.Course) (jira.EpicResult, error) {
+		if workspace.Jira.Project != "STUDY" || course.Code != "CS3103" {
+			t.Fatalf("ensure input = %+v, %+v", workspace, course)
+		}
+		return jira.EpicResult{Key: "STUDY-1", Created: true}, nil
+	}
+
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), []string{"jira", "ensure-epic", "CS3103"}, nil, &out, &errOut); code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, errOut.String())
+	}
+	var result map[string]any
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["course"] != "CS3103" || result["epic"] != "STUDY-1" || result["created"] != true {
+		t.Fatalf("result = %#v", result)
+	}
+	stored, err := config.LoadCourse(root, "CS3103")
+	if err != nil || stored.Jira == nil || stored.Jira.Epic != "STUDY-1" {
+		t.Fatalf("stored = %+v, err = %v", stored, err)
 	}
 }

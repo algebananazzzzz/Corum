@@ -266,6 +266,23 @@ func TestValidateRejectsDuplicateCodes(t *testing.T) {
 	}
 }
 
+func TestWriteCourseReplacesExistingCourseConfiguration(t *testing.T) {
+	root := initializedVault(t, "test")
+	writeCourseFixture(t, root, "CS3103", "version: 2\ncode: CS3103\ncanvas:\n  id: 1\n  sources: [assignments]\n")
+	course, err := config.LoadCourse(root, "CS3103")
+	if err != nil {
+		t.Fatal(err)
+	}
+	course.Jira = &config.JiraCourse{Epic: "STUDY-1"}
+	if err := WriteCourse(root, course); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := config.LoadCourse(root, "CS3103")
+	if err != nil || stored.Jira == nil || stored.Jira.Epic != "STUDY-1" {
+		t.Fatalf("stored = %+v, err = %v", stored, err)
+	}
+}
+
 func TestSyncToolkitRefusesConcurrentProcessBeforeAnyWrite(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := initializedVault(t, "old")

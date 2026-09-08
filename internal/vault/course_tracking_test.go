@@ -75,6 +75,19 @@ func TestConfigureCanvasCoursesNormalizesIDs(t *testing.T) {
 	}
 }
 
+func TestConfigureCanvasCoursesBackfillsTrackedCanvasName(t *testing.T) {
+	root := initializedVault(t, "test")
+	writeCourseFixture(t, root, "CS3103", "version: 2\ncode: CS3103\ncanvas:\n  id: 1\n  sources: [assignments]\n")
+	result, err := ConfigureCanvasCourses(root, []CanvasCourseChoice{{ID: "1", Code: "CS3103", Name: "Computer Networks"}}, []string{"1"})
+	if err != nil || !reflect.DeepEqual(result.Unchanged, []string{"CS3103"}) {
+		t.Fatalf("ConfigureCanvasCourses() = %+v, %v", result, err)
+	}
+	course, err := config.LoadCourse(root, "CS3103")
+	if err != nil || course.Canvas.Name != "Computer Networks" {
+		t.Fatalf("course = %+v, err = %v", course, err)
+	}
+}
+
 func TestConfigureCanvasCoursesRollsBackEarlierWrites(t *testing.T) {
 	root := initializedVault(t, "test")
 	writeCourseFixture(t, root, "ONE", "version: 2\ncode: ONE\ncanvas:\n  id: 1\n  sources: [assignments]\n")

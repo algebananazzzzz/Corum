@@ -108,6 +108,12 @@ func configureCanvasCourses(root string, current []CanvasCourseChoice, selectedI
 		}
 		course := courses[index]
 		if selected[id] {
+			name := strings.TrimSpace(visible[id].Name)
+			if course.Canvas.Name != name {
+				course.Canvas.Name = name
+				courses[index] = course
+				changed[course.Code] = course
+			}
 			result.Unchanged = append(result.Unchanged, course.Code)
 			continue
 		}

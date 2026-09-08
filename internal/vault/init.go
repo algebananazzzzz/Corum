@@ -101,6 +101,22 @@ func WriteWorkspace(root string, workspace config.Workspace) error {
 	return writeConfigAtomic(config.WorkspacePath(root), data)
 }
 
+// WriteCourse atomically replaces an existing course configuration after
+// validating the supplied course and its target path.
+func WriteCourse(root string, course config.Course) error {
+	if err := config.ValidateCourse(course); err != nil {
+		return fmt.Errorf("validate course: %w", err)
+	}
+	if _, err := config.LoadCourse(root, course.Code); err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(course)
+	if err != nil {
+		return err
+	}
+	return writeConfigAtomic(filepath.Join(root, "courses", course.Code, "course.yaml"), data)
+}
+
 func writeConfigAtomic(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
