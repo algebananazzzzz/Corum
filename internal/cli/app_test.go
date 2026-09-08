@@ -370,6 +370,9 @@ func TestRunJiraEnsureEpic(t *testing.T) {
 		if !reconcile {
 			return jira.EpicResult{}, &jira.MutationError{Message: "outcome unknown", State: jira.WriteUnknown}
 		}
+		if len(calls) == 2 {
+			return jira.EpicResult{}, errors.New("search failed")
+		}
 		return jira.EpicResult{Key: "STUDY-1"}, nil
 	}
 
@@ -379,6 +382,16 @@ func TestRunJiraEnsureEpic(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "courses", "CS3103", "state", "jira-epic.json")); err != nil {
 		t.Fatalf("missing provisioning barrier: %v", err)
+	}
+	openJiraSession = func(context.Context, jira.OpenOptions) (*jira.RovoSession, error) { return nil, errors.New("offline") }
+	if code := Run(context.Background(), []string{"jira", "ensure-epic", "CS3103"}, nil, io.Discard, io.Discard); code != 1 {
+		t.Fatalf("reconciliation session code = %d", code)
+	}
+	openJiraSession = func(context.Context, jira.OpenOptions) (*jira.RovoSession, error) { return nil, nil }
+	out.Reset()
+	errOut.Reset()
+	if code := Run(context.Background(), []string{"jira", "ensure-epic", "CS3103"}, nil, &out, &errOut); code != 1 {
+		t.Fatalf("reconciliation search code = %d, stderr = %q", code, errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
@@ -392,7 +405,7 @@ func TestRunJiraEnsureEpic(t *testing.T) {
 	if result["course"] != "CS3103" || result["epic"] != "STUDY-1" || result["created"] != false {
 		t.Fatalf("result = %#v", result)
 	}
-	if !reflect.DeepEqual(calls, []bool{false, true}) {
+	if !reflect.DeepEqual(calls, []bool{false, true, true}) {
 		t.Fatalf("ensure calls = %#v", calls)
 	}
 	if _, err := os.Stat(filepath.Join(root, "courses", "CS3103", "state", "jira-epic.json")); !errors.Is(err, os.ErrNotExist) {

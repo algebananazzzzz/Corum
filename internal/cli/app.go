@@ -599,9 +599,11 @@ func runJiraEnsureEpic(ctx context.Context, args []string, out, errOut io.Writer
 	}
 	session, err := openJiraSession(ctx, jira.OpenOptions{Interactive: false, CachePath: jiraCacheFor(root), Out: errOut})
 	if err != nil {
-		if clearErr := jira.ClearEpicProvisioning(root, course); clearErr != nil {
-			fmt.Fprintln(errOut, "could not clear Jira epic provisioning state")
-			return 1, true
+		if !reconcile {
+			if clearErr := jira.ClearEpicProvisioning(root, course); clearErr != nil {
+				fmt.Fprintln(errOut, "could not clear Jira epic provisioning state")
+				return 1, true
+			}
 		}
 		if errors.Is(err, jira.LoginRequired) {
 			fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum auth jira")
@@ -614,7 +616,7 @@ func runJiraEnsureEpic(ctx context.Context, args []string, out, errOut io.Writer
 	result, err := ensureCourseEpic(ctx, session, workspace, course, reconcile)
 	if err != nil {
 		var mutation *jira.MutationError
-		if !errors.As(err, &mutation) {
+		if !reconcile && !errors.As(err, &mutation) {
 			if clearErr := jira.ClearEpicProvisioning(root, course); clearErr != nil {
 				fmt.Fprintln(errOut, "could not clear Jira epic provisioning state")
 				return 1, true
