@@ -5,7 +5,7 @@ description: Use when creating or revising course wiki explainers, concept pages
 
 # Authoring Wiki Pages
 
-Read [Markdown conventions](references/markdown-conventions.md) before writing. Use [authoring blocks](references/authoring-markdown.md) to choose the smallest useful representation. For a concept, also read [concept boundaries](references/course-split-rules.md).
+Read [Markdown conventions](references/markdown-conventions.md) before writing. Use [authoring blocks](references/authoring-markdown.md) to choose the smallest useful representation. Keep concept pages broad unless a concept has an independent purpose, lifecycle, constraints, and failure modes.
 
 The LLM authors the wiki’s educational prose. Deterministic scripts identify defects and support review.
 
@@ -59,7 +59,7 @@ A checkpoint tests knowledge already taught. The explainer is complete when a be
 
 ## Concepts
 
-Build around the concept. Link prerequisites. Cover the purpose, mechanism, parts, interactions, constraints, and failure cases needed to reason about the concept. Separate neighboring concepts according to the configured split rule and link them where they interact. Integrate researched knowledge into the same mental model.
+Build around the concept. Link prerequisites. Cover the purpose, mechanism, parts, interactions, constraints, and failure cases needed to reason about the concept. Separate neighboring concepts when they have independent purposes, lifecycles, constraints, or failure modes, and link them where they interact. Integrate researched knowledge into the same mental model.
 
 A concept is complete when a prepared reader can explain and apply it independently.
 

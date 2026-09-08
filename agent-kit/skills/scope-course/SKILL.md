@@ -17,8 +17,8 @@ Read the selected manifest, `courses/{{COURSE}}/course.yaml`, and the successful
 
 | Workflow | Enabled inputs | Disabled result |
 | --- | --- | --- |
-| Jira | Workspace Jira settings, course epic, `state/jira.json`, and [Jira planning](references/jira-board.md) | `status: disabled`, `plan: null`, and empty evidence |
-| Wiki | `state/wiki.json`, wiki pages and index, course split rule, and captured sources | `status: disabled` with empty concept, ingestion, and ignored lists |
+| Jira | Vault Jira settings, course epic, `state/jira.json`, and [Jira planning](references/jira-board.md) | `status: disabled`, `plan: null`, and empty evidence |
+| Wiki | `state/wiki.json`, wiki pages and index, and captured sources | `status: disabled` with empty concept, ingestion, and ignored lists |
 
 An enabled wiki with no state or pages begins as an empty wiki. An enabled Jira workflow uses the reconciled Jira cache supplied by `sync-course`.
 

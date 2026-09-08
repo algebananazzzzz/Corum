@@ -9,12 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/algebananazzzzz/Corum/internal/config"
 	"github.com/algebananazzzzz/Corum/internal/lockfile"
 )
 
 const toolkitTemporaryPrefix = ".corum-toolkit-"
 
 const toolkitLockName = ".toolkit.lock"
+
+const toolkitVersionPath = ".config/corum/toolkit-version"
 
 var removeAll = os.RemoveAll
 
@@ -54,7 +57,7 @@ func RefreshToolkit(root string, assets fs.FS, version string) error {
 }
 
 func toolkitIsCurrent(root, version string) bool {
-	data, err := os.ReadFile(filepath.Join(root, ".corum", "toolkit-version"))
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(toolkitVersionPath)))
 	if err != nil || string(data) != version+"\n" {
 		return false
 	}
@@ -77,11 +80,11 @@ func toolkitIsCurrent(root, version string) bool {
 }
 
 func syncToolkit(root string, assets fs.FS, version string, rename func(string, string) error) error {
-	corumDir := filepath.Join(root, ".corum")
-	if err := os.MkdirAll(corumDir, 0o755); err != nil {
+	toolkitDir := config.ProjectDir(root)
+	if err := os.MkdirAll(toolkitDir, 0o700); err != nil {
 		return err
 	}
-	lock, err := lockfile.TryAcquire(filepath.Join(corumDir, toolkitLockName))
+	lock, err := lockfile.TryAcquire(filepath.Join(toolkitDir, toolkitLockName))
 	if err != nil {
 		return err
 	}
@@ -95,7 +98,7 @@ func syncToolkit(root string, assets fs.FS, version string, rename func(string, 
 		return err
 	}
 	id := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
-	stageRoot := filepath.Join(corumDir, toolkitTemporaryPrefix+"stage-"+id)
+	stageRoot := filepath.Join(toolkitDir, toolkitTemporaryPrefix+"stage-"+id)
 	defer removeAll(stageRoot)
 	if err := installPayload(stageRoot, payload); err != nil {
 		return err
@@ -104,7 +107,7 @@ func syncToolkit(root string, assets fs.FS, version string, rename func(string, 
 	for _, link := range toolkitLinks {
 		items = append(items, link.path)
 	}
-	items = append(items, ".corum/toolkit-version")
+	items = append(items, toolkitVersionPath)
 	replacements := make([]replacement, 0, len(items))
 	for _, item := range items {
 		parent := filepath.Dir(filepath.Join(root, item))
@@ -119,7 +122,7 @@ func syncToolkit(root string, assets fs.FS, version string, rename func(string, 
 		replacements = append(replacements, replacement{
 			target: filepath.Join(root, filepath.FromSlash(item)),
 			stage:  filepath.Join(stageRoot, filepath.FromSlash(item)),
-			backup: filepath.Join(corumDir, toolkitTemporaryPrefix+"backup-"+id+"-"+name),
+			backup: filepath.Join(toolkitDir, toolkitTemporaryPrefix+"backup-"+id+"-"+name),
 		})
 	}
 	for index := range replacements {
@@ -178,8 +181,8 @@ func rollback(items []replacement, rename func(string, string) error) error {
 }
 
 func cleanToolkitTemporaryFiles(root string, cleanBackups bool) error {
-	corumDir := filepath.Join(root, ".corum")
-	entries, err := os.ReadDir(corumDir)
+	toolkitDir := config.ProjectDir(root)
+	entries, err := os.ReadDir(toolkitDir)
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -189,7 +192,7 @@ func cleanToolkitTemporaryFiles(root string, cleanBackups bool) error {
 	for _, entry := range entries {
 		name := entry.Name()
 		if strings.HasPrefix(name, toolkitTemporaryPrefix+"stage-") || (cleanBackups && strings.HasPrefix(name, toolkitTemporaryPrefix+"backup-")) {
-			if err := removeAll(filepath.Join(corumDir, name)); err != nil {
+			if err := removeAll(filepath.Join(toolkitDir, name)); err != nil {
 				return err
 			}
 		}
@@ -224,7 +227,7 @@ func collectToolkit(assets fs.FS, version string) ([]assetFile, error) {
 			return nil, fmt.Errorf("read embedded toolkit %s: %w", source, err)
 		}
 	}
-	payload = append(payload, assetFile{path: filepath.Join(".corum", "toolkit-version"), data: []byte(version + "\n"), mode: 0o644})
+	payload = append(payload, assetFile{path: filepath.FromSlash(toolkitVersionPath), data: []byte(version + "\n"), mode: 0o600})
 	return payload, nil
 }
 

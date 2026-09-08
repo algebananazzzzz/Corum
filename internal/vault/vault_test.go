@@ -119,14 +119,22 @@ func TestInitializeCreatesOnlyExpectedTree(t *testing.T) {
 	}
 	want := []string{
 		".agents", ".agents/skills", ".claude", ".claude/skills", ".codex", ".codex/skills",
-		".config", ".config/corum", ".config/corum/.gitignore", ".config/corum/corum.yaml",
-		".corum", ".corum/toolkit-version", "AGENTS.md", "CLAUDE.md", "courses",
+		".config", ".config/corum", ".config/corum/.gitignore", ".config/corum/corum.yaml", ".config/corum/toolkit-version",
+		"AGENTS.md", "CLAUDE.md", "courses",
 		"skills", "skills/example", "skills/example/SKILL.md",
 		"templates", "templates/template.md", "templates/wiki", "templates/wiki/index.md",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("initialized tree = %#v, want %#v", got, want)
 	}
+}
+
+func TestInitializeKeepsToolkitMetadataInProjectConfiguration(t *testing.T) {
+	root := initializedVault(t, "v1")
+	if _, err := os.Stat(filepath.Join(root, ".corum")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("project-local .corum directory = %v, want absent", err)
+	}
+	assertToolkitVersion(t, root, "v1")
 }
 
 func assertToolkitLinks(t *testing.T, root, label string) {
@@ -261,8 +269,8 @@ func TestValidateRejectsDuplicateCodes(t *testing.T) {
 func TestSyncToolkitRefusesConcurrentProcessBeforeAnyWrite(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := initializedVault(t, "old")
-	corumDir := filepath.Join(root, ".corum")
-	lock, err := lockfile.Acquire(filepath.Join(corumDir, toolkitLockName))
+	toolkitDir := config.ProjectDir(root)
+	lock, err := lockfile.Acquire(filepath.Join(toolkitDir, toolkitLockName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,13 +332,13 @@ func TestToolkitReportsRollbackFailureAndRetainsBackup(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "injected rename failure") || !strings.Contains(err.Error(), "rollback") {
 		t.Fatalf("syncToolkit() error = %v", err)
 	}
-	entries, readErr := os.ReadDir(filepath.Join(root, ".corum"))
+	entries, readErr := os.ReadDir(config.ProjectDir(root))
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), toolkitTemporaryPrefix+"backup-") {
-			assertFileContent(t, filepath.Join(root, ".corum", entry.Name()), "old agents")
+			assertFileContent(t, filepath.Join(config.ProjectDir(root), entry.Name()), "old agents")
 			return
 		}
 	}
@@ -345,13 +353,13 @@ func TestToolkitKeepsRecoveryBackupAcrossAnotherFailedSync(t *testing.T) {
 	if err := syncToolkit(root, testAssets("newer"), "newer", failRenameAt(1)); err == nil {
 		t.Fatal("second sync succeeded")
 	}
-	entries, err := os.ReadDir(filepath.Join(root, ".corum"))
+	entries, err := os.ReadDir(config.ProjectDir(root))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), toolkitTemporaryPrefix+"backup-") {
-			assertFileContent(t, filepath.Join(root, ".corum", entry.Name()), "old agents")
+			assertFileContent(t, filepath.Join(config.ProjectDir(root), entry.Name()), "old agents")
 			return
 		}
 	}
@@ -373,13 +381,13 @@ func TestToolkitReportsRollbackRemovalFailureAndRetainsBackup(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "injected removal failure") || !strings.Contains(err.Error(), "rollback") {
 		t.Fatalf("syncToolkit() error = %v", err)
 	}
-	entries, readErr := os.ReadDir(filepath.Join(root, ".corum"))
+	entries, readErr := os.ReadDir(config.ProjectDir(root))
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), toolkitTemporaryPrefix+"backup-") && strings.Contains(entry.Name(), "AGENTS.md") {
-			assertFileContent(t, filepath.Join(root, ".corum", entry.Name()), "old agents")
+			assertFileContent(t, filepath.Join(config.ProjectDir(root), entry.Name()), "old agents")
 			return
 		}
 	}
@@ -388,7 +396,7 @@ func TestToolkitReportsRollbackRemovalFailureAndRetainsBackup(t *testing.T) {
 
 func assertToolkitVersion(t *testing.T, root, want string) {
 	t.Helper()
-	assertFileContent(t, filepath.Join(root, ".corum", "toolkit-version"), want+"\n")
+	assertFileContent(t, filepath.Join(config.ProjectDir(root), "toolkit-version"), want+"\n")
 }
 
 func assertFileContent(t *testing.T, path, want string) {

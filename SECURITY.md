@@ -63,7 +63,7 @@ rollout:
 - `.claude/skills`, `.codex/skills`, and `.agents/skills` symlinks to `../skills`
 - `skills/`
 - `templates/`
-- `.corum/toolkit-version`
+- `.config/corum/toolkit-version`
 
 Do not store personal changes inside those paths. Everything else is user-owned,
 including `.config/corum/corum.yaml`, `courses/`, raw captures, wiki pages and

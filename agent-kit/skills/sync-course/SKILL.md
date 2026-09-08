@@ -26,7 +26,7 @@ Select the requested course from the JSON result. The selected manifest supplies
 | Jira | Scope and apply Jira actions. | Omit Jira actions from the plan and preserve prior Jira records. |
 | Wiki | Scope, author, review, and record wiki work. | Omit wiki actions from the plan and preserve prior wiki records. |
 
-Jira uses the configured workspace and course Jira settings. Wiki uses the existing course wiki and its state, or initializes an empty wiki when no wiki pages or state exist.
+Jira is enabled for the vault when its workspace settings exist; each course still supplies its own Jira epic. Wiki is enabled for the vault when its workspace setting exists and initializes an empty course wiki when no pages or state exist.
 
 ## 3. Scope enabled work
 
@@ -46,7 +46,7 @@ Build this empty plan from the selected course and its configured epic, then con
 
 ## 4. Present one plan
 
-Present Jira Changes and Wiki Changes together. Jira rows include the action, target, change, and source evidence. Wiki rows include the page action, coverage, source paths, provenance labels, and page ranges. Under a disabled workflow heading, write `{{SERVICE}} is disabled for this course.` Under an enabled workflow heading with no actions, write `No {{SERVICE}} changes.`
+Present Jira Changes and Wiki Changes together. Jira rows include the action, target, change, and source evidence. Wiki rows include the page action, coverage, source paths, provenance labels, and page ranges. Under a disabled workflow heading, write `{{SERVICE}} is disabled for this vault.` Under an enabled workflow heading with no actions, write `No {{SERVICE}} changes.`
 
 ### Jira Changes
 

@@ -334,6 +334,33 @@ func TestSyncReturnsFullRunManifest(t *testing.T) {
 	}
 }
 
+func TestSyncReplacesDisabledWorkflowStagesAfterConfigurationEnablesThem(t *testing.T) {
+	root, workspace, course := initializedCanvasVault(t)
+	manifestPath := filepath.Join(root, "courses", course.Code, "state", "latest-run.json")
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	previous := "{\"version\":2,\"run_id\":\"old\",\"course\":\"CS3103\",\"effective_features\":{\"jira\":false,\"wiki\":false},\"canvas\":{\"status\":\"up_to_date\",\"changes\":[],\"failures\":[],\"sources\":[]},\"jira\":{\"status\":\"disabled\"},\"wiki\":{\"status\":\"disabled\"}}\n"
+	if err := os.WriteFile(manifestPath, []byte(previous), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	workspace.Jira = &config.JiraWorkspace{CloudID: "cloud-1", Project: "STUDY"}
+	workspace.Wiki = &config.WikiWorkspace{}
+	course.Jira = &config.JiraCourse{Epic: "STUDY-1"}
+
+	client := &syncClient{lists: map[string][]map[string]any{"/api/v1/courses/1/discussion_topics": {}}}
+	result, err := Sync(context.Background(), root, workspace, course, client, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Manifest.Jira.(map[string]any)["status"]; got != "pending" {
+		t.Fatalf("Jira status = %q, want pending", got)
+	}
+	if got := result.Manifest.Wiki.(map[string]any)["status"]; got != "pending" {
+		t.Fatalf("Wiki status = %q, want pending", got)
+	}
+}
+
 func TestSyncUsesSharedCourseLockBeforeReadingOrWritingState(t *testing.T) {
 	root, workspace, course := initializedCanvasVault(t)
 	stateDir := filepath.Join(root, "courses", "CS3103", "state")

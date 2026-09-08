@@ -11,7 +11,6 @@ type Course struct {
 	Code    string        `yaml:"code"`
 	Canvas  *CanvasCourse `yaml:"canvas,omitempty"`
 	Jira    *JiraCourse   `yaml:"jira,omitempty"`
-	Wiki    *WikiCourse   `yaml:"wiki,omitempty"`
 }
 
 type CanvasCourse struct {
@@ -24,23 +23,19 @@ type JiraCourse struct {
 	Epic string `yaml:"epic"`
 }
 
-type WikiCourse struct {
-	SplitRules string `yaml:"split_rules"`
-}
-
-// Services is the per-course service set after workspace and course blocks are intersected.
+// Services is the effective set for a course.
 type Services struct {
 	Canvas bool
 	Jira   bool
 	Wiki   bool
 }
 
-// Effective returns service enablement based exclusively on block presence.
+// Effective uses vault-wide Jira and wiki settings. Canvas remains course-specific.
 func Effective(workspace Workspace, course Course) Services {
 	return Services{
 		Canvas: workspace.Canvas != nil && course.Canvas != nil,
-		Jira:   workspace.Jira != nil && course.Jira != nil,
-		Wiki:   workspace.Wiki != nil && course.Wiki != nil,
+		Jira:   workspace.Jira != nil,
+		Wiki:   workspace.Wiki != nil,
 	}
 }
 

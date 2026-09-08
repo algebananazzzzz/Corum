@@ -261,19 +261,19 @@ func TestInstalledBinary(t *testing.T) {
 			mustSucceed(t, runBinary(binary, environment, "", "", "init", "--defaults", vault))
 			mustWrite(t, filepath.Join(vault, "AGENTS.md"), "stale owned toolkit\n")
 			mustWrite(t, filepath.Join(vault, "skills", "obsolete", "SKILL.md"), "stale owned skill\n")
-			mustWrite(t, filepath.Join(vault, ".corum", "toolkit-version"), "v1.9.0\n")
+			mustWrite(t, filepath.Join(vault, ".config", "corum", "toolkit-version"), "v1.9.0\n")
 			mustWrite(t, filepath.Join(vault, "user-sentinel.md"), "preserve root file\n")
 			mustWrite(t, filepath.Join(vault, "courses", "user-sentinel.md"), "preserve course file\n")
 		}
 		mustSucceed(t, runBinary(binary, environment, "", "", "version"))
 		for _, vault := range vaults {
-			if got := mustRead(t, filepath.Join(vault, ".corum", "toolkit-version")); got != "v1.9.0\n" {
+			if got := mustRead(t, filepath.Join(vault, ".config", "corum", "toolkit-version")); got != "v1.9.0\n" {
 				t.Fatalf("version command changed %s toolkit to %q", vault, got)
 			}
 		}
 
 		mustSucceed(t, runBinary(binary, environment, "", "", "doctor", vaults[0]))
-		if got := mustRead(t, filepath.Join(vaults[1], ".corum", "toolkit-version")); got != "v1.9.0\n" {
+		if got := mustRead(t, filepath.Join(vaults[1], ".config", "corum", "toolkit-version")); got != "v1.9.0\n" {
 			t.Fatalf("inactive project toolkit changed to %q", got)
 		}
 		mustSucceed(t, runBinary(binary, environment, "", "", "doctor", vaults[1]))
@@ -285,7 +285,7 @@ func TestInstalledBinary(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(vault, "skills", "obsolete")); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("%s obsolete owned skill remains: %v", vault, err)
 			}
-			if got := mustRead(t, filepath.Join(vault, ".corum", "toolkit-version")); got != integrationVersion+"\n" {
+			if got := mustRead(t, filepath.Join(vault, ".config", "corum", "toolkit-version")); got != integrationVersion+"\n" {
 				t.Fatalf("%s toolkit version = %q", vault, got)
 			}
 			if got := mustRead(t, filepath.Join(vault, "user-sentinel.md")); got != "preserve root file\n" {

@@ -34,7 +34,6 @@ canvas:
     Course Materials: lectures
 jira:
   epic: TODO-1
-wiki: {}
 `
 
 func writeConfig(t *testing.T, root, course, contents string) {
@@ -157,7 +156,6 @@ func TestLoadRejectsNullServiceBlocksAndMissingCanvasSources(t *testing.T) {
 		"workspace wiki null":   strings.Replace(validWorkspace, "wiki: {}", "wiki: null", 1),
 		"course canvas null":    strings.Replace(validCourse, "canvas:\n  id: 1\n  sources: [announcements, assignments]\n  folders:\n    Course Materials: lectures", "canvas: null", 1),
 		"course jira null":      strings.Replace(validCourse, "jira:\n  epic: TODO-1", "jira: null", 1),
-		"course wiki null":      strings.Replace(validCourse, "wiki: {}", "wiki: null", 1),
 		"course sources absent": strings.Replace(validCourse, "  sources: [announcements, assignments]\n", "", 1),
 		"course sources null":   strings.Replace(validCourse, "sources: [announcements, assignments]", "sources: null", 1),
 	} {
@@ -180,9 +178,9 @@ func TestLoadRejectsNullServiceBlocksAndMissingCanvasSources(t *testing.T) {
 
 func TestEffectiveServicesUseBlockPresence(t *testing.T) {
 	workspace := Workspace{Canvas: &CanvasWorkspace{}, Jira: &JiraWorkspace{}, Wiki: &WikiWorkspace{}}
-	course := Course{Canvas: &CanvasCourse{}, Wiki: &WikiCourse{}}
+	course := Course{Canvas: &CanvasCourse{}}
 	got := Effective(workspace, course)
-	if !got.Canvas || got.Jira || !got.Wiki {
+	if !got.Canvas || !got.Jira || !got.Wiki {
 		t.Fatalf("Effective() = %+v", got)
 	}
 }

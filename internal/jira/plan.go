@@ -223,8 +223,11 @@ func validateConfiguration(workspace config.Workspace, course config.Course, pla
 	if err := validatePlanShape(plan); err != nil {
 		return nil, err
 	}
-	if !config.Effective(workspace, course).Jira || workspace.Jira == nil || course.Jira == nil {
+	if workspace.Jira == nil {
 		return nil, &ValidationError{Message: fmt.Sprintf("Jira is disabled for %s", course.Code)}
+	}
+	if course.Jira == nil {
+		return nil, &ValidationError{Message: fmt.Sprintf("Jira epic is not configured for %s", course.Code)}
 	}
 	if requireCloud && !planIdentifierRE.MatchString(workspace.Jira.CloudID) {
 		return nil, &ValidationError{Message: "configured Jira cloud ID has invalid syntax"}
