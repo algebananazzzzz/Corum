@@ -52,6 +52,60 @@ func remoteIssue(key string) map[string]any {
 	}
 }
 
+func remoteEpic(key, summary string) map[string]any {
+	issue := remoteIssue(key)
+	fields := issue["fields"].(map[string]any)
+	fields["issuetype"] = map[string]any{"name": "Epic"}
+	fields["summary"] = summary
+	return issue
+}
+
+func TestJiraClientEnsureEpic(t *testing.T) {
+	ctx := context.Background()
+	summary := "CS3103 — Computer Networks"
+	t.Run("reuses one exact epic", func(t *testing.T) {
+		caller := &fakeJSONCaller{responses: map[string][]any{
+			"searchJiraIssuesUsingJql": []any{map[string]any{"data": map[string]any{"issues": []any{remoteEpic("STUDY-1", summary)}}}},
+		}}
+		client, _ := newJiraClient(caller, "cloud-1")
+		result, err := client.EnsureEpic(ctx, "STUDY", summary)
+		if err != nil || result != (EpicResult{Key: "STUDY-1"}) {
+			t.Fatalf("EnsureEpic = %+v, %v", result, err)
+		}
+		want := map[string]any{"cloudId": "cloud-1", "jql": `project = "STUDY" AND issuetype = "Epic" AND summary = "CS3103 — Computer Networks"`, "maxResults": 2, "view": "full", "responseContentFormat": "markdown"}
+		if !reflect.DeepEqual(caller.calls[0].args, want) {
+			t.Fatalf("args = %#v, want %#v", caller.calls[0].args, want)
+		}
+	})
+	t.Run("creates when no epic exists", func(t *testing.T) {
+		caller := &fakeJSONCaller{responses: map[string][]any{
+			"searchJiraIssuesUsingJql": []any{map[string]any{"data": map[string]any{"issues": []any{}}}},
+			"createJiraIssue":          []any{map[string]any{"data": map[string]any{"key": "STUDY-2"}}},
+		}}
+		client, _ := newJiraClient(caller, "cloud-1")
+		result, err := client.EnsureEpic(ctx, "STUDY", summary)
+		if err != nil || result != (EpicResult{Key: "STUDY-2", Created: true}) {
+			t.Fatalf("EnsureEpic = %+v, %v", result, err)
+		}
+		want := map[string]any{"cloudId": "cloud-1", "projectKey": "STUDY", "summary": summary, "issueType": "Epic"}
+		if !reflect.DeepEqual(caller.calls[1].args, want) {
+			t.Fatalf("args = %#v, want %#v", caller.calls[1].args, want)
+		}
+	})
+	t.Run("rejects ambiguous epic matches without creating", func(t *testing.T) {
+		caller := &fakeJSONCaller{responses: map[string][]any{
+			"searchJiraIssuesUsingJql": []any{map[string]any{"data": map[string]any{"issues": []any{remoteEpic("STUDY-1", summary), remoteEpic("STUDY-2", summary)}}}},
+		}}
+		client, _ := newJiraClient(caller, "cloud-1")
+		if _, err := client.EnsureEpic(ctx, "STUDY", summary); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+			t.Fatalf("EnsureEpic error = %v", err)
+		}
+		if len(caller.calls) != 1 {
+			t.Fatalf("calls = %#v", caller.calls)
+		}
+	})
+}
+
 func TestJiraClientMapsExactRovoArgumentsAndPagination(t *testing.T) {
 	ctx := context.Background()
 	caller := &fakeJSONCaller{responses: map[string][]any{
