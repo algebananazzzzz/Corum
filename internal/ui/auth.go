@@ -221,16 +221,18 @@ func RunAuth(ctx context.Context, root string, deps AuthDependencies) (err error
 	if err != nil {
 		return err
 	}
-	if workspace.Wiki == nil {
-		enable, err := deps.Prompts.Confirm("Enable wiki authoring?", true)
-		if err != nil {
-			return promptError(err)
-		}
-		if enable {
+	enableWiki, err := deps.Prompts.Confirm("Enable wiki authoring?", workspace.Wiki != nil)
+	if err != nil {
+		return promptError(err)
+	}
+	if enableWiki != (workspace.Wiki != nil) {
+		if enableWiki {
 			workspace.Wiki = &config.WikiWorkspace{}
-			if err := vault.WriteWorkspace(root, workspace); err != nil {
-				return err
-			}
+		} else {
+			workspace.Wiki = nil
+		}
+		if err := vault.WriteWorkspace(root, workspace); err != nil {
+			return err
 		}
 	}
 	return nil

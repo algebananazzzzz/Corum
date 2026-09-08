@@ -489,6 +489,30 @@ func TestRunAuthConfiguresDisabledServices(t *testing.T) {
 	}
 }
 
+func TestRunAuthCanDisableWikiAuthoring(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "vault")
+	workspace := config.Workspace{
+		Version:   2,
+		Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "Term"},
+		Wiki:      &config.WikiWorkspace{},
+		Calendar:  config.Calendar{Timetable: "Timetable.md", Term: "Term.md"},
+	}
+	if err := vault.Initialize(root, workspace, uiAssets(), "test"); err != nil {
+		t.Fatal(err)
+	}
+	deps := AuthDependencies{Prompts: &scriptedPrompts{answers: []any{false, false}}}
+	if err := RunAuth(context.Background(), root, deps); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := config.LoadWorkspace(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Wiki != nil {
+		t.Fatalf("workspace = %+v, want wiki disabled", updated)
+	}
+}
+
 func TestSummaryHasNoSecrets(t *testing.T) {
 	value := initSummary(config.Workspace{Wiki: &config.WikiWorkspace{}})
 	for _, forbidden := range []string{"cloud", "token", "secret", "password"} {
