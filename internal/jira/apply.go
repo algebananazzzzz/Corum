@@ -218,8 +218,11 @@ func normalizeChildren(raw []map[string]any, project, epic string) ([]IssueState
 // normalizeJiraTimestamp rewrites Jira's compact numeric offset (+0800) into
 // RFC 3339 form (+08:00) so time.Parse can read it.
 func normalizeJiraTimestamp(value string) string {
-	if len(value) >= 5 && (value[len(value)-4] == '+' || value[len(value)-4] == '-') && !strings.Contains(value, ":") {
-		return value[:len(value)-4] + ":" + value[len(value)-3:]
+	if len(value) >= 5 {
+		offset := value[len(value)-5:]
+		if (offset[0] == '+' || offset[0] == '-') && offset[1] >= '0' && offset[1] <= '9' && offset[2] >= '0' && offset[2] <= '9' && offset[3] >= '0' && offset[3] <= '9' && offset[4] >= '0' && offset[4] <= '9' {
+			return value[:len(value)-2] + ":" + value[len(value)-2:]
+		}
 	}
 	return value
 }

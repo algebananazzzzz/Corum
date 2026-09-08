@@ -50,6 +50,9 @@ func TestConfigureCanvasCoursesReconcilesOnlyVisibleSelection(t *testing.T) {
 	if err != nil || added.Canvas == nil || added.Canvas.ID != 2 {
 		t.Fatalf("added = %+v, %v", added, err)
 	}
+	if added.Canvas.Name != "Software Engineering" {
+		t.Fatalf("canvas name = %q", added.Canvas.Name)
+	}
 	wantSources := []string{"announcements", "assignments", "files", "pages", "modules", "syllabus"}
 	if !reflect.DeepEqual(added.Canvas.Sources, wantSources) {
 		t.Fatalf("sources = %#v", added.Canvas.Sources)

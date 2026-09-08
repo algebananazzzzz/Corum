@@ -23,6 +23,18 @@ func validPlan() Plan {
 	return Plan{Version: 2, Course: "CS3103", Epic: "STUDY-1", Actions: []Action{}}
 }
 
+func TestNormalizeJiraTimestamp(t *testing.T) {
+	for _, test := range []struct{ input, want string }{
+		{"2026-09-06T00:00:00+0800", "2026-09-06T00:00:00+08:00"},
+		{"2026-09-06T00:00:00-0700", "2026-09-06T00:00:00-07:00"},
+		{"2026-09-06T00:00:00+08:00", "2026-09-06T00:00:00+08:00"},
+	} {
+		if got := normalizeJiraTimestamp(test.input); got != test.want {
+			t.Fatalf("normalizeJiraTimestamp(%q) = %q, want %q", test.input, got, test.want)
+		}
+	}
+}
+
 func TestPlanDecodeIsStrictVersionTwo(t *testing.T) {
 	valid := `{"version":2,"course":"CS3103","epic":"STUDY-1","actions":[{"action":"update","key":"STUDY-2","set":{"due":null}}]}`
 	plan, err := DecodePlan(strings.NewReader(valid))

@@ -15,6 +15,7 @@ type Course struct {
 
 type CanvasCourse struct {
 	ID      int               `yaml:"id"`
+	Name    string            `yaml:"name,omitempty"`
 	Sources []string          `yaml:"sources"`
 	Folders map[string]string `yaml:"folders"`
 }

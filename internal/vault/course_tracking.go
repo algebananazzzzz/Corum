@@ -130,7 +130,7 @@ func configureCanvasCourses(root string, current []CanvasCourseChoice, selectedI
 		if err != nil {
 			return CanvasTrackingResult{}, err
 		}
-		course := config.Course{Version: 2, Code: code, Canvas: newCanvasCourse(id)}
+		course := config.Course{Version: 2, Code: code, Canvas: newCanvasCourse(id, choice.Name)}
 		courses = append(courses, course)
 		byCode[code] = len(courses) - 1
 		changed[code] = course
@@ -207,8 +207,8 @@ func positiveCourseID(value string) (int, error) {
 	return id, nil
 }
 
-func newCanvasCourse(id int) *config.CanvasCourse {
-	return &config.CanvasCourse{ID: id, Sources: append([]string(nil), defaultCanvasSources...), Folders: map[string]string{}}
+func newCanvasCourse(id int, name string) *config.CanvasCourse {
+	return &config.CanvasCourse{ID: id, Name: strings.TrimSpace(name), Sources: append([]string(nil), defaultCanvasSources...), Folders: map[string]string{}}
 }
 
 func normalizedCourseCode(choice CanvasCourseChoice) string {
