@@ -188,6 +188,10 @@ func TestInstalledBinary(t *testing.T) {
 				t.Fatalf("discover sync-course via %s: %v", directory, err)
 			}
 		}
+		syncSkill, err := os.ReadFile(filepath.Join(vault, "skills", "sync-course", "SKILL.md"))
+		if err != nil || !strings.Contains(string(syncSkill), "corum jira ensure-epic {{COURSE}}") {
+			t.Fatalf("installed sync-course skill does not provision missing Jira epics: %v", err)
+		}
 
 		result := runBinary(binary, environment, "", "", "doctor", vault)
 		mustSucceed(t, result)

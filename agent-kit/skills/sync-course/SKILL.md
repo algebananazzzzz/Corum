@@ -26,11 +26,19 @@ Select the requested course from the JSON result. The selected manifest supplies
 | Jira | Scope and apply Jira actions. | Omit Jira actions from the plan and preserve prior Jira records. |
 | Wiki | Scope, author, review, and record wiki work. | Omit wiki actions from the plan and preserve prior wiki records. |
 
-Jira is enabled for the vault when its workspace settings exist; each course still supplies its own Jira epic. Wiki is enabled for the vault when its workspace setting exists and initializes an empty course wiki when no pages or state exist.
+Jira is enabled for the vault when its workspace settings exist. Each course uses one Jira epic; when a Canvas-backed course has no configured epic, initialize it before scoping. Wiki is enabled for the vault when its workspace setting exists and initializes an empty course wiki when no pages or state exist.
 
 ## 3. Scope enabled work
 
 Invoke `scope-course` with the selected manifest. Its output provides the Jira plan, Jira evidence, wiki page actions, source coverage, and ingestion dependencies for the enabled services.
+
+When Jira is enabled and `courses/{{COURSE}}/course.yaml` has no `jira.epic`, provision it before building any plan:
+
+```console
+corum jira ensure-epic {{COURSE}}
+```
+
+Confirm the JSON result, including its `epic` key and whether it was reused or created. Corum searches the configured project for exactly one Epic named `{{COURSE}} — {{CANVAS_COURSE_NAME}}`; it reuses that exact match, creates one when none exists, and stops on duplicate matches. The command writes the resolved key to `course.yaml`. If the course has no stored Canvas name, refresh its Canvas course selection before continuing; do not invent an epic name.
 
 When Jira is enabled and `courses/{{COURSE}}/state/jira.json` is absent, initialize the cache before running the main scope:
 
