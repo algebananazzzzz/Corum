@@ -189,7 +189,7 @@ func TestInstalledBinary(t *testing.T) {
 			}
 		}
 		syncSkill, err := os.ReadFile(filepath.Join(vault, "skills", "sync-course", "SKILL.md"))
-		if err != nil || !strings.Contains(string(syncSkill), "corum jira ensure-epic {{COURSE}}") {
+		if err != nil || !strings.Contains(string(syncSkill), "corum jira create-epic {{COURSE}}") {
 			t.Fatalf("installed sync-course skill does not provision missing Jira epics: %v", err)
 		}
 

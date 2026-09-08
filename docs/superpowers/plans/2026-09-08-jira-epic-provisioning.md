@@ -4,7 +4,7 @@
 
 **Goal:** Let a Canvas-backed course safely reuse or create a Jira epic before its first Jira cache reconciliation.
 
-**Architecture:** Preserve Canvas's display name in course configuration, add an explicit `jira ensure-epic` command, and use `JiraClient` exclusively as the adapter to Rovo's existing MCP tools. Exact-summary JQL lookup returns one reusable Epic or creates one; the command atomically stores its key. Correct Jira compact-offset parsing independently unblocks existing cache reconciliation.
+**Architecture:** Preserve Canvas's display name in course configuration, add an explicit `jira create-epic` command, and use `JiraClient` exclusively as the adapter to Rovo's existing MCP tools. Case-insensitive course-code JQL lookup returns one reusable Epic or creates one; the command atomically stores its key. Correct Jira compact-offset parsing independently unblocks existing cache reconciliation.
 
 **Tech Stack:** Go, Cobra-free CLI dispatch, `gopkg.in/yaml.v3`, Atlassian Rovo MCP client, Go standard-library tests.
 
@@ -51,7 +51,7 @@
 
 **Files:** `internal/vault/init.go`, `internal/vault/vault_test.go`, `internal/cli/app.go`, `internal/cli/app_test.go`
 
-**Interfaces:** Produces `vault.WriteCourse(root string, course config.Course) error`. Produces JSON `{ "course": "CS3103", "epic": "STUDY-1", "created": false }` from `corum jira ensure-epic CS3103`.
+**Interfaces:** Produces `vault.WriteCourse(root string, course config.Course) error`. Produces JSON `{ "course": "CS3103", "epic": "STUDY-1", "created": false }` from `corum jira create-epic CS3103`.
 
 - [ ] Write `TestWriteCourse` that saves `course.Jira = &config.JiraCourse{Epic: "STUDY-1"}` then reloads it. Run `go test ./internal/vault -run TestWriteCourse -count=1`; expect missing method failure.
 - [ ] Implement `WriteCourse`: validate, marshal, verify the existing `courses/<code>/course.yaml` target, and atomically replace it using `writeConfigAtomic`.
@@ -64,9 +64,9 @@
 
 **Files:** `agent-kit/skills/sync-course/SKILL.md`, `internal/integration/end_to_end_test.go`
 
-**Interfaces:** The generated workflow calls `corum jira ensure-epic {{COURSE}}` when Jira is enabled and `course.yaml` lacks `jira.epic`, then builds its existing empty plan with the saved key.
+**Interfaces:** The generated workflow calls `corum jira create-epic {{COURSE}}` when Jira is enabled and `course.yaml` lacks `jira.epic`, then builds its existing empty plan with the saved key.
 
-- [ ] Write `TestJiraEnsureEpicHelp`, asserting `corum jira ensure-epic --help` prints `usage: corum jira ensure-epic COURSE`.
+- [ ] Write `TestJiraEnsureEpicHelp`, asserting `corum jira create-epic --help` prints `usage: corum jira create-epic COURSE`.
 - [ ] Run `go test ./internal/integration -run TestJiraEnsureEpicHelp -count=1`; expected failure before the Task 3 command is wired; after Task 3 it proves its continued availability.
-- [ ] Replace the sync skill's assumption that each course already has an epic: run ensure-epic, read the JSON response, then run existing empty-plan reconciliation. Retain existing exact-plan approval for child issues.
+- [ ] Replace the sync skill's assumption that each course already has an epic: run create-epic, read the JSON response, then run existing empty-plan reconciliation. Retain existing exact-plan approval for child issues.
 - [ ] Run `go test ./internal/integration -run TestJiraEnsureEpicHelp -count=1 && go test ./...`; expect PASS. Commit `docs: provision Jira epics before sync`.

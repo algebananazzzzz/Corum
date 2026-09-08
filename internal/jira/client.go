@@ -45,8 +45,8 @@ func newJiraClient(session jsonCaller, cloudID string) (*JiraClient, error) {
 	return &JiraClient{session: session, cloudID: cloudID}, nil
 }
 
-// EnsureEpic finds the single exact-matching Epic in project or creates it.
-// It uses the same authenticated Rovo MCP tools as the rest of JiraClient.
+// EnsureEpic finds the single Epic whose summary contains the course code, or
+// creates it. It is used only for initial course provisioning.
 func (c *JiraClient) EnsureEpic(ctx context.Context, project, summary string) (EpicResult, error) {
 	if err := validateProjectKey(project, "Jira project key"); err != nil {
 		return EpicResult{}, err
@@ -54,12 +54,17 @@ func (c *JiraClient) EnsureEpic(ctx context.Context, project, summary string) (E
 	if strings.TrimSpace(summary) == "" {
 		return EpicResult{}, &ValidationError{Message: "Jira epic summary is required"}
 	}
+	courseCode, _, _ := strings.Cut(summary, " — ")
+	courseCode = strings.TrimSpace(courseCode)
+	if courseCode == "" {
+		return EpicResult{}, &ValidationError{Message: "Jira epic summary must begin with a course code"}
+	}
 	quotedProject, _ := json.Marshal(project)
-	quotedSummary, _ := json.Marshal(summary)
+	quotedCourseCode, _ := json.Marshal(courseCode)
 	arguments := map[string]any{
 		"cloudId":               c.cloudID,
-		"jql":                   "project = " + string(quotedProject) + " AND issuetype = \"Epic\" AND summary = " + string(quotedSummary),
-		"maxResults":            2,
+		"jql":                   "project = " + string(quotedProject) + " AND issuetype = \"Epic\" AND summary ~ " + string(quotedCourseCode),
+		"maxResults":            50,
 		"view":                  "full",
 		"responseContentFormat": "markdown",
 	}
@@ -75,15 +80,25 @@ func (c *JiraClient) EnsureEpic(ctx context.Context, project, summary string) (E
 	if !ok {
 		return EpicResult{}, fmt.Errorf("Atlassian returned invalid Jira epic search results")
 	}
-	if len(values) > 1 {
-		return EpicResult{}, &ValidationError{Message: "configured Jira project has ambiguous matching course epics"}
-	}
-	if len(values) == 1 {
-		issue, ok := values[0].(map[string]any)
+	var matches []map[string]any
+	for _, value := range values {
+		issue, ok := value.(map[string]any)
 		if !ok {
 			return EpicResult{}, fmt.Errorf("Atlassian returned invalid Jira epic search results")
 		}
-		key, err := validateExactEpic(issue, project, summary)
+		matchesCourse, err := epicMatchesCourseCode(issue, project, courseCode)
+		if err != nil {
+			return EpicResult{}, err
+		}
+		if matchesCourse {
+			matches = append(matches, issue)
+		}
+	}
+	if len(matches) > 1 {
+		return EpicResult{}, &ValidationError{Message: "configured Jira project has ambiguous matching course epics"}
+	}
+	if len(matches) == 1 {
+		key, err := validateEpic(matches[0], project)
 		if err != nil {
 			return EpicResult{}, err
 		}
@@ -161,6 +176,19 @@ func (c *JiraClient) ReconcileEpic(ctx context.Context, project, summary string)
 }
 
 func validateExactEpic(issue map[string]any, project, summary string) (string, error) {
+	key, err := validateEpic(issue, project)
+	if err != nil {
+		return "", err
+	}
+	fields := issue["fields"].(map[string]any)
+	foundSummary, _ := fields["summary"].(string)
+	if foundSummary != summary {
+		return "", &ValidationError{Message: "Jira epic response does not match the requested course"}
+	}
+	return key, nil
+}
+
+func validateEpic(issue map[string]any, project string) (string, error) {
 	key, _ := issue["key"].(string)
 	if err := validateIssueKey(key, "Jira epic response key"); err != nil {
 		return "", err
@@ -176,11 +204,44 @@ func validateExactEpic(issue map[string]any, project, summary string) (string, e
 	if !ok || typeName != "Epic" {
 		return "", &ValidationError{Message: "Jira epic response has invalid issue type"}
 	}
-	foundSummary, ok := fields["summary"].(string)
-	if !ok || foundSummary != summary {
-		return "", &ValidationError{Message: "Jira epic response does not match the requested course"}
-	}
 	return key, nil
+}
+
+func epicMatchesCourseCode(issue map[string]any, project, courseCode string) (bool, error) {
+	if _, err := validateEpic(issue, project); err != nil {
+		return false, err
+	}
+	fields := issue["fields"].(map[string]any)
+	summary, ok := fields["summary"].(string)
+	if !ok || strings.TrimSpace(summary) == "" {
+		return false, &ValidationError{Message: "Jira epic response must contain a summary"}
+	}
+	return containsCourseCode(summary, courseCode), nil
+}
+
+func containsCourseCode(summary, courseCode string) bool {
+	if courseCode == "" {
+		return false
+	}
+	lowerSummary := strings.ToLower(summary)
+	lowerCode := strings.ToLower(courseCode)
+	for start := 0; ; {
+		index := strings.Index(lowerSummary[start:], lowerCode)
+		if index < 0 {
+			return false
+		}
+		index += start
+		end := index + len(lowerCode)
+		if (index == 0 || !isCourseCodeCharacter(lowerSummary[index-1])) &&
+			(end == len(lowerSummary) || !isCourseCodeCharacter(lowerSummary[end])) {
+			return true
+		}
+		start = end
+	}
+}
+
+func isCourseCodeCharacter(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= '0' && value <= '9' || value == '_' || value == '-'
 }
 
 func (c *JiraClient) CreateIssue(ctx context.Context, fields map[string]any) (string, error) {
@@ -313,6 +374,10 @@ func (c *JiraClient) EpicChildren(ctx context.Context, epic string) ([]map[strin
 		}
 		values, ok := page["issues"].([]any)
 		if !ok {
+			if page["issues"] == nil {
+				values = []any{}
+				ok = true
+			}
 			if typed, typedOK := page["issues"].([]map[string]any); typedOK {
 				for _, item := range typed {
 					issues = append(issues, item)

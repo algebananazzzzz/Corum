@@ -348,7 +348,7 @@ func TestRunJiraApplyDryRunEchoesPlanWithoutOAuth(t *testing.T) {
 	}
 }
 
-func TestRunJiraEnsureEpic(t *testing.T) {
+func TestRunJiraCreateEpic(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "vault")
 	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("init code = %d", code)
@@ -387,25 +387,25 @@ func TestRunJiraEnsureEpic(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	if code := Run(context.Background(), []string{"jira", "ensure-epic", "CS3103"}, nil, &out, &errOut); code != 1 {
+	if code := Run(context.Background(), []string{"jira", "create-epic", "CS3103"}, nil, &out, &errOut); code != 1 {
 		t.Fatalf("first code = %d, stderr = %q", code, errOut.String())
 	}
 	if _, err := os.Stat(filepath.Join(root, "courses", "CS3103", "state", "jira-epic.json")); err != nil {
 		t.Fatalf("missing provisioning barrier: %v", err)
 	}
 	openJiraSession = func(context.Context, jira.OpenOptions) (*jira.RovoSession, error) { return nil, errors.New("offline") }
-	if code := Run(context.Background(), []string{"jira", "ensure-epic", "CS3103"}, nil, io.Discard, io.Discard); code != 1 {
+	if code := Run(context.Background(), []string{"jira", "create-epic", "CS3103"}, nil, io.Discard, io.Discard); code != 1 {
 		t.Fatalf("reconciliation session code = %d", code)
 	}
 	openJiraSession = func(context.Context, jira.OpenOptions) (*jira.RovoSession, error) { return nil, nil }
 	out.Reset()
 	errOut.Reset()
-	if code := Run(context.Background(), []string{"jira", "ensure-epic", "CS3103"}, nil, &out, &errOut); code != 1 {
+	if code := Run(context.Background(), []string{"jira", "create-epic", "CS3103"}, nil, &out, &errOut); code != 1 {
 		t.Fatalf("reconciliation search code = %d, stderr = %q", code, errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	if code := Run(context.Background(), []string{"jira", "ensure-epic", "CS3103"}, nil, &out, &errOut); code != 0 {
+	if code := Run(context.Background(), []string{"jira", "create-epic", "CS3103"}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("reconciliation code = %d, stderr = %q", code, errOut.String())
 	}
 	var result map[string]any
@@ -427,7 +427,7 @@ func TestRunJiraEnsureEpic(t *testing.T) {
 	}
 }
 
-func TestRunJiraEnsureEpicClearsBarrierBeforeCreateAttempt(t *testing.T) {
+func TestRunJiraCreateEpicClearsBarrierBeforeCreateAttempt(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "vault")
 	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("init code = %d", code)
@@ -449,7 +449,7 @@ func TestRunJiraEnsureEpicClearsBarrierBeforeCreateAttempt(t *testing.T) {
 		ensureCourseEpic = oldEnsure
 	})
 	openJiraSession = func(context.Context, jira.OpenOptions) (*jira.RovoSession, error) { return nil, errors.New("offline") }
-	if code := Run(context.Background(), []string{"jira", "ensure-epic", "CS3103"}, nil, io.Discard, io.Discard); code != 1 {
+	if code := Run(context.Background(), []string{"jira", "create-epic", "CS3103"}, nil, io.Discard, io.Discard); code != 1 {
 		t.Fatalf("first code = %d", code)
 	}
 	openJiraSession = func(context.Context, jira.OpenOptions) (*jira.RovoSession, error) { return nil, nil }
@@ -459,7 +459,7 @@ func TestRunJiraEnsureEpicClearsBarrierBeforeCreateAttempt(t *testing.T) {
 		}
 		return jira.EpicResult{Key: "STUDY-1", Created: true}, nil
 	}
-	if code := Run(context.Background(), []string{"jira", "ensure-epic", "CS3103"}, nil, io.Discard, io.Discard); code != 0 {
+	if code := Run(context.Background(), []string{"jira", "create-epic", "CS3103"}, nil, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("retry code = %d", code)
 	}
 }

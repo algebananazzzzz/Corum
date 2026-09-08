@@ -22,11 +22,12 @@ For a Canvas course, Corum will use this exact epic summary:
 ```
 
 The provisioning command will search the configured Jira project for epics
-with that exact summary. One match is reused and its issue key is stored in
-the course's `jira.epic` configuration. No match causes Corum to create an
-Epic through the existing `createJiraIssue` MCP tool, verify the created
-issue, and store its key. More than one exact match is an error; Corum will
-not guess which duplicate epic owns a course.
+whose summaries contain the course code, case-insensitively. One matching
+epic is reused and its issue key is stored in the course's `jira.epic`
+configuration. No match causes Corum to create an Epic through the existing
+`createJiraIssue` MCP tool, verify the created issue, and store its key. More
+than one matching epic is an error; Corum will not guess which duplicate epic
+owns a course.
 
 Provisioning applies only to a Canvas-backed course with Jira configured for
 the vault and no existing `jira.epic`. Existing course epic configuration
@@ -36,7 +37,7 @@ chosen initialization step.
 
 ## Command and data flow
 
-Add a `corum jira ensure-epic COURSE` command. It loads the workspace and
+Add a `corum jira create-epic COURSE` command. It loads the workspace and
 course configuration, opens the existing project-local Jira/Rovo session,
 and calls a new Jira-client epic lookup helper. It then atomically writes the
 resolved key into `courses/COURSE/course.yaml`. Its JSON output reports the
@@ -63,11 +64,13 @@ timestamps. Tests cover `+0800`, `-0700`, and existing `+08:00` values.
 
 ## Failure handling and tests
 
-Epic lookup must use a project/type/summary-constrained JQL query with JSON
-quoting for the summary. Empty, malformed, remote-error, and ambiguous
-results fail before changing local configuration. Creating an epic treats a
-missing or malformed returned issue key as an applied-but-unknown mutation,
-matching existing Jira mutation safety rules.
+Initial epic lookup must use a project/type/course-code JQL query with JSON
+quoting and verify matches locally with case-insensitive course-code matching.
+An empty Jira child list, including a `null` list returned by Jira, represents
+an empty result. Malformed, remote-error, and ambiguous results fail before
+changing local configuration. Creating an epic treats a missing or malformed
+returned issue key as an applied-but-unknown mutation, matching existing Jira
+mutation safety rules.
 
 Tests will cover exact lookup arguments, duplicate results, creation mapping,
 atomic course configuration updates, CLI wiring with a fake session/client,

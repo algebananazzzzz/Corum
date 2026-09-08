@@ -35,10 +35,10 @@ Invoke `scope-course` with the selected manifest. Its output provides the Jira p
 When Jira is enabled and `courses/{{COURSE}}/course.yaml` has no `jira.epic`, provision it before building any plan:
 
 ```console
-corum jira ensure-epic {{COURSE}}
+corum jira create-epic {{COURSE}}
 ```
 
-Confirm the JSON result, including its `epic` key and whether it was reused or created. Corum searches the configured project for exactly one Epic named `{{COURSE}} — {{CANVAS_COURSE_NAME}}`; it reuses that exact match, creates one when none exists, and stops on duplicate matches. The command writes the resolved key to `course.yaml`. If the course has no stored Canvas name, refresh its Canvas course selection before continuing; do not invent an epic name.
+Confirm the JSON result, including its `epic` key and whether it was reused or created. Corum searches the configured project for exactly one Epic whose summary contains the course code, case-insensitively; it reuses that match, creates one when none exists, and stops on duplicate matches. The command writes the resolved key to `course.yaml`. If the course has no stored Canvas name, refresh its Canvas course selection before continuing; do not invent an epic name.
 
 When Jira is enabled and `courses/{{COURSE}}/state/jira.json` is absent, initialize the cache before running the main scope:
 

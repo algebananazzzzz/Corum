@@ -80,7 +80,7 @@ func RunProcess(ctx context.Context, argv []string, in io.Reader, out, errOut io
 // Run dispatches the complete local Corum command surface.
 func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
 	if len(args) == 1 && args[0] == "--help" {
-		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira status [PATH] | corum jira logout [PATH] | corum jira ensure-epic COURSE | corum jira apply COURSE [--dry-run]")
+		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira status [PATH] | corum jira logout [PATH] | corum jira create-epic COURSE | corum jira apply COURSE [--dry-run]")
 		return 0
 	}
 	if len(args) == 1 && args[0] == "update" {
@@ -179,11 +179,11 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, "usage: corum jira apply COURSE [--dry-run]")
 		return 0
 	}
-	if len(args) == 3 && args[0] == "jira" && args[1] == "ensure-epic" && args[2] == "--help" {
-		fmt.Fprintln(out, "usage: corum jira ensure-epic COURSE")
+	if len(args) == 3 && args[0] == "jira" && args[1] == "create-epic" && args[2] == "--help" {
+		fmt.Fprintln(out, "usage: corum jira create-epic COURSE")
 		return 0
 	}
-	if code, handled := runJiraEnsureEpic(ctx, args, out, errOut); handled {
+	if code, handled := runJiraCreateEpic(ctx, args, out, errOut); handled {
 		return code
 	}
 	if code, handled := runJiraApply(ctx, args, in, out, errOut); handled {
@@ -250,7 +250,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, label)
 		return 0
 	}
-	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira status [PATH] | corum jira logout [PATH] | corum jira ensure-epic COURSE | corum jira apply COURSE [--dry-run]")
+	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira status [PATH] | corum jira logout [PATH] | corum jira create-epic COURSE | corum jira apply COURSE [--dry-run]")
 	return 2
 }
 
@@ -518,7 +518,7 @@ func commandVaultPath(args []string) (string, bool) {
 			return args[2], true
 		}
 	case "jira":
-		if len(args) >= 2 && (args[1] == "apply" || args[1] == "ensure-epic" || args[1] == "status" || args[1] == "logout") {
+		if len(args) >= 2 && (args[1] == "apply" || args[1] == "create-epic" || args[1] == "status" || args[1] == "logout") {
 			if (args[1] == "status" || args[1] == "logout") && len(args) == 3 {
 				return args[2], true
 			}
@@ -550,8 +550,8 @@ type ensuredEpicOutput struct {
 	Created bool   `json:"created"`
 }
 
-func runJiraEnsureEpic(ctx context.Context, args []string, out, errOut io.Writer) (int, bool) {
-	if len(args) != 3 || args[0] != "jira" || args[1] != "ensure-epic" {
+func runJiraCreateEpic(ctx context.Context, args []string, out, errOut io.Writer) (int, bool) {
+	if len(args) != 3 || args[0] != "jira" || args[1] != "create-epic" {
 		return 0, false
 	}
 	root, err := openVault(".")

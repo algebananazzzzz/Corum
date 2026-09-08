@@ -72,9 +72,23 @@ func TestJiraClientEnsureEpic(t *testing.T) {
 		if err != nil || result != (EpicResult{Key: "STUDY-1"}) {
 			t.Fatalf("EnsureEpic = %+v, %v", result, err)
 		}
-		want := map[string]any{"cloudId": "cloud-1", "jql": `project = "STUDY" AND issuetype = "Epic" AND summary = "CS3103 — Computer Networks"`, "maxResults": 2, "view": "full", "responseContentFormat": "markdown"}
+		want := map[string]any{"cloudId": "cloud-1", "jql": `project = "STUDY" AND issuetype = "Epic" AND summary ~ "CS3103"`, "maxResults": 50, "view": "full", "responseContentFormat": "markdown"}
 		if !reflect.DeepEqual(caller.calls[0].args, want) {
 			t.Fatalf("args = %#v, want %#v", caller.calls[0].args, want)
+		}
+	})
+	t.Run("reuses one epic whose course code matches case insensitively", func(t *testing.T) {
+		caller := &fakeJSONCaller{responses: map[string][]any{
+			"searchJiraIssuesUsingJql": []any{map[string]any{"data": map[string]any{"issues": []any{remoteEpic("STUDY-1", "cs3103 — Existing Computer Networks")}}}},
+		}}
+		client, _ := newJiraClient(caller, "cloud-1")
+		result, err := client.EnsureEpic(ctx, "STUDY", summary)
+		if err != nil || result != (EpicResult{Key: "STUDY-1"}) {
+			t.Fatalf("EnsureEpic = %+v, %v", result, err)
+		}
+		want := `project = "STUDY" AND issuetype = "Epic" AND summary ~ "CS3103"`
+		if got := caller.calls[0].args["jql"]; got != want {
+			t.Fatalf("JQL = %q, want %q", got, want)
 		}
 	})
 	t.Run("creates when no epic exists", func(t *testing.T) {
@@ -104,6 +118,35 @@ func TestJiraClientEnsureEpic(t *testing.T) {
 			t.Fatalf("calls = %#v", caller.calls)
 		}
 	})
+	t.Run("rejects a malformed epic result without creating", func(t *testing.T) {
+		malformed := remoteEpic("STUDY-1", summary)
+		delete(malformed["fields"].(map[string]any), "summary")
+		caller := &fakeJSONCaller{responses: map[string][]any{
+			"searchJiraIssuesUsingJql": []any{map[string]any{"data": map[string]any{"issues": []any{malformed}}}},
+			"createJiraIssue":          []any{map[string]any{"data": map[string]any{"key": "STUDY-2"}}},
+		}}
+		client, _ := newJiraClient(caller, "cloud-1")
+		if _, err := client.EnsureEpic(ctx, "STUDY", summary); err == nil {
+			t.Fatal("EnsureEpic accepted a malformed Jira epic result")
+		}
+		if len(caller.calls) != 1 {
+			t.Fatalf("calls = %#v", caller.calls)
+		}
+	})
+}
+
+func TestJiraClientEpicChildrenAcceptsNilIssues(t *testing.T) {
+	caller := &fakeJSONCaller{responses: map[string][]any{
+		"searchJiraIssuesUsingJql": []any{map[string]any{"data": map[string]any{"issues": nil, "isLast": true}}},
+	}}
+	client, _ := newJiraClient(caller, "cloud-1")
+	children, err := client.EpicChildren(context.Background(), "STUDY-1")
+	if err != nil {
+		t.Fatalf("EpicChildren returned an error for an empty Jira result: %v", err)
+	}
+	if len(children) != 0 {
+		t.Fatalf("EpicChildren = %#v, want no children", children)
+	}
 }
 
 func TestJiraClientReconcileEpicNeverCreatesAfterAnUncertainAttempt(t *testing.T) {
