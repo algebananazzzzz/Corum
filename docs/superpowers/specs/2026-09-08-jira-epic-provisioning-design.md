@@ -48,6 +48,12 @@ It will then run its existing empty-plan reconciliation. Courses without
 Canvas metadata receive a clear configuration error instead of a fabricated
 epic name.
 
+Canvas course configuration must retain the Canvas display name captured at
+course selection time. A legacy course whose stored Canvas name is blank
+cannot safely satisfy the requested naming convention, so provisioning will
+return an actionable error instead of silently falling back to the code-only
+name.
+
 ## Timestamp normalization
 
 `normalizeJiraTimestamp` will identify a compact terminal offset by checking
