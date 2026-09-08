@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/algebananazzzzz/Corum/internal/config"
+	"github.com/algebananazzzzz/Corum/internal/lockfile"
 )
 
 type IssueState struct {
@@ -58,6 +59,16 @@ func BeginEpicProvisioning(root string, course config.Course, summary string) (b
 		return false, err
 	}
 	return false, nil
+}
+
+// AcquireCourseLock obtains the shared per-course lock used by Jira mutation
+// workflows. Callers must hold it across checking and creating an Epic.
+func AcquireCourseLock(root string, course config.Course) (*lockfile.Lock, error) {
+	cachePath, _, err := statePaths(root, course)
+	if err != nil {
+		return nil, err
+	}
+	return lockfile.TryAcquire(filepath.Join(filepath.Dir(cachePath), ".course.lock"))
 }
 
 // ClearEpicProvisioning removes the completed Epic mutation barrier.

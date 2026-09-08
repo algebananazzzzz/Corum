@@ -87,6 +87,23 @@ func TestDryRunNeverCallsClientOrWrites(t *testing.T) {
 	}
 }
 
+func TestAcquireCourseLockRejectsConcurrentEpicProvisioning(t *testing.T) {
+	root := prepareRoot(t)
+	_, course := validConfig()
+	first, err := AcquireCourseLock(root, course)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := AcquireCourseLock(root, course)
+	if second != nil {
+		defer second.Close()
+	}
+	if !errors.Is(err, lockfile.ErrLocked) {
+		t.Fatalf("AcquireCourseLock error = %v, want ErrLocked", err)
+	}
+}
+
 func TestPlanMatchesCourseEpicParentsAndTransitionsBeforeRemote(t *testing.T) {
 	workspace, course := validConfig()
 	root := t.TempDir()

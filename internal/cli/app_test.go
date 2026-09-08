@@ -403,3 +403,40 @@ func TestRunJiraEnsureEpic(t *testing.T) {
 		t.Fatalf("stored = %+v, err = %v", stored, err)
 	}
 }
+
+func TestRunJiraEnsureEpicClearsBarrierBeforeCreateAttempt(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "vault")
+	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("init code = %d", code)
+	}
+	workspace, err := config.LoadWorkspace(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace.Jira = &config.JiraWorkspace{CloudID: "cloud-1", Project: "STUDY"}
+	if err := vault.WriteWorkspace(root, workspace); err != nil {
+		t.Fatal(err)
+	}
+	writeCourse(t, root, "CS3103", "version: 2\ncode: CS3103\ncanvas:\n  id: 1\n  name: Computer Networks\n  sources: [assignments]\n")
+	t.Chdir(root)
+
+	oldOpen, oldEnsure := openJiraSession, ensureCourseEpic
+	t.Cleanup(func() {
+		openJiraSession = oldOpen
+		ensureCourseEpic = oldEnsure
+	})
+	openJiraSession = func(context.Context, jira.OpenOptions) (*jira.RovoSession, error) { return nil, errors.New("offline") }
+	if code := Run(context.Background(), []string{"jira", "ensure-epic", "CS3103"}, nil, io.Discard, io.Discard); code != 1 {
+		t.Fatalf("first code = %d", code)
+	}
+	openJiraSession = func(context.Context, jira.OpenOptions) (*jira.RovoSession, error) { return nil, nil }
+	ensureCourseEpic = func(_ context.Context, _ *jira.RovoSession, _ config.Workspace, _ config.Course, reconcile bool) (jira.EpicResult, error) {
+		if reconcile {
+			t.Fatal("pre-create failure incorrectly forced reconciliation")
+		}
+		return jira.EpicResult{Key: "STUDY-1", Created: true}, nil
+	}
+	if code := Run(context.Background(), []string{"jira", "ensure-epic", "CS3103"}, nil, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("retry code = %d", code)
+	}
+}

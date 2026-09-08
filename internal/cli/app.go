@@ -576,10 +576,6 @@ func runJiraEnsureEpic(ctx context.Context, args []string, out, errOut io.Writer
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
 	if course.Jira != nil {
-		if err := jira.ClearEpicProvisioning(root, course); err != nil {
-			fmt.Fprintln(errOut, "could not clear Jira epic provisioning state")
-			return 1, true
-		}
 		if err := encoder.Encode(ensuredEpicOutput{Course: course.Code, Epic: course.Jira.Epic}); err != nil {
 			fmt.Fprintln(errOut, "could not write Jira epic result")
 			return 1, true
@@ -590,6 +586,12 @@ func runJiraEnsureEpic(ctx context.Context, args []string, out, errOut io.Writer
 		fmt.Fprintln(errOut, "Jira epic initialization requires a Canvas course name")
 		return 1, true
 	}
+	lock, err := jira.AcquireCourseLock(root, course)
+	if err != nil {
+		fmt.Fprintln(errOut, "Jira epic initialization is already running for this course")
+		return 1, true
+	}
+	defer lock.Close()
 	reconcile, err := jira.BeginEpicProvisioning(root, course, course.Code+" — "+course.Canvas.Name)
 	if err != nil {
 		fmt.Fprintln(errOut, "could not record Jira epic provisioning state")
@@ -597,6 +599,10 @@ func runJiraEnsureEpic(ctx context.Context, args []string, out, errOut io.Writer
 	}
 	session, err := openJiraSession(ctx, jira.OpenOptions{Interactive: false, CachePath: jiraCacheFor(root), Out: errOut})
 	if err != nil {
+		if clearErr := jira.ClearEpicProvisioning(root, course); clearErr != nil {
+			fmt.Fprintln(errOut, "could not clear Jira epic provisioning state")
+			return 1, true
+		}
 		if errors.Is(err, jira.LoginRequired) {
 			fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum auth jira")
 		} else {
@@ -607,6 +613,13 @@ func runJiraEnsureEpic(ctx context.Context, args []string, out, errOut io.Writer
 	defer session.Close()
 	result, err := ensureCourseEpic(ctx, session, workspace, course, reconcile)
 	if err != nil {
+		var mutation *jira.MutationError
+		if !errors.As(err, &mutation) {
+			if clearErr := jira.ClearEpicProvisioning(root, course); clearErr != nil {
+				fmt.Fprintln(errOut, "could not clear Jira epic provisioning state")
+				return 1, true
+			}
+		}
 		fmt.Fprintln(errOut, "could not initialize Jira epic")
 		return 1, true
 	}
