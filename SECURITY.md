@@ -46,7 +46,8 @@ All configuration is stored project-locally in `<vault>/.config/corum/`.
 - Commands without an explicit vault path use the current project. Corum never
   reads or writes a global configuration directory. The only global Corum data
   is the non-secret update-check cache in the platform user cache directory.
-- Do not copy, inspect, log, or commit credential files. Run `corum jira logout`
+- Do not copy, inspect, log, or commit credential files. Use the client’s MCP
+  logout command to clear its credentials.
   and revoke Atlassian access after suspected exposure.
 
 Disabled Jira and Jira dry-runs must not read the OAuth cache, open a browser,
