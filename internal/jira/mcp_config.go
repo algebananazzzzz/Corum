@@ -45,20 +45,27 @@ func writeCodexMCPConfig(path string) error {
 }
 
 func writeClaudeMCPConfig(path string) error {
-	var document struct {
-		MCPServers map[string]json.RawMessage `json:"mcpServers"`
-	}
+	document := map[string]json.RawMessage{}
 	data, err := os.ReadFile(path)
 	if errorsIsNotExist(err) {
-		document.MCPServers = map[string]json.RawMessage{}
+		document["mcpServers"] = json.RawMessage(`{}`)
 	} else if err != nil {
 		return err
 	} else if err := json.Unmarshal(data, &document); err != nil {
 		return err
-	} else if document.MCPServers == nil {
-		document.MCPServers = map[string]json.RawMessage{}
 	}
-	document.MCPServers[projectJiraMCPName] = json.RawMessage(fmt.Sprintf(`{"type":"http","url":%q}`, rovoMCPURL))
+	servers := map[string]json.RawMessage{}
+	if raw, ok := document["mcpServers"]; ok && len(raw) > 0 {
+		if err := json.Unmarshal(raw, &servers); err != nil {
+			return fmt.Errorf("mcpServers must be an object: %w", err)
+		}
+	}
+	servers[projectJiraMCPName] = json.RawMessage(fmt.Sprintf(`{"type":"http","url":%q}`, rovoMCPURL))
+	encodedServers, err := json.Marshal(servers)
+	if err != nil {
+		return err
+	}
+	document["mcpServers"] = encodedServers
 	result, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
 		return err

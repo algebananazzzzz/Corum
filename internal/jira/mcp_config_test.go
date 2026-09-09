@@ -36,7 +36,7 @@ func TestProjectMCPConfigPreservesUnrelatedEntriesAndIsIdempotent(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(root, ".codex", "config.toml"), []byte("model = \"gpt\"\n\n[mcp_servers.other]\nurl = \"https://example.test\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".mcp.json"), []byte(`{"mcpServers":{"other":{"url":"https://example.test"}}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".mcp.json"), []byte(`{"enabled":true,"mcpServers":{"other":{"url":"https://example.test"}}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := writeProjectMCPConfig(root); err != nil {
@@ -52,7 +52,7 @@ func TestProjectMCPConfigPreservesUnrelatedEntriesAndIsIdempotent(t *testing.T) 
 	if string(first) != string(second) || string(firstClaude) != string(secondClaude) {
 		t.Fatal("repeated config write was not idempotent")
 	}
-	if !strings.Contains(string(second), "mcp_servers.other") || !strings.Contains(string(secondClaude), "https://example.test") {
+	if !strings.Contains(string(second), "mcp_servers.other") || !strings.Contains(string(secondClaude), "https://example.test") || !strings.Contains(string(secondClaude), `"enabled": true`) {
 		t.Fatal("unrelated MCP entry was not preserved")
 	}
 	if strings.Contains(string(second), "token") || strings.Contains(string(secondClaude), "token") {
