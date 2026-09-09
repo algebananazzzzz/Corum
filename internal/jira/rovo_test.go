@@ -46,7 +46,7 @@ func TestRovoBoundedToolPaginationRejectsRepeatedCursor(t *testing.T) {
 	}
 }
 
-func TestRovoRequiresAllSafetyBoundaryTools(t *testing.T) {
+func TestRovoRequiresReadTools(t *testing.T) {
 	err := requireTools(map[string]*mcp.Tool{"atlassianUserInfo": {Name: "atlassianUserInfo"}})
 	if err == nil || !strings.Contains(err.Error(), "getAccessibleAtlassianResources") {
 		t.Fatalf("requireTools error = %v", err)

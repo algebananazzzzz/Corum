@@ -66,6 +66,21 @@ type fakeSyncClient struct {
 	fetchErr error
 }
 
+func remoteIssue(key string) map[string]any {
+	return map[string]any{"key": key, "fields": map[string]any{
+		"issuetype": map[string]any{"name": "Task"}, "summary": "Summary " + key,
+		"status": map[string]any{"name": "To Do"}, "labels": []any{},
+		"updated": "2026-09-09T00:00:00+0800",
+	}}
+}
+
+func remoteEpic(key, summary string) map[string]any {
+	value := remoteIssue(key)
+	value["fields"].(map[string]any)["issuetype"] = map[string]any{"name": "Epic"}
+	value["fields"].(map[string]any)["summary"] = summary
+	return value
+}
+
 func (f *fakeSyncClient) FetchIssue(context.Context, string) (map[string]any, error) {
 	if f.fetchErr != nil {
 		return nil, f.fetchErr

@@ -12,7 +12,7 @@ import (
 
 var requiredTools = []string{
 	"atlassianUserInfo", "getAccessibleAtlassianResources", "listJiraProjects",
-	"getJiraIssue", "searchJiraIssuesUsingJql", "createJiraIssue", "editJiraIssue", "transitionJiraIssue",
+	"getJiraIssue", "searchJiraIssuesUsingJql",
 }
 
 // RovoError deliberately keeps protocol and remote payloads out of CLI output.
