@@ -319,6 +319,9 @@ func runConfigure(ctx context.Context, args []string, in io.Reader, out, errOut 
 		_ = ui.ShowNotice("Canvas Authentication", "Canvas authenticated.", in, out)
 		return 0, true
 	case "jira":
+		if err := jira.ConfigureProjectMCP(root); err != nil {
+			return fail("Jira MCP Configuration", "Could not configure project-local Jira MCP clients.", err)
+		}
 		deps := ui.DefaultJiraAuthDependencies(in, out, root)
 		if err := ui.RunJiraAuthFullscreen(ctx, root, deps, in, out); err != nil {
 			if errors.Is(err, ui.ErrCancelled) {
