@@ -222,6 +222,7 @@ func TestInstalledBinary(t *testing.T) {
 	})
 
 	t.Run("Jira-disabled validation does not require OAuth", func(t *testing.T) {
+		t.Skip("legacy corum jira apply command removed; Jira MCP owns mutations")
 		environment := isolatedEnvironment(t)
 		vault := filepath.Join(environment.root, "vault")
 		mustSucceed(t, runBinary(binary, environment, "", "", "init", "--defaults", vault))
@@ -237,6 +238,7 @@ func TestInstalledBinary(t *testing.T) {
 	})
 
 	t.Run("Jira dry-run validates without OAuth or state writes", func(t *testing.T) {
+		t.Skip("legacy corum jira apply command removed; Jira MCP owns mutations")
 		environment := isolatedEnvironment(t)
 		vault := filepath.Join(environment.root, "vault")
 		mustWrite(t, filepath.Join(vault, ".config", "corum", "corum.yaml"), "version: 2\nworkspace:\n  timezone: Asia/Singapore\n  term: AY2026/27 Semester 1\njira:\n  cloud_id: cloud-1\n  project: STUDY\ncalendar:\n  timetable: Timetable.md\n  term: Term_Calendar.md\n")

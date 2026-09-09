@@ -175,14 +175,6 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 		}
 	}
-	if len(args) == 3 && args[0] == "jira" && args[1] == "apply" && args[2] == "--help" {
-		fmt.Fprintln(out, "usage: corum jira apply COURSE [--dry-run]")
-		return 0
-	}
-	if len(args) == 3 && args[0] == "jira" && args[1] == "create-epic" && args[2] == "--help" {
-		fmt.Fprintln(out, "usage: corum jira create-epic COURSE")
-		return 0
-	}
 	if len(args) == 3 && args[0] == "jira" && args[1] == "sync-epic" && args[2] == "--help" {
 		fmt.Fprintln(out, "usage: corum jira sync-epic COURSE")
 		return 0
@@ -190,72 +182,8 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if code, handled := runJiraSyncEpic(ctx, args, out, errOut); handled {
 		return code
 	}
-	if code, handled := runJiraCreateEpic(ctx, args, out, errOut); handled {
-		return code
-	}
-	if code, handled := runJiraApply(ctx, args, in, out, errOut); handled {
-		return code
-	}
 	if code, handled := runCanvasSync(ctx, args, out, errOut); handled {
 		return code
-	}
-	if (len(args) == 2 || len(args) == 3) && args[0] == "jira" && args[1] == "logout" {
-		path := "."
-		if len(args) == 3 {
-			path = args[2]
-		}
-		root, err := openVault(path)
-		if err != nil {
-			fmt.Fprintln(errOut, "vault validation failed")
-			return 1
-		}
-		removed, err := jira.ClearAuthFor(root)
-		if err != nil {
-			fmt.Fprintln(errOut, "could not clear Jira authentication")
-			return 1
-		}
-		if removed {
-			fmt.Fprintln(out, "Jira authentication cleared")
-		} else {
-			fmt.Fprintln(out, "Jira is already logged out")
-		}
-		return 0
-	}
-	if (len(args) == 2 || len(args) == 3) && args[0] == "jira" && args[1] == "status" {
-		path := "."
-		if len(args) == 3 {
-			path = args[2]
-		}
-		root, err := openVault(path)
-		if err != nil {
-			fmt.Fprintln(errOut, "vault validation failed")
-			return 1
-		}
-		session, err := jira.Open(ctx, jira.OpenOptions{Interactive: false, CachePath: jiraCacheFor(root), Out: errOut})
-		if err != nil {
-			if err == jira.LoginRequired {
-				fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum configure jira")
-			} else {
-				fmt.Fprintln(errOut, "could not connect to Atlassian")
-			}
-			return 1
-		}
-		defer session.Close()
-		account, err := session.UserInfo(ctx)
-		if err != nil {
-			fmt.Fprintln(errOut, "could not read Atlassian account")
-			return 1
-		}
-		label := account.DisplayName
-		if label == "" {
-			label = account.AccountID
-		}
-		if label == "" {
-			fmt.Fprintln(errOut, "could not read Atlassian account")
-			return 1
-		}
-		fmt.Fprintln(out, label)
-		return 0
 	}
 	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira sync-epic COURSE")
 	return 2
@@ -528,10 +456,7 @@ func commandVaultPath(args []string) (string, bool) {
 			return args[2], true
 		}
 	case "jira":
-		if len(args) >= 2 && (args[1] == "apply" || args[1] == "create-epic" || args[1] == "sync-epic" || args[1] == "status" || args[1] == "logout") {
-			if (args[1] == "status" || args[1] == "logout") && len(args) == 3 {
-				return args[2], true
-			}
+		if len(args) >= 2 && args[1] == "sync-epic" {
 			return ".", true
 		}
 	}

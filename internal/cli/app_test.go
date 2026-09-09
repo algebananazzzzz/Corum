@@ -164,6 +164,7 @@ func TestRunDoctorOptionalPathDefaultsToWorkingDirectory(t *testing.T) {
 }
 
 func TestRunJiraStatusWithoutPathRequiresCurrentProject(t *testing.T) {
+	t.Skip("legacy Jira status command removed")
 	t.Chdir(t.TempDir())
 	var out, errOut bytes.Buffer
 	if code := Run(context.Background(), []string{"jira", "status"}, nil, &out, &errOut); code != 1 {
@@ -202,6 +203,7 @@ func TestRunConfigureRequiresTerminalWithoutVault(t *testing.T) {
 }
 
 func TestRunJiraStatusRejectsInvalidVault(t *testing.T) {
+	t.Skip("legacy Jira status command removed")
 	var out, errOut bytes.Buffer
 	if code := Run(context.Background(), []string{"jira", "status", "/nonexistent/corum-vault"}, nil, &out, &errOut); code != 1 {
 		t.Fatalf("jira status code = %d, stderr = %q", code, errOut.String())
@@ -314,6 +316,7 @@ func writeCourse(t *testing.T, root, code, contents string) {
 }
 
 func TestRunJiraApplyDryRunEchoesPlanWithoutOAuth(t *testing.T) {
+	t.Skip("legacy Jira apply command removed")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "courses", "CS3103"), 0o755); err != nil {
@@ -349,6 +352,7 @@ func TestRunJiraApplyDryRunEchoesPlanWithoutOAuth(t *testing.T) {
 }
 
 func TestRunJiraCreateEpic(t *testing.T) {
+	t.Skip("legacy Jira create-epic command removed")
 	root := filepath.Join(t.TempDir(), "vault")
 	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("init code = %d", code)
@@ -428,6 +432,7 @@ func TestRunJiraCreateEpic(t *testing.T) {
 }
 
 func TestRunJiraCreateEpicClearsBarrierBeforeCreateAttempt(t *testing.T) {
+	t.Skip("legacy Jira create-epic command removed")
 	root := filepath.Join(t.TempDir(), "vault")
 	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("init code = %d", code)
