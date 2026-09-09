@@ -1,6 +1,6 @@
 # Sync Course Error Handling
 
-Use this reference when capture, scoping, Jira application, wiki authoring, or review returns an unexpected result.
+Use this reference when capture, scoping, Jira MCP work, wiki authoring, or review returns an unexpected result.
 
 ## Capture and scope
 
@@ -10,15 +10,8 @@ Return scope errors with their stable code and path. Use the selected manifest a
 
 ## Jira results
 
-Preserve the exact Jira command result in `state/latest-run.json`. For an interrupted or uncertain Jira write, reconcile the configured epic with this empty plan, then scope a fresh plan from the reconciled cache and present it for approval:
+Preserve the exact Jira MCP result in `state/latest-run.json`. For an interrupted or uncertain Jira write, run `corum jira sync-epic {{COURSE}}`, scope a fresh plan from the reconciled cache, and present it for approval. Never replay an uncertain mutation before reconciliation.
 
-```json
-{"version":2,"course":"{{COURSE}}","epic":"{{EPIC_KEY}}","actions":[]}
-```
-
-```console
-corum jira apply {{COURSE}} < {{EMPTY_JIRA_PLAN_FILE}}
-```
 
 ## Wiki results
 

@@ -26,7 +26,7 @@ An enabled wiki with no state or pages begins as an empty wiki. An enabled Jira 
 
 Create Jira actions for required work, required sessions, required dated milestones, and changed course obligations. Use the matching cached issue to produce an update or transition for a changed owned value. Read [Jira planning](references/jira-board.md) for issue types, dates, details, and labels.
 
-Build `plan.actions` as the exact `corum jira apply` payload. Use one of these shapes for each action:
+Build `jira.actions` as an approval table describing the exact Jira MCP call for each action:
 
 | Action | Fields |
 | --- | --- |

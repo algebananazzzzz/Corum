@@ -20,7 +20,7 @@ Convert source timestamps to the timezone in `.config/corum/corum.yaml`. Look up
 
 ## Status
 
-New issues use the board default. When an issue must move, name a transition declared under the workspace Jira configuration. The exact plan carries the transition name; `corum jira apply` resolves its configured ID.
+New issues use the board default. When an issue must move, call the Jira MCP transition tool with the transition declared under the workspace Jira configuration.
 
 ## Details
 

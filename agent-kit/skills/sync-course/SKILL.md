@@ -23,34 +23,24 @@ Select the requested course from the JSON result. The selected manifest supplies
 
 | Service | Enabled workflow | Disabled workflow |
 | --- | --- | --- |
-| Jira | Scope and apply Jira actions. | Omit Jira actions from the plan and preserve prior Jira records. |
+| Jira | Reconcile with `corum jira sync-epic`, scope changes, and apply approved changes through Jira MCP. | Omit Jira actions from the plan and preserve prior Jira records. |
 | Wiki | Scope, author, review, and record wiki work. | Omit wiki actions from the plan and preserve prior wiki records. |
 
-Jira is enabled for the vault when its workspace settings exist. Each course uses one Jira epic; when a Canvas-backed course has no configured epic, initialize it before scoping. Wiki is enabled for the vault when its workspace setting exists and initializes an empty course wiki when no pages or state exist.
+Jira is enabled for the vault when its workspace settings exist. Each course uses one Jira epic. Wiki is enabled for the vault when its workspace setting exists and initializes an empty course wiki when no pages or state exist.
 
 ## 3. Scope enabled work
 
 Invoke `scope-course` with the selected manifest. Its output provides the Jira plan, Jira evidence, wiki page actions, source coverage, and ingestion dependencies for the enabled services.
 
-When Jira is enabled and `courses/{{COURSE}}/course.yaml` has no `jira.epic`, provision it before building any plan:
+When Jira is enabled, use Jira MCP to find or create the course Epic and save its key in `course.yaml`, then run `corum jira sync-epic {{COURSE}}` before planning.
 
 ```console
-corum jira create-epic {{COURSE}}
+corum jira sync-epic {{COURSE}}
 ```
 
-Confirm the JSON result, including its `epic` key and whether it was reused or created. Corum searches the configured project for exactly one Epic whose summary contains the course code, case-insensitively; it reuses that match, creates one when none exists, and stops on duplicate matches. The command writes the resolved key to `course.yaml`. If the course has no stored Canvas name, refresh its Canvas course selection before continuing; do not invent an epic name.
+Confirm the JSON result before continuing.
 
-When Jira is enabled and `courses/{{COURSE}}/state/jira.json` is absent, initialize the cache before running the main scope:
-
-```json
-{"version":2,"course":"{{COURSE}}","epic":"{{EPIC_KEY}}","actions":[]}
-```
-
-```console
-corum jira apply {{COURSE}} < {{EMPTY_JIRA_PLAN_FILE}}
-```
-
-Build this empty plan from the selected course and its configured epic, then confirm its JSON result before continuing.
+The sync command initializes or replaces the local Jira cache before the main scope.
 
 ## 4. Present one plan
 
@@ -76,14 +66,7 @@ An affirmative response authorizes the displayed plan.
 
 ## 5. Apply Jira work
 
-For approved Jira actions, validate the scoped plan and apply it exactly:
-
-```console
-corum jira apply {{COURSE}} --dry-run < {{JIRA_PLAN_FILE}}
-corum jira apply {{COURSE}} < {{JIRA_PLAN_FILE}}
-```
-
-Record the command’s observed action results in the Jira stage of `state/latest-run.json`.
+For each approved Jira action, call the corresponding Jira MCP tool directly. After successful mutations, run `corum jira sync-epic {{COURSE}}` and record the MCP and sync results in `state/latest-run.json`.
 
 ## 6. Apply wiki work
 

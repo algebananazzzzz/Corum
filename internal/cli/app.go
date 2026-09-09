@@ -183,6 +183,13 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		fmt.Fprintln(out, "usage: corum jira create-epic COURSE")
 		return 0
 	}
+	if len(args) == 3 && args[0] == "jira" && args[1] == "sync-epic" && args[2] == "--help" {
+		fmt.Fprintln(out, "usage: corum jira sync-epic COURSE")
+		return 0
+	}
+	if code, handled := runJiraSyncEpic(ctx, args, out, errOut); handled {
+		return code
+	}
 	if code, handled := runJiraCreateEpic(ctx, args, out, errOut); handled {
 		return code
 	}
@@ -521,7 +528,7 @@ func commandVaultPath(args []string) (string, bool) {
 			return args[2], true
 		}
 	case "jira":
-		if len(args) >= 2 && (args[1] == "apply" || args[1] == "create-epic" || args[1] == "status" || args[1] == "logout") {
+		if len(args) >= 2 && (args[1] == "apply" || args[1] == "create-epic" || args[1] == "sync-epic" || args[1] == "status" || args[1] == "logout") {
 			if (args[1] == "status" || args[1] == "logout") && len(args) == 3 {
 				return args[2], true
 			}
@@ -551,6 +558,50 @@ type ensuredEpicOutput struct {
 	Course  string `json:"course"`
 	Epic    string `json:"epic"`
 	Created bool   `json:"created"`
+}
+
+func runJiraSyncEpic(ctx context.Context, args []string, out, errOut io.Writer) (int, bool) {
+	if len(args) != 3 || args[0] != "jira" || args[1] != "sync-epic" {
+		return 0, false
+	}
+	root, err := openVault(".")
+	if err != nil {
+		fmt.Fprintln(errOut, "could not locate vault")
+		return 1, true
+	}
+	workspace, err := config.LoadWorkspace(root)
+	if err != nil || workspace.Jira == nil {
+		fmt.Fprintln(errOut, "Jira is disabled or misconfigured")
+		return 1, true
+	}
+	course, err := config.LoadCourse(root, args[2])
+	if err != nil || course.Jira == nil {
+		fmt.Fprintln(errOut, "course has no configured Jira epic")
+		return 1, true
+	}
+	session, err := openJiraSession(ctx, jira.OpenOptions{Interactive: false, CachePath: jiraCacheFor(root), Out: errOut})
+	if err != nil {
+		fmt.Fprintln(errOut, "could not connect to Atlassian; run corum configure jira")
+		return 1, true
+	}
+	defer session.Close()
+	client, err := makeJiraClient(session, workspace.Jira.CloudID)
+	if err != nil {
+		fmt.Fprintln(errOut, "invalid Jira configuration")
+		return 1, true
+	}
+	result, err := jira.SyncEpic(ctx, root, course.Code, course.Jira.Epic, jira.SyncOptions{Client: client, Project: workspace.Jira.Project})
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1, true
+	}
+	encoder := json.NewEncoder(out)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(result); err != nil {
+		fmt.Fprintln(errOut, "could not write Jira sync result")
+		return 1, true
+	}
+	return 0, true
 }
 
 func runJiraCreateEpic(ctx context.Context, args []string, out, errOut io.Writer) (int, bool) {
