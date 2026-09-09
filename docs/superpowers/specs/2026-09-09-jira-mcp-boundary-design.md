@@ -35,8 +35,11 @@ configurations:
 It must merge only Corum's named Jira server entry, preserve all unrelated
 user-owned MCP entries and settings, and write no bearer token or refresh
 token into the repository. The command reports the exact client commands
-needed to complete each client's OAuth login. Authentication remains owned by
-Codex and Claude; Corum does not store or share their credentials.
+needed to complete each client's OAuth login. It collects the Jira cloud ID
+and project key as validated user input; it does not query Jira to discover
+them. Agents discover sites and projects through Jira MCP after login.
+Authentication remains owned by Codex and Claude; Corum does not store or
+share their credentials.
 
 The generated toolkit will state that Jira MCP is the authoritative interface
 for normal Jira work. It will name `sync-epic` as the required post-mutation
