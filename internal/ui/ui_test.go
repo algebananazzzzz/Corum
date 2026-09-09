@@ -489,6 +489,31 @@ func TestRunAuthConfiguresDisabledServices(t *testing.T) {
 	}
 }
 
+func TestRunAuthInstallsMCPConfigWhenJiraIsEnabled(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "vault")
+	workspace := config.Workspace{
+		Version:   2,
+		Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "Term"},
+		Jira:      &config.JiraWorkspace{CloudID: "cloud-1", Project: "TODO"},
+		Calendar:  config.Calendar{Timetable: "Timetable.md", Term: "Term.md"},
+	}
+	if err := vault.Initialize(root, workspace, uiAssets(), "test"); err != nil {
+		t.Fatal(err)
+	}
+	deps := AuthDependencies{
+		Prompts: &scriptedPrompts{answers: []any{false}},
+		RunJira: func(context.Context, string, JiraAuthDependencies) error { return nil },
+	}
+	if err := RunAuth(context.Background(), root, deps); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(root, ".codex", "config.toml"), filepath.Join(root, ".mcp.json")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("combined configure did not install %s: %v", path, err)
+		}
+	}
+}
+
 func TestRunAuthCanDisableWikiAuthoring(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "vault")
 	workspace := config.Workspace{

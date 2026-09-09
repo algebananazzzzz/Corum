@@ -10,6 +10,7 @@ import (
 
 	"github.com/algebananazzzzz/Corum/internal/canvas"
 	"github.com/algebananazzzzz/Corum/internal/config"
+	"github.com/algebananazzzzz/Corum/internal/jira"
 	"github.com/algebananazzzzz/Corum/internal/vault"
 )
 
@@ -220,6 +221,11 @@ func RunAuth(ctx context.Context, root string, deps AuthDependencies) (err error
 	workspace, err = config.LoadWorkspace(root)
 	if err != nil {
 		return err
+	}
+	if workspace.Jira != nil {
+		if err := jira.ConfigureProjectMCP(root); err != nil {
+			return fmt.Errorf("configure Jira MCP clients: %w", err)
+		}
 	}
 	enableWiki, err := deps.Prompts.Confirm("Enable wiki authoring?", workspace.Wiki != nil)
 	if err != nil {

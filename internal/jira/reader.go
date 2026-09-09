@@ -53,7 +53,7 @@ func (c *JiraClient) EpicChildren(ctx context.Context, epic string) ([]map[strin
 	var next string
 	seen := map[string]bool{}
 	for {
-		args := map[string]any{"jql": "parent = " + string(quoted), "maxResults": 100, "view": "full", "responseContentFormat": "markdown"}
+		args := map[string]any{"cloudId": c.cloudID, "jql": "parent = " + string(quoted), "maxResults": 100, "view": "full", "responseContentFormat": "markdown"}
 		if next != "" {
 			args["nextPageToken"] = next
 		}
