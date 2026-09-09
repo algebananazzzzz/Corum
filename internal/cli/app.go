@@ -230,10 +230,6 @@ func runConfigure(ctx context.Context, args []string, in io.Reader, out, errOut 
 		fmt.Fprintln(errOut, "vault validation failed")
 		return 1, true
 	}
-	if !isTerminal(in) {
-		fmt.Fprintln(errOut, "interactive authentication requires a terminal")
-		return 2, true
-	}
 	fail := func(title, message string, err error) (int, bool) {
 		if err == nil {
 			_ = ui.ShowNotice(title, message, in, out)
@@ -241,6 +237,17 @@ func runConfigure(ctx context.Context, args []string, in io.Reader, out, errOut 
 			_ = ui.ShowError(title, message, err, in, out)
 		}
 		return 1, true
+	}
+	if target == "jira" {
+		if err := jira.ConfigureProjectMCP(root); err != nil {
+			return fail("Jira MCP Configuration", "Could not configure project-local Jira MCP clients.", err)
+		}
+		fmt.Fprintln(out, "Jira MCP configured for Codex and Claude. Authenticate from either client before use.")
+		return 0, true
+	}
+	if !isTerminal(in) {
+		fmt.Fprintln(errOut, "interactive authentication requires a terminal")
+		return 2, true
 	}
 	switch target {
 	case "canvas":
@@ -254,9 +261,6 @@ func runConfigure(ctx context.Context, args []string, in io.Reader, out, errOut 
 		_ = ui.ShowNotice("Canvas Authentication", "Canvas authenticated.", in, out)
 		return 0, true
 	case "jira":
-		if err := jira.ConfigureProjectMCP(root); err != nil {
-			return fail("Jira MCP Configuration", "Could not configure project-local Jira MCP clients.", err)
-		}
 		deps := ui.DefaultJiraAuthDependencies(in, out, root)
 		if err := ui.RunJiraAuthFullscreen(ctx, root, deps, in, out); err != nil {
 			if errors.Is(err, ui.ErrCancelled) {
