@@ -8,7 +8,9 @@ Do not include credentials or private course material in public issues.
 
 The installer downloads a platform archive and its SHA-256 checksum from the
 project's GitHub Release, verifies the archive, and installs the `corum` binary.
-The checksum relies on trust in the repository and release publisher. Corum does
+`corum update` performs the same verification before atomically replacing the
+installed executable. The checksum relies on trust in the repository and release
+publisher. Corum does
 not check for updates or replace itself during ordinary commands.
 
 ## Credentials

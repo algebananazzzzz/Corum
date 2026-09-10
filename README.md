@@ -108,8 +108,11 @@ are not implemented.
   and skills. It also removes the three retired bundled wiki authoring skills.
   Custom skills and existing course pages are preserved.
 - `corum version` prints the installed version.
-- Re-run the installer to install a newer release. There is no self-updater,
-  background maintenance, toolkit version registry or runtime lockfile system.
+- `corum update` explicitly checks for a newer release, verifies its SHA-256
+  checksum and replaces the installed executable. Development builds cannot
+  self-update; use the installer to install a release first.
+- There are no startup update checks, background maintenance, update caches,
+  toolkit version registries or runtime lockfiles.
 
 Run one sync per course at a time. Configuration and cache formats are unstable;
 there are no format versions, migrations or compatibility adapters.

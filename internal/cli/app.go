@@ -15,6 +15,7 @@ import (
 	"github.com/algebananazzzzz/Corum/internal/config"
 	"github.com/algebananazzzzz/Corum/internal/jira"
 	"github.com/algebananazzzzz/Corum/internal/ui"
+	"github.com/algebananazzzzz/Corum/internal/update"
 	"github.com/algebananazzzzz/Corum/internal/vault"
 )
 
@@ -27,13 +28,27 @@ var (
 // Run dispatches the complete local Corum command surface.
 func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
 	if len(args) == 1 && args[0] == "--help" {
-		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira sync-epic COURSE")
+		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira sync-epic COURSE")
 		return 0
 	}
 	if len(args) == 1 && args[0] == "version" {
 		fmt.Fprintln(out, buildinfo.Version)
 		return 0
 	}
+	if len(args) == 1 && args[0] == "update" {
+		latest, changed, err := update.Run(ctx, buildinfo.Version, os.Getenv("_CORUM_TEST_UPDATE_API_BASE"))
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		if changed {
+			fmt.Fprintf(out, "corum updated to %s\n", latest)
+		} else {
+			fmt.Fprintf(out, "corum %s is up to date\n", buildinfo.Version)
+		}
+		return 0
+	}
+
 	if (len(args) == 2 || len(args) == 3) && args[0] == "toolkit" && args[1] == "update" {
 		path := "."
 		if len(args) == 3 {
@@ -107,7 +122,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if code, handled := runCanvasSync(ctx, args, out, errOut); handled {
 		return code
 	}
-	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira sync-epic COURSE")
+	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira sync-epic COURSE")
 	return 2
 }
 

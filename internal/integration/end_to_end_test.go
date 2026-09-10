@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -384,4 +385,67 @@ func snapshot(t *testing.T, root string) string {
 	}
 	sort.Strings(entries)
 	return strings.Join(entries, "\n")
+}
+
+func TestExplicitUpdate(t *testing.T) {
+	oldBinary := buildBinaryVersion(t, "v1.0.0")
+	newBinary := buildBinary(t)
+	archive := archiveBinary(t, newBinary)
+	asset := fmt.Sprintf("corum_2.0.0_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	var requests atomic.Int32
+	var badChecksum atomic.Bool
+	badChecksum.Store(true)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		switch r.URL.Path {
+		case "/repos/algebananazzzzz/Corum/releases/latest":
+			fmt.Fprintf(w, `{"tag_name":"v2.0.0","assets":[{"name":%q,"browser_download_url":%q},{"name":"checksums.txt","browser_download_url":%q}]}`, asset, "http://"+r.Host+"/archive", "http://"+r.Host+"/checksums")
+		case "/archive":
+			_, _ = w.Write(archive)
+		case "/checksums":
+			digest := sha256.Sum256(archive)
+			if badChecksum.Load() {
+				digest = sha256.Sum256(nil)
+			}
+			fmt.Fprintf(w, "%x  %s\n", digest, asset)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	environment := isolatedEnvironment(t)
+	environment.values = append(environment.values, "_CORUM_TEST_UPDATE_API_BASE="+server.URL)
+	for _, command := range []string{"version", "--help"} {
+		mustSucceed(t, runBinary(oldBinary, environment, "", "", command))
+	}
+	if requests.Load() != 0 {
+		t.Fatal("ordinary commands contacted update server")
+	}
+	before := mustRead(t, oldBinary)
+	result := runBinary(oldBinary, environment, "", "", "update")
+	mustExit(t, result, 1)
+	if !strings.Contains(result.stderr, "checksum mismatch") {
+		t.Fatalf("stderr = %q", result.stderr)
+	}
+	if mustRead(t, oldBinary) != before {
+		t.Fatal("bad checksum replaced executable")
+	}
+	badChecksum.Store(false)
+	result = runBinary(oldBinary, environment, "", "", "update")
+	mustSucceed(t, result)
+	if !strings.Contains(result.stdout, "updated to v2.0.0") {
+		t.Fatalf("stdout = %q", result.stdout)
+	}
+	result = runBinary(oldBinary, environment, "", "", "version")
+	mustSucceed(t, result)
+	if result.stdout != "v2.0.0\n" {
+		t.Fatalf("version = %q", result.stdout)
+	}
+	count := requests.Load()
+	result = runBinary(oldBinary, environment, "", "", "update")
+	mustSucceed(t, result)
+	if !strings.Contains(result.stdout, "up to date") || requests.Load() != count+1 {
+		t.Fatalf("up-to-date check = %+v", result)
+	}
+	assertNoGlobalCorumConfig(t, environment.config)
 }
