@@ -1,10 +1,5 @@
 # Incomplete evidence
 
-Report failed captures, unreadable sources, stale issue caches and ambiguous
-matches explicitly. Scope supported obligations from successful captures, but do
-not infer cancellation or completion from absent data. Preserve exact source
-paths so the missing evidence can be revisited.
+Report failed captures, unreadable sources and stale issue caches with their source paths. Scope supported obligations from successful changes. Require affirmative source evidence before proposing cancellation or completion.
 
-If a required date or venue conflicts across sources, present the conflict and
-its sources instead of silently choosing a value. If no Jira cache or epic is
-configured, report local obligations without claiming they are new remote issues.
+Treat an issue's absence from a stale or incomplete cache as an uncertain match; resolve that match before proposing creation.

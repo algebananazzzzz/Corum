@@ -13,40 +13,34 @@ From the vault root, run:
 corum sync {{COURSE}} --json
 ```
 
-Select the course's result from the JSON array. It contains `course`, `dry_run`,
-`status`, `changes`, `failures`, and `sources`. Each change identifies the source
-item, its summary, its `raw_path` relative to the course's `raw/`, and available
-metadata. Read those captured files to understand the evidence.
+Verify the exit code and the selected course's `dry_run`, `status`, `failures`, and source statuses. Pass that course's JSON changeset to `scope-course` in this workflow. Defer captured-file reads to scoping.
 
-Consume this result now. There is no saved run manifest. A later capture uses the
-Canvas cache and may return no changes for already captured material.
+## 2. Prepare current obligations
 
-## 2. Read current obligations
+Read `.config/corum/corum.yaml` and `courses/{{COURSE}}/course.yaml`. If the workspace has a `jira` block, resolve the epic below; otherwise, proceed to step 3.
 
-Read `.config/corum/corum.yaml` and `courses/{{COURSE}}/course.yaml`.
-If Jira is configured and the course has an epic, refresh its cache:
+When Jira is enabled, resolve the course epic:
+
+1. Use the epic already mapped in `course.yaml` when available.
+2. When the mapping is missing, use Jira MCP to search epics in the configured cloud and project with a matching course code. Verify the course identity, including the term when available. Reuse a unique matching epic; report ambiguous matches for resolution.
+3. When a successful, complete search finds no match, create a course epic through Jira MCP using the course code and available course name.
+
+Save the reused or created epic key as `jira.epic` in `course.yaml`, preserving its other settings. If a mapped epic is confirmed missing, repeat the lookup process. For unavailable Jira MCP, failed operations or ambiguous matches, follow [error handling](references/error-handling.md) and continue local scoping.
+
+With an epic mapped, refresh its cache:
 
 ```console
 corum jira sync-epic {{COURSE}}
 ```
 
-Confirm success, then read `courses/{{COURSE}}/state/jira.json`.
-If the epic is not configured, report that Jira reconciliation is unavailable.
-Do not create an epic as a side effect of capture. If Jira is unavailable, scope
-local obligations and identify the missing remote context.
+Verify success and pass `courses/{{COURSE}}/state/jira.json` to `scope-course` for comparison.
 
 ## 3. Scope and review
 
-Use `scope-course` with the changeset and available cached issues. Present the
-proposed actions with their targets, changed fields and source evidence. Report
-capture failures and uncertain matches alongside the plan. If there are no
-supported changes, say so.
+Invoke `scope-course` with the retained changeset and available Jira cache. Present its plan for user review.
 
 ## 4. Apply approved work
 
-When the user approves Jira changes, call the configured Jira MCP tools directly.
-After successful writes, run `corum jira sync-epic {{COURSE}}` again to refresh the
-cache. Report the observed results. Do not create run manifests or changelogs.
+When the user approves the scoped Jira actions, call the configured Jira MCP tools directly. After successful writes, run `corum jira sync-epic {{COURSE}}` again to refresh the cache. Report the observed results.
 
-For command errors, partial captures or uncertain writes, read
-[error handling](references/error-handling.md).
+For command errors, partial captures or uncertain writes, read [error handling](references/error-handling.md).
