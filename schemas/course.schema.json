@@ -3,29 +3,97 @@
   "title": "Corum course configuration",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "code"],
+  "required": [
+    "code"
+  ],
   "properties": {
-    "version": {"const": 2},
-    "code": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"},
+    "code": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+    },
     "canvas": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "sources"],
+      "required": [
+        "id",
+        "sources"
+      ],
       "properties": {
-        "id": {"type": "integer", "exclusiveMinimum": 0},
-        "sources": {"type": "array", "uniqueItems": true, "items": {"enum": ["announcements", "assignments", "files", "pages", "modules", "syllabus"]}},
-        "folders": {"type": "object", "propertyNames": {"allOf": [{"pattern": "\\S"}, {"$ref": "#/$defs/credentialFreeKey"}]}, "additionalProperties": {"$ref": "#/$defs/relativePath"}}
+        "id": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "sources": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "announcements",
+              "assignments",
+              "files",
+              "pages",
+              "modules",
+              "syllabus"
+            ]
+          }
+        },
+        "folders": {
+          "type": "object",
+          "propertyNames": {
+            "allOf": [
+              {
+                "pattern": "\\S"
+              },
+              {
+                "$ref": "#/$defs/credentialFreeKey"
+              }
+            ]
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/relativePath"
+          }
+        },
+        "name": {
+          "type": "string"
+        }
       }
     },
     "jira": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["epic"],
-      "properties": {"epic": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$"}}
+      "required": [
+        "epic"
+      ],
+      "properties": {
+        "epic": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$"
+        }
+      }
     }
   },
   "$defs": {
-    "relativePath": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
-    "credentialFreeKey": {"type": "string", "not": {"pattern": "(?:^|[_-])(?:[Tt][Oo][Kk][Ee][Nn]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss]?|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]|[Aa][Pp][Ii][^A-Za-z0-9]?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss][^A-Za-z0-9]?[Tt][Oo][Kk][Ee][Nn]|[Cc][Ll][Ii][Ee][Nn][Tt][^A-Za-z0-9]?[Ss][Ee][Cc][Rr][Ee][Tt]|[Cc][Aa][Nn][Vv][Aa][Ss][^A-Za-z0-9]?[Tt][Oo][Kk][Ee][Nn]|[Jj][Ii][Rr][Aa][^A-Za-z0-9]?[Tt][Oo][Kk][Ee][Nn])(?:[_-]|$)"}}
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "allOf": [
+        {
+          "not": {
+            "pattern": "^/"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|[/\\\\])\\.\\.([/\\\\]|$)"
+          }
+        }
+      ]
+    },
+    "credentialFreeKey": {
+      "type": "string",
+      "not": {
+        "pattern": "(?:^|[_-])(?:[Tt][Oo][Kk][Ee][Nn]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss]?|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]|[Aa][Pp][Ii][^A-Za-z0-9]?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss][^A-Za-z0-9]?[Tt][Oo][Kk][Ee][Nn]|[Cc][Ll][Ii][Ee][Nn][Tt][^A-Za-z0-9]?[Ss][Ee][Cc][Rr][Ee][Tt]|[Cc][Aa][Nn][Vv][Aa][Ss][^A-Za-z0-9]?[Tt][Oo][Kk][Ee][Nn]|[Jj][Ii][Rr][Aa][^A-Za-z0-9]?[Tt][Oo][Kk][Ee][Nn])(?:[_-]|$)"
+      }
+    }
   }
 }

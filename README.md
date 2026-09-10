@@ -1,97 +1,140 @@
 # Corum
 
-Corum is an agentic academic framework for students. It connects Canvas, Jira, and a course wiki so an LLM can turn scattered course material into clear work you can act on and help you catch every deadline.
+Corum captures Canvas course material and reads Jira epic issues into local
+caches. An agent uses the captured changes and cached issues to identify required
+work, sessions, milestones and updates to existing obligations.
 
-Course requirements rarely live in one place. An assignment can omit its due date while an announcement supplies it. A lecture slide can explain a requirement that the assignment page assumes. A tutorial can introduce a concept that makes the next lecture easier to understand. Corum captures this material into a private local vault, where an agent can connect the evidence, surface obligations, create Jira tasks, and build a useful wiki from your course content.
-
-## What Corum does
-
-- Captures Canvas announcements, assignments, files, pages, modules, and syllabus material into your local course vault.
-- Gives your LLM course-aware skills for finding deadlines, requirements, milestones, and assessed work across those sources.
-- Creates a reviewable Jira plan for tasks, sessions, and milestones when Jira is enabled for a course.
-- Builds explainers, concept pages, references, diagrams, and a course guide from lecture slides and other course material when wiki authoring is enabled.
-- Preserves source paths and page-range provenance so every wiki section can be traced back to course material.
-
-## Get started
-
-Install Corum, create a vault, and connect the services you want to use:
+## Setup
 
 ```console
 curl -fsSL https://raw.githubusercontent.com/algebananazzzzz/Corum/main/install.sh | sh
 corum init
 cd path-to-vault
 corum configure
-corum doctor
 ```
 
-`corum configure` connects Canvas and Jira, and can enable wiki authoring. Your vault contains the agent instructions, custom skills, course sources, wiki pages, and local workflow records.
+`corum configure` authenticates Canvas and selects courses to track. It also lets
+you enable Jira, authenticate Corum's read client and select a Jira site/project.
+Jira MCP entries are installed for Codex and Claude; authenticate those clients
+separately when using their tools.
 
-Open an LLM coding agent in the vault directory after setup. Corum provides the skills and course context; you describe the outcome you want in plain language.
+Use `corum init --defaults PATH` for noninteractive initialization. Canvas defaults
+to NUS; edit `.config/corum/corum.yaml` for another Canvas URL or timezone. Set
+`CORUM_CANVAS_TOKEN` for automation, or save a token with `corum configure canvas`.
 
-## Prompts for your LLM
-
-Use prompts like these from inside your vault:
-
-```text
-Sync {{course}} and show me the Jira and wiki changes for approval.
-```
-
-```text
-Review {{course}} for upcoming deadlines, including dates mentioned in announcements and lecture material.
-```
-
-```text
-Catch up {{course}}. Create Jira tasks for outstanding required work and build wiki pages for the new lecture material.
-```
-
-```text
-Build a beginner-friendly wiki explainer for the Week 4 transport-layer slides in {{course}}.
-```
-
-```text
-Update the {{course}} course guide with the latest grading rules, weekly rhythm, milestones, and late policy.
-```
-
-```text
-Audit the {{course}} wiki for missing source coverage, broken links, and concepts that need clearer explanations.
-```
-
-## How a course sync works
-
-1. Corum captures the latest Canvas material for the selected course.
-2. The agent reads the captured sources and identifies course obligations, deadlines, changes, and wiki knowledge.
-3. The agent presents separate Jira Changes and Wiki Changes sections for your approval.
-4. Approved Jira work becomes tasks, sessions, or milestones. Approved wiki work becomes source-backed course pages.
-5. Corum records the completed work in your local vault so later syncs build on the current course state.
-
-Jira and wiki workflows operate independently. Enable either workflow for the courses where it helps, and use a fresh sync after changing a course’s service configuration.
-
-## The course wiki
-
-The wiki is a learning resource. It turns course material into progressive explainers, focused concept pages, rapid-lookup references, diagrams, and a course guide. Each page links to related knowledge and records the source material that supports it.
-
-The result is a study resource that grows with the course: a place to revisit difficult concepts, find details quickly before an assignment, and understand how each lecture connects to the next.
-
-## Privacy and ownership
-
-Each Corum vault is a private local project. Your course sources, credentials, Jira records, wiki pages, and workflow history live in that vault. See [SECURITY.md](SECURITY.md) for the trust boundaries and security model.
-
-## Updates
-
-Update Corum with:
+## Canvas course sync
 
 ```console
-corum update
+corum sync CS101 --json
+corum sync CS101 CS102 --json
+corum sync --all --json
 ```
 
-Refresh a vault's agent instructions, skills, templates, and assets with the toolkit embedded in the installed Corum version:
+Capture includes announcements, assignments, files, pages, modules and syllabus.
+Text is converted to Markdown with source metadata; files are downloaded into
+`courses/<course>/raw/`. Each course's `course.yaml` selects source types and
+optional folder mappings.
+
+JSON output is an array of per-course changesets:
+
+```json
+[
+  {
+    "course": "CS101",
+    "dry_run": false,
+    "status": "changed",
+    "changes": [
+      {
+        "id": "canvas:announcements:1",
+        "source": "announcements",
+        "item_id": "1",
+        "kind": "announcement",
+        "status": "changed",
+        "summary": "announcement 1 · Assessment briefing",
+        "raw_path": "announcements/assessment-briefing-1.md",
+        "details": {"title": "Assessment briefing"}
+      }
+    ],
+    "failures": [],
+    "sources": [
+      {"source": "announcements", "status": "changed", "changes": ["canvas:announcements:1"], "failures": []}
+    ]
+  }
+]
+```
+
+Consume stdout in the agent workflow. Corum keeps the capture comparison cache
+at `state/canvas.json`, but does not save changesets, run manifests or changelogs.
+A later sync may report no changes for material already captured. Partial failures
+return a nonzero exit code while preserving available results in stdout.
+
+`--dry-run` reports readiness without fetching Canvas data. Current incremental
+capture recognizes new announcements/files, assignment due-date changes, page
+updates, module changes and syllabus changes. It does not comprehensively detect
+content-only edits or deletions for every source type.
+
+## Jira epic sync
+
+Add an existing epic to `courses/CS101/course.yaml`:
+
+```yaml
+jira:
+  epic: STUDY-1
+```
+
+Then run:
 
 ```console
-corum toolkit update
+corum jira sync-epic CS101
 ```
 
-Pass a vault path to refresh a different vault:
+Corum validates the epic, fetches its children and replaces `state/jira.json` with
+the complete issue snapshot. If fetching or validation fails, the previous cache
+is preserved. It does not create epics or write Jira issues.
+
+Agents can propose changes using the installed `sync-course` and `scope-course`
+skills. Approved writes go through the Jira MCP tools configured by Corum.
+`corum configure jira [PATH]` installs only the project-local MCP entries; use the
+combined `corum configure` flow to authenticate Corum's own Jira read client.
+
+The cache currently uses Jira issue fields and provider-specific issue types.
+A provider-independent Todo/Session/Milestone model and Google Calendar integration
+are not implemented.
+
+## Maintenance
+
+- `corum doctor [PATH]` validates workspace and course configuration.
+- `corum toolkit update [PATH]` explicitly refreshes bundled agent instructions
+  and skills. It also removes the three retired bundled wiki authoring skills.
+  Custom skills and existing course pages are preserved.
+- `corum version` prints the installed version.
+- Re-run the installer to install a newer release. There is no self-updater,
+  background maintenance, toolkit version registry or runtime lockfile system.
+
+Run one sync per course at a time. Configuration and cache formats are unstable;
+there are no format versions, migrations or compatibility adapters.
+
+Wiki authoring and the original combined scoping skill are preserved under
+[`archive/skills/`](archive/skills/). They are not embedded or installed. Existing
+wiki pages in user vaults are not deleted. See [SECURITY.md](SECURITY.md) for
+credential and filesystem boundaries.
+
+## Development
 
 ```console
-corum toolkit update path-to-vault
+gofmt -w cmd internal
+go vet ./...
+go test -race ./...
+CGO_ENABLED=0 go build ./cmd/corum
 ```
+
+## Minimal stored state
+
+Workspace settings keep the selected timezone (SGT / `Asia/Singapore` by default)
+and academic term, plus configured Canvas/Jira connection details. The selected
+term determines the bundled calendar installed as `Term_Calendar.md` for week
+lookup. Calendar paths and Jira transition mappings are not configurable.
+
+Course configuration maps the course to Canvas and optionally a Jira epic.
+Canvas keeps only its comparison state; Jira keeps the current issue snapshot.
+See [schemas/README.md](schemas/README.md) for the stored shapes.

@@ -3,27 +3,47 @@
   "title": "Corum Canvas capture state",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "synced_at", "sources"],
+  "required": [
+    "sources"
+  ],
   "properties": {
-    "version": {"const": 2},
-    "synced_at": {"type": ["string", "null"]},
     "sources": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "announcements": {"$ref": "#/$defs/ledger"},
-        "assignments": {"$ref": "#/$defs/ledger"},
-        "files": {"$ref": "#/$defs/ledger"},
-        "pages": {"$ref": "#/$defs/ledger"},
-        "modules": {"$ref": "#/$defs/ledger"},
-        "syllabus": {"type": ["string", "null"]}
+        "announcements": {
+          "$ref": "#/$defs/ledger"
+        },
+        "assignments": {
+          "$ref": "#/$defs/ledger"
+        },
+        "files": {
+          "$ref": "#/$defs/ledger"
+        },
+        "pages": {
+          "$ref": "#/$defs/ledger"
+        },
+        "modules": {
+          "$ref": "#/$defs/ledger"
+        },
+        "syllabus": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     }
   },
   "$defs": {
     "ledger": {
       "type": "object",
-      "additionalProperties": {"type": ["string", "null"]}
+      "additionalProperties": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
     }
   }
 }

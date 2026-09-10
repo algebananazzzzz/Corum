@@ -11,10 +11,7 @@ import (
 	"golang.org/x/oauth2"
 )
 
-const authCacheVersion = 1
-
 type authRecord struct {
-	Version      int           `json:"version"`
 	ClientID     string        `json:"client_id"`
 	ClientSecret string        `json:"client_secret,omitempty"`
 	Issuer       string        `json:"issuer"`
@@ -33,15 +30,6 @@ func AuthCachePathFor(root string) (string, error) {
 		return "", errors.New("Jira authentication cache requires a project root")
 	}
 	return filepath.Join(root, ".config", "corum", "auth.json"), nil
-}
-
-// ClearAuthFor removes the cache for the given vault.
-func ClearAuthFor(root string) (bool, error) {
-	path, err := AuthCachePathFor(root)
-	if err != nil {
-		return false, err
-	}
-	return clearAuth(path)
 }
 
 // AuthSnapshot preserves the raw, private cache around an interactive vault
@@ -167,7 +155,7 @@ func loadAuthCache(path string) (authRecord, error) {
 	if err := json.Unmarshal(bytes, &record); err != nil {
 		return authRecord{}, errors.New("Jira authentication cache is corrupt")
 	}
-	if record.Version != authCacheVersion || record.Token == nil {
+	if record.Token == nil {
 		return authRecord{}, errors.New("Jira authentication cache has an unsupported format")
 	}
 	return record, nil
@@ -181,10 +169,7 @@ func checkPrivateDirectory(info os.FileInfo) error {
 }
 
 func saveAuthCache(path string, record authRecord) (err error) {
-	if record.Version == 0 {
-		record.Version = authCacheVersion
-	}
-	if record.Version != authCacheVersion || record.Token == nil {
+	if record.Token == nil {
 		return errors.New("refusing to save incomplete Jira authentication cache")
 	}
 	dir := filepath.Dir(path)

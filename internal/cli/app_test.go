@@ -6,19 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/algebananazzzzz/Corum/internal/buildinfo"
 	"github.com/algebananazzzzz/Corum/internal/canvas"
 	"github.com/algebananazzzzz/Corum/internal/config"
-	"github.com/algebananazzzzz/Corum/internal/jira"
-	"github.com/algebananazzzzz/Corum/internal/update"
-	"github.com/algebananazzzzz/Corum/internal/vault"
 )
 
 func TestRunVersionPrintsBuildVersion(t *testing.T) {
@@ -28,30 +22,6 @@ func TestRunVersionPrintsBuildVersion(t *testing.T) {
 	}
 	if out.String() != "dev\n" {
 		t.Fatalf("version output = %q", out.String())
-	}
-}
-
-func TestFullscreenCommandOnlyMatchesInteractiveFlows(t *testing.T) {
-	for _, args := range [][]string{
-		{"init"},
-		{"init", "/tmp/vault"},
-		{"configure"},
-		{"configure", "canvas"},
-		{"configure", "jira", "/tmp/vault"},
-	} {
-		if !fullscreenCommand(args) {
-			t.Fatalf("fullscreenCommand(%q) = false", args)
-		}
-	}
-	for _, args := range [][]string{
-		{"init", "--defaults", "/tmp/vault"},
-		{"configure", "--help"},
-		{"doctor"},
-		{"sync", "--all"},
-	} {
-		if fullscreenCommand(args) {
-			t.Fatalf("fullscreenCommand(%q) = true", args)
-		}
 	}
 }
 
@@ -69,58 +39,6 @@ func TestRunRejectsRenamedAuthCommand(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "corum configure") {
 		t.Fatalf("usage does not direct users to configure: %q", errOut.String())
-	}
-}
-
-func TestRunUpdateRejectsDevelopmentBuild(t *testing.T) {
-	var out, errOut bytes.Buffer
-	if code := Run(context.Background(), []string{"update"}, nil, &out, &errOut); code != 1 {
-		t.Fatalf("Run code = %d, stdout = %q, stderr = %q", code, out.String(), errOut.String())
-	}
-	if !strings.Contains(errOut.String(), "development build cannot self-update") {
-		t.Fatalf("stderr = %q", errOut.String())
-	}
-}
-
-func TestRunProcessReexecSyncsBeforeDispatchAndReportsPartialErrors(t *testing.T) {
-	oldVersion := buildinfo.Version
-	oldMaybe := maybeUpdate
-	oldSync := syncVaultToolkit
-	t.Cleanup(func() {
-		buildinfo.Version = oldVersion
-		maybeUpdate = oldMaybe
-		syncVaultToolkit = oldSync
-	})
-	buildinfo.Version = "v2.0.0"
-	t.Setenv(update.ReexecEnv, "1")
-	maybeUpdate = func(context.Context, update.Options) (update.Outcome, error) {
-		t.Fatal("re-executed process attempted another update")
-		return update.Outcome{}, nil
-	}
-	var out, errOut bytes.Buffer
-	syncCalls := 0
-	root := filepath.Join(t.TempDir(), "vault")
-	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
-		t.Fatalf("init code = %d", code)
-	}
-	syncVaultToolkit = func(gotRoot string, _ fs.FS, _ string) error {
-		syncCalls++
-		if gotRoot != root {
-			t.Fatalf("toolkit root = %q, want %q", gotRoot, root)
-		}
-		if out.Len() != 0 {
-			t.Fatal("command dispatched before toolkit sync")
-		}
-		return errors.New("injected toolkit failure")
-	}
-	if code := RunProcess(context.Background(), []string{"corum", "doctor", root}, nil, &out, &errOut); code != 0 {
-		t.Fatalf("RunProcess code = %d, stderr = %q", code, errOut.String())
-	}
-	if syncCalls != 1 || out.String() != "doctor: 0 courses\n" {
-		t.Fatalf("sync calls = %d, stdout = %q", syncCalls, out.String())
-	}
-	if !strings.Contains(errOut.String(), root) || !strings.Contains(errOut.String(), "injected toolkit failure") {
-		t.Fatalf("stderr = %q", errOut.String())
 	}
 }
 
@@ -163,18 +81,6 @@ func TestRunDoctorOptionalPathDefaultsToWorkingDirectory(t *testing.T) {
 	}
 }
 
-func TestRunJiraStatusWithoutPathRequiresCurrentProject(t *testing.T) {
-	t.Skip("legacy Jira status command removed")
-	t.Chdir(t.TempDir())
-	var out, errOut bytes.Buffer
-	if code := Run(context.Background(), []string{"jira", "status"}, nil, &out, &errOut); code != 1 {
-		t.Fatalf("jira status code = %d, stderr = %q", code, errOut.String())
-	}
-	if !strings.Contains(errOut.String(), "vault validation failed") {
-		t.Fatalf("stderr = %q", errOut.String())
-	}
-}
-
 func TestRunConfigureJiraRejectsInvalidVaultBeforeTTY(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := Run(context.Background(), []string{"configure", "jira", "/nonexistent/corum-vault"}, nil, &out, &errOut); code != 1 {
@@ -202,55 +108,6 @@ func TestRunConfigureRequiresTerminalWithoutVault(t *testing.T) {
 	}
 }
 
-func TestRunJiraStatusRejectsInvalidVault(t *testing.T) {
-	t.Skip("legacy Jira status command removed")
-	var out, errOut bytes.Buffer
-	if code := Run(context.Background(), []string{"jira", "status", "/nonexistent/corum-vault"}, nil, &out, &errOut); code != 1 {
-		t.Fatalf("jira status code = %d, stderr = %q", code, errOut.String())
-	}
-	if !strings.Contains(errOut.String(), "vault validation failed") {
-		t.Fatalf("stderr = %q", errOut.String())
-	}
-}
-
-func TestRunUpdateContinuationReportsWithoutSecondCheck(t *testing.T) {
-	oldMaybe := maybeUpdate
-	t.Cleanup(func() { maybeUpdate = oldMaybe })
-	maybeUpdate = func(context.Context, update.Options) (update.Outcome, error) {
-		t.Fatal("continuation invoked an update check")
-		return update.Outcome{}, nil
-	}
-	var out, errOut bytes.Buffer
-	if code := Run(context.Background(), []string{update.ContinuationArg}, nil, &out, &errOut); code != 0 {
-		t.Fatalf("continuation code = %d, stderr = %q", code, errOut.String())
-	}
-	if !strings.Contains(out.String(), "corum updated to") {
-		t.Fatalf("stdout = %q", out.String())
-	}
-}
-
-func TestRunToolkitUpdateRefreshesValidatedVault(t *testing.T) {
-	oldRefresh := refreshVaultToolkit
-	t.Cleanup(func() { refreshVaultToolkit = oldRefresh })
-	root := filepath.Join(t.TempDir(), "vault")
-	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
-		t.Fatalf("init code = %d", code)
-	}
-	refreshVaultToolkit = func(gotRoot string, _ fs.FS, _ string) error {
-		if gotRoot != root {
-			t.Fatalf("toolkit root = %q, want %q", gotRoot, root)
-		}
-		return nil
-	}
-	var out, errOut bytes.Buffer
-	if code := Run(context.Background(), []string{"toolkit", "update", root}, nil, &out, &errOut); code != 0 {
-		t.Fatalf("Run code = %d, stderr = %q", code, errOut.String())
-	}
-	if out.String() != "toolkit updated\n" {
-		t.Fatalf("stdout = %q", out.String())
-	}
-}
-
 func TestRunInteractiveInitExplainsNonTTYFallback(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := Run(context.Background(), []string{"init", "vault"}, &bytes.Buffer{}, &out, &errOut); code != 2 {
@@ -261,15 +118,15 @@ func TestRunInteractiveInitExplainsNonTTYFallback(t *testing.T) {
 	}
 }
 
-func TestRunSyncJSONEmitsPerCourseManifestsPreservingEarlierCourses(t *testing.T) {
+func TestRunSyncJSONPreservesEarlierCourseChanges(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("CORUM_CANVAS_TOKEN", "test-token")
 	root := filepath.Join(t.TempDir(), "vault")
 	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("init code = %d", code)
 	}
-	writeCourse(t, root, "CS3103", "version: 2\ncode: CS3103\ncanvas:\n  id: 1\n  sources:\n    - announcements\n")
-	writeCourse(t, root, "CS3104", "version: 2\ncode: CS3104\ncanvas:\n  id: 2\n  sources:\n    - announcements\n")
+	writeCourse(t, root, "CS3103", "code: CS3103\ncanvas:\n  id: 1\n  sources:\n    - announcements\n")
+	writeCourse(t, root, "CS3104", "code: CS3104\ncanvas:\n  id: 2\n  sources:\n    - announcements\n")
 	t.Chdir(root)
 	oldSync := syncCanvas
 	t.Cleanup(func() { syncCanvas = oldSync })
@@ -294,7 +151,7 @@ func TestRunSyncJSONEmitsPerCourseManifestsPreservingEarlierCourses(t *testing.T
 		t.Fatalf("manifest count = %d: %v", len(manifests), manifests)
 	}
 	first := manifests[0]
-	if first["course"] != "CS3103" || first["run_id"] == "" || first["canvas"] == nil || first["jira"] == nil || first["wiki"] == nil || first["effective_features"] == nil {
+	if first["course"] != "CS3103" || first["status"] != "up_to_date" || first["changes"] == nil || first["failures"] == nil || first["run_id"] != nil || first["wiki"] != nil {
 		t.Fatalf("first manifest = %#v", first)
 	}
 	if second := manifests[1]; second["course"] != "CS3104" {
@@ -312,159 +169,5 @@ func writeCourse(t *testing.T, root, code, contents string) {
 	}
 	if err := os.WriteFile(filepath.Join(root, "courses", code, "course.yaml"), []byte(contents), 0o644); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestRunJiraApplyDryRunEchoesPlanWithoutOAuth(t *testing.T) {
-	t.Skip("legacy Jira apply command removed")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "courses", "CS3103"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	workspace := "version: 2\nworkspace:\n  timezone: Asia/Singapore\n  term: AY2026/27 Semester 1\njira:\n  cloud_id: cloud-1\n  project: STUDY\n  transitions:\n    this_week: \"2\"\ncalendar:\n  timetable: Timetable.md\n  term: Term_Calendar.md\n"
-	course := "version: 2\ncode: CS3103\njira:\n  epic: STUDY-1\n"
-	if err := os.MkdirAll(filepath.Join(root, ".config", "corum"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, ".config", "corum", "corum.yaml"), []byte(workspace), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "courses", "CS3103", "course.yaml"), []byte(course), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(root)
-	input := bytes.NewBufferString(`{"version":2,"course":"CS3103","epic":"STUDY-1","actions":[]}`)
-	var out, errOut bytes.Buffer
-	if code := Run(context.Background(), []string{"jira", "apply", "CS3103", "--dry-run"}, input, &out, &errOut); code != 0 {
-		t.Fatalf("code=%d stderr=%s", code, errOut.String())
-	}
-	var echoed map[string]any
-	if err := json.Unmarshal(out.Bytes(), &echoed); err != nil {
-		t.Fatal(err)
-	}
-	if echoed["version"] != float64(2) || len(echoed["actions"].([]any)) != 0 {
-		t.Fatalf("output=%v", echoed)
-	}
-	if _, err := os.Stat(filepath.Join(root, "courses", "CS3103", "state")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("dry-run state=%v", err)
-	}
-}
-
-func TestRunJiraCreateEpic(t *testing.T) {
-	t.Skip("legacy Jira create-epic command removed")
-	root := filepath.Join(t.TempDir(), "vault")
-	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
-		t.Fatalf("init code = %d", code)
-	}
-	workspace, err := config.LoadWorkspace(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	workspace.Jira = &config.JiraWorkspace{CloudID: "cloud-1", Project: "STUDY"}
-	if err := vault.WriteWorkspace(root, workspace); err != nil {
-		t.Fatal(err)
-	}
-	writeCourse(t, root, "CS3103", "version: 2\ncode: CS3103\ncanvas:\n  id: 1\n  name: Computer Networks\n  sources: [assignments]\n")
-	t.Chdir(root)
-
-	oldEnsure := ensureCourseEpic
-	oldOpen := openJiraSession
-	t.Cleanup(func() {
-		ensureCourseEpic = oldEnsure
-		openJiraSession = oldOpen
-	})
-	openJiraSession = func(context.Context, jira.OpenOptions) (*jira.RovoSession, error) { return nil, nil }
-	var calls []bool
-	ensureCourseEpic = func(_ context.Context, _ *jira.RovoSession, workspace config.Workspace, course config.Course, reconcile bool) (jira.EpicResult, error) {
-		if workspace.Jira.Project != "STUDY" || course.Code != "CS3103" {
-			t.Fatalf("ensure input = %+v, %+v", workspace, course)
-		}
-		calls = append(calls, reconcile)
-		if !reconcile {
-			return jira.EpicResult{}, &jira.MutationError{Message: "outcome unknown", State: jira.WriteUnknown}
-		}
-		if len(calls) == 2 {
-			return jira.EpicResult{}, errors.New("search failed")
-		}
-		return jira.EpicResult{Key: "STUDY-1"}, nil
-	}
-
-	var out, errOut bytes.Buffer
-	if code := Run(context.Background(), []string{"jira", "create-epic", "CS3103"}, nil, &out, &errOut); code != 1 {
-		t.Fatalf("first code = %d, stderr = %q", code, errOut.String())
-	}
-	if _, err := os.Stat(filepath.Join(root, "courses", "CS3103", "state", "jira-epic.json")); err != nil {
-		t.Fatalf("missing provisioning barrier: %v", err)
-	}
-	openJiraSession = func(context.Context, jira.OpenOptions) (*jira.RovoSession, error) { return nil, errors.New("offline") }
-	if code := Run(context.Background(), []string{"jira", "create-epic", "CS3103"}, nil, io.Discard, io.Discard); code != 1 {
-		t.Fatalf("reconciliation session code = %d", code)
-	}
-	openJiraSession = func(context.Context, jira.OpenOptions) (*jira.RovoSession, error) { return nil, nil }
-	out.Reset()
-	errOut.Reset()
-	if code := Run(context.Background(), []string{"jira", "create-epic", "CS3103"}, nil, &out, &errOut); code != 1 {
-		t.Fatalf("reconciliation search code = %d, stderr = %q", code, errOut.String())
-	}
-	out.Reset()
-	errOut.Reset()
-	if code := Run(context.Background(), []string{"jira", "create-epic", "CS3103"}, nil, &out, &errOut); code != 0 {
-		t.Fatalf("reconciliation code = %d, stderr = %q", code, errOut.String())
-	}
-	var result map[string]any
-	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
-	if result["course"] != "CS3103" || result["epic"] != "STUDY-1" || result["created"] != false {
-		t.Fatalf("result = %#v", result)
-	}
-	if !reflect.DeepEqual(calls, []bool{false, true, true}) {
-		t.Fatalf("ensure calls = %#v", calls)
-	}
-	if _, err := os.Stat(filepath.Join(root, "courses", "CS3103", "state", "jira-epic.json")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("provisioning barrier = %v", err)
-	}
-	stored, err := config.LoadCourse(root, "CS3103")
-	if err != nil || stored.Jira == nil || stored.Jira.Epic != "STUDY-1" {
-		t.Fatalf("stored = %+v, err = %v", stored, err)
-	}
-}
-
-func TestRunJiraCreateEpicClearsBarrierBeforeCreateAttempt(t *testing.T) {
-	t.Skip("legacy Jira create-epic command removed")
-	root := filepath.Join(t.TempDir(), "vault")
-	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
-		t.Fatalf("init code = %d", code)
-	}
-	workspace, err := config.LoadWorkspace(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	workspace.Jira = &config.JiraWorkspace{CloudID: "cloud-1", Project: "STUDY"}
-	if err := vault.WriteWorkspace(root, workspace); err != nil {
-		t.Fatal(err)
-	}
-	writeCourse(t, root, "CS3103", "version: 2\ncode: CS3103\ncanvas:\n  id: 1\n  name: Computer Networks\n  sources: [assignments]\n")
-	t.Chdir(root)
-
-	oldOpen, oldEnsure := openJiraSession, ensureCourseEpic
-	t.Cleanup(func() {
-		openJiraSession = oldOpen
-		ensureCourseEpic = oldEnsure
-	})
-	openJiraSession = func(context.Context, jira.OpenOptions) (*jira.RovoSession, error) { return nil, errors.New("offline") }
-	if code := Run(context.Background(), []string{"jira", "create-epic", "CS3103"}, nil, io.Discard, io.Discard); code != 1 {
-		t.Fatalf("first code = %d", code)
-	}
-	openJiraSession = func(context.Context, jira.OpenOptions) (*jira.RovoSession, error) { return nil, nil }
-	ensureCourseEpic = func(_ context.Context, _ *jira.RovoSession, _ config.Workspace, _ config.Course, reconcile bool) (jira.EpicResult, error) {
-		if reconcile {
-			t.Fatal("pre-create failure incorrectly forced reconciliation")
-		}
-		return jira.EpicResult{Key: "STUDY-1", Created: true}, nil
-	}
-	if code := Run(context.Background(), []string{"jira", "create-epic", "CS3103"}, nil, io.Discard, io.Discard); code != 0 {
-		t.Fatalf("retry code = %d", code)
 	}
 }

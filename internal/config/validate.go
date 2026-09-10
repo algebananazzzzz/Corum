@@ -16,15 +16,14 @@ var (
 	issueRE      = regexp.MustCompile(`^[A-Z][A-Z0-9_]*-[1-9][0-9]*$`)
 	identifierRE = regexp.MustCompile(`^\S+$`)
 	courseCodeRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
-	transitionRE = regexp.MustCompile(`^[0-9]+$`)
 )
 
 func ValidateWorkspace(value Workspace) error {
-	if value.Version != 2 {
-		return fmt.Errorf("configuration format is invalid")
+	if strings.TrimSpace(value.Workspace.Term) == "" {
+		return fmt.Errorf("academic term is required")
 	}
-	if value.Workspace.Timezone == "" || value.Workspace.Term == "" {
-		return fmt.Errorf("workspace timezone and term are required")
+	if value.Workspace.Timezone == "" {
+		return fmt.Errorf("workspace timezone is required")
 	}
 	if value.Workspace.Timezone == "Local" {
 		return fmt.Errorf("workspace timezone must be an IANA timezone")
@@ -44,25 +43,12 @@ func ValidateWorkspace(value Workspace) error {
 		if !projectRE.MatchString(value.Jira.Project) {
 			return fmt.Errorf("jira project is invalid")
 		}
-		for name, id := range value.Jira.Transitions {
-			if !identifierRE.MatchString(name) || !transitionRE.MatchString(id) {
-				return fmt.Errorf("jira transition %q is invalid", name)
-			}
-		}
 	}
-	if err := safeRelativePath(value.Calendar.Timetable); err != nil {
-		return fmt.Errorf("calendar timetable: %w", err)
-	}
-	if err := safeRelativePath(value.Calendar.Term); err != nil {
-		return fmt.Errorf("calendar term: %w", err)
-	}
+
 	return nil
 }
 
 func ValidateCourse(value Course) error {
-	if value.Version != 2 {
-		return fmt.Errorf("configuration format is invalid")
-	}
 	if !courseCodeRE.MatchString(value.Code) {
 		return fmt.Errorf("course code is invalid")
 	}
@@ -105,7 +91,7 @@ func rejectNullServiceBlocks(node *yaml.Node) error {
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key, value := node.Content[i], node.Content[i+1]
 		switch key.Value {
-		case "canvas", "jira", "wiki":
+		case "canvas", "jira":
 			if value.Tag == "!!null" {
 				return fmt.Errorf("%s service block must be omitted or an object, not null", key.Value)
 			}

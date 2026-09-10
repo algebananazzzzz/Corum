@@ -13,7 +13,7 @@ import (
 )
 
 // Initialize creates a new, empty vault. Configuration and embedded assets are fully checked before the target directory is created.
-func Initialize(root string, workspace config.Workspace, assets fs.FS, toolkitVersion string) error {
+func Initialize(root string, workspace config.Workspace, assets fs.FS) error {
 	if err := config.ValidateWorkspace(workspace); err != nil {
 		return fmt.Errorf("validate workspace: %w", err)
 	}
@@ -21,7 +21,7 @@ func Initialize(root string, workspace config.Workspace, assets fs.FS, toolkitVe
 	if err != nil {
 		return err
 	}
-	payload, err := collectToolkit(assets, toolkitVersion)
+	payload, err := collectToolkit(assets)
 	if err != nil {
 		return err
 	}
@@ -60,10 +60,7 @@ func Initialize(root string, workspace config.Workspace, assets fs.FS, toolkitVe
 		return err
 	}
 	if calendar != nil {
-		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, workspace.Calendar.Term)), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(root, workspace.Calendar.Term), calendar, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "Term_Calendar.md"), calendar, 0o644); err != nil {
 			return err
 		}
 	}

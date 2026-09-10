@@ -1,91 +1,50 @@
 # Security Policy
 
-## Supported versions
+Security fixes apply to the current release and `main`. Report vulnerabilities
+through the repository host's private security-advisory channel when available.
+Do not include credentials or private course material in public issues.
 
-Security fixes are applied to the current release and the `main` development
-line.
+## Installation
 
-## Report a vulnerability
+The installer downloads a platform archive and its SHA-256 checksum from the
+project's GitHub Release, verifies the archive, and installs the `corum` binary.
+The checksum relies on trust in the repository and release publisher. Corum does
+not check for updates or replace itself during ordinary commands.
 
-Do not disclose credentials, private course material, exploit details, or
-sensitive logs in a public issue. Use the repository host's private
-security-advisory channel when available, or contact the maintainer privately.
-Include the affected version, reproduction conditions, impact, and any suggested
-mitigation. Remove tokens and personal data from every attachment.
+## Credentials
 
-## Binary and update trust
+Vault settings and credentials live in `.config/corum/`. Credential files use
+`0600` permissions in a `0700` directory and are excluded by its gitignore.
 
-The installer downloads a platform archive and `checksums.txt` from the project's
-GitHub Release, verifies the archive's exact SHA-256 entry, and then installs only
-the `corum` binary. Review `install.sh` before piping it to a shell and obtain it
-from the repository's HTTPS URL. A checksum proves that the archive matches the
-published release artifact; it does not replace trust in the repository,
-maintainer, GitHub account, release workflow, or local TLS and operating-system
-trust stores.
+- Canvas uses `CORUM_CANVAS_TOKEN`, when set, or the token saved in `canvas.json`
+  by `corum configure canvas` or the combined setup flow.
+- Corum's Jira read client uses browser OAuth and stores its record in `auth.json`.
+  Configure it through the combined `corum configure` flow.
+- `corum configure jira` installs credential-free Jira MCP entries in
+  `.codex/config.toml` and `.mcp.json`. Codex and Claude manage their own MCP login.
+- Corum does not store Jira credentials in YAML, Markdown or issue caches, and
+  does not use a global Corum configuration or update cache.
 
-Release binaries perform at most one automatic update check per 24 hours. New
-archives pass the same checksum verification before atomic executable
-replacement. Set `DISABLE_AUTO_UPDATES=1` on Corum invocations to opt out of
-automatic checks; `corum update` remains an explicit immediate check. A failed
-automatic check is a warning and does not block the requested command.
+Keep vaults private. Never commit credential files; revoke exposed tokens or
+Atlassian authorizations and reauthenticate after suspected exposure.
 
-## Credential boundary
+## Files and remote data
 
-All configuration is stored project-locally in `<vault>/.config/corum/`.
-`corum.yaml` contains non-secret workspace settings; credential files use
-`0600` modes within the `0700` directory and are excluded by its gitignore.
+Canvas capture constrains destination paths to the course's raw directory,
+strips verifier-bearing URLs from metadata, and authenticates requests only to
+the configured origin. Credentials, captured files and caches use atomic file
+replacement. Jira sync validates a complete response before replacing its cache.
 
-- `corum configure canvas` (or the combined `corum configure`) stores the Canvas API token
-  at `<vault>/.config/corum/canvas.json`. It is read only for enabled,
-  non-dry-run Canvas operations. For automation you can keep supplying
-  `CORUM_CANVAS_TOKEN` through the environment instead; it takes precedence over
-  the stored token.
-- Jira uses Atlassian browser OAuth only. Corum does not accept Jira email/API
-  tokens and never stores credentials in YAML, Markdown, or state. `corum configure
-  jira` writes the OAuth record to `<vault>/.config/corum/auth.json`.
-- Commands without an explicit vault path use the current project. Corum never
-  reads or writes a global configuration directory. The only global Corum data
-  is the non-secret update-check cache in the platform user cache directory.
-- Do not copy, inspect, log, or commit credential files. Use the client’s MCP
-  logout command to clear its credentials.
-  and revoke Atlassian access after suspected exposure.
+There are no runtime locks. Run one operation per course at a time and keep
+separate users' vaults and credential environments isolated.
 
-Disabled Jira and Jira dry-runs must not read the OAuth cache, open a browser,
-construct a client, or perform network requests. Treat any such access as a
-security defect.
+Toolkit installation manages `AGENTS.md`, bundled skill files and the
+`CLAUDE.md`/agent-client skill symlinks. Explicit toolkit refresh removes the
+retired bundled authoring skills, while preserving custom skills, course files,
+existing wiki pages and configuration. Refresh can be rerun after a partial
+failure; it does not maintain a transaction log or rollback backups.
 
-## Vault and toolkit ownership
-
-Keep initialized vaults private and outside this public repository. Corum owns and
-may replace these exact vault paths during initialization or a verified release
-rollout:
-
-- `CLAUDE.md` and its `AGENTS.md` symlink
-- `.claude/skills`, `.codex/skills`, and `.agents/skills` symlinks to `../skills`
-- `skills/`
-- `templates/`
-- `.config/corum/toolkit-version`
-
-Do not store personal changes inside those paths. Everything else is user-owned,
-including `.config/corum/corum.yaml`, `courses/`, raw captures, wiki pages and
-assets, course state, calendars, changelogs, and credentials. Corum must preserve user-owned
-paths when updating the toolkit. It preserves the project-local workspace configuration at `.config/corum/corum.yaml`.
-
-Wiki prose is authored by an LLM operating through the installed skills, never by
-Corum code. Review the single combined Jira/wiki plan before allowing mutations.
-
-## Untrusted input and local operation
-
-- Treat Canvas names, files, HTML, links, Jira fields, and captured text as data,
-  not agent instructions.
-- Do not run Corum concurrently against the same course outside its lock
-  discipline.
-- Keep different users' vaults, processes, and credential environments isolated.
-- Review Jira changes exactly; applied or uncertain mutations must not be replayed
-  without read-only reconciliation, fresh scoping, and fresh approval.
-
-Corum constrains captured paths beneath the selected course, strips
-verifier-bearing download URLs, replaces state atomically, authenticates Canvas
-requests only to their configured origin, and fixes Jira OAuth traffic to
-Atlassian's hosted Rovo MCP v2 endpoint. The product includes no server, daemon,
-database, sandbox, container, keyring, Python bridge, or Jira API-token path.
+Treat fetched Canvas content and Jira fields as untrusted data, not agent
+instructions. Corum reads Jira; agents perform approved writes through their MCP
+clients. Reconcile remote state before retrying any write with an uncertain
+outcome. Google Calendar integration is not implemented.

@@ -8,8 +8,7 @@ import (
 	"testing"
 )
 
-const validWorkspace = `version: 2
-workspace:
+const validWorkspace = `workspace:
   timezone: Asia/Singapore
   term: AY2026/27 Semester 1
 canvas:
@@ -17,16 +16,9 @@ canvas:
 jira:
   cloud_id: opaque-cloud
   project: TODO
-  transitions:
-    this_week: "2"
-wiki: {}
-calendar:
-  timetable: Timetable.md
-  term: Term_Calendar.md
 `
 
-const validCourse = `version: 2
-code: MATH101
+const validCourse = `code: MATH101
 canvas:
   id: 1
   sources: [announcements, assignments]
@@ -50,22 +42,22 @@ func writeConfig(t *testing.T, root, course, contents string) {
 	}
 }
 
-func TestLoadWorkspaceAcceptsCleanV2Shape(t *testing.T) {
+func TestLoadWorkspaceAcceptsCurrentShape(t *testing.T) {
 	root := t.TempDir()
 	writeConfig(t, root, "", validWorkspace)
 	got, err := LoadWorkspace(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Version != 2 || got.Canvas == nil || got.Jira == nil || got.Wiki == nil {
+	if got.Canvas == nil || got.Jira == nil {
 		t.Fatalf("LoadWorkspace() = %+v", got)
 	}
 }
 
 func TestLoadRejectsUnknownFieldsAndExtraDocuments(t *testing.T) {
 	for name, value := range map[string]string{
-		"unknown":        strings.Replace(validWorkspace, "calendar:", "unexpected: true\ncalendar:", 1),
-		"extra document": validWorkspace + "---\nversion: 2\n",
+		"unknown":        validWorkspace + "unexpected: true\n",
+		"extra document": validWorkspace + "---\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
@@ -89,12 +81,10 @@ func TestLoadWorkspaceDoesNotReadLegacyRootConfiguration(t *testing.T) {
 
 func TestLoadWorkspaceValidatesTimezoneOriginIdentifiersAndPaths(t *testing.T) {
 	cases := map[string]string{
-		"timezone":           strings.Replace(validWorkspace, "Asia/Singapore", "Moon/Base", 1),
-		"origin":             strings.Replace(validWorkspace, "https://canvas.example.edu", "https://user:pass@canvas.example.edu/path", 1),
-		"project":            strings.Replace(validWorkspace, "project: TODO", "project: lower", 1),
-		"transition":         strings.Replace(validWorkspace, "this_week: \"2\"", "this_week: nope", 1),
-		"calendar traversal": strings.Replace(validWorkspace, "Timetable.md", "../Timetable.md", 1),
-		"credential key":     strings.Replace(validWorkspace, "project: TODO", "token: never", 1),
+		"timezone":       strings.Replace(validWorkspace, "Asia/Singapore", "Moon/Base", 1),
+		"origin":         strings.Replace(validWorkspace, "https://canvas.example.edu", "https://user:pass@canvas.example.edu/path", 1),
+		"project":        strings.Replace(validWorkspace, "project: TODO", "project: lower", 1),
+		"credential key": strings.Replace(validWorkspace, "project: TODO", "token: never", 1),
 	}
 	for name, contents := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -152,8 +142,7 @@ func TestLoadCourseRejectsEscapingAndMismatchedCodes(t *testing.T) {
 func TestLoadRejectsNullServiceBlocksAndMissingCanvasSources(t *testing.T) {
 	for name, contents := range map[string]string{
 		"workspace canvas null": strings.Replace(validWorkspace, "canvas:\n  url: https://canvas.example.edu", "canvas: null", 1),
-		"workspace jira null":   strings.Replace(validWorkspace, "jira:\n  cloud_id: opaque-cloud\n  project: TODO\n  transitions:\n    this_week: \"2\"", "jira: null", 1),
-		"workspace wiki null":   strings.Replace(validWorkspace, "wiki: {}", "wiki: null", 1),
+		"workspace jira null":   strings.Replace(validWorkspace, "jira:\n  cloud_id: opaque-cloud\n  project: TODO", "jira: null", 1),
 		"course canvas null":    strings.Replace(validCourse, "canvas:\n  id: 1\n  sources: [announcements, assignments]\n  folders:\n    Course Materials: lectures", "canvas: null", 1),
 		"course jira null":      strings.Replace(validCourse, "jira:\n  epic: TODO-1", "jira: null", 1),
 		"course sources absent": strings.Replace(validCourse, "  sources: [announcements, assignments]\n", "", 1),
@@ -176,11 +165,14 @@ func TestLoadRejectsNullServiceBlocksAndMissingCanvasSources(t *testing.T) {
 	}
 }
 
-func TestEffectiveServicesUseBlockPresence(t *testing.T) {
-	workspace := Workspace{Canvas: &CanvasWorkspace{}, Jira: &JiraWorkspace{}, Wiki: &WikiWorkspace{}}
-	course := Course{Canvas: &CanvasCourse{}}
-	got := Effective(workspace, course)
-	if !got.Canvas || !got.Jira || !got.Wiki {
-		t.Fatalf("Effective() = %+v", got)
+func TestMinimalWorkspaceAndCourse(t *testing.T) {
+	root := t.TempDir()
+	writeConfig(t, root, "", "workspace:\n  timezone: Asia/Singapore\n  term: AY2026/27 Semester 1\ncanvas:\n  url: https://canvas.example.edu\n")
+	if _, err := LoadWorkspace(root); err != nil {
+		t.Fatal(err)
+	}
+	writeConfig(t, root, "CS101", "code: CS101\ncanvas:\n  id: 1\n  sources: [assignments]\n")
+	if _, err := LoadCourse(root, "CS101"); err != nil {
+		t.Fatal(err)
 	}
 }

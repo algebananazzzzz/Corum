@@ -10,14 +10,11 @@ import (
 	"github.com/algebananazzzzz/Corum/internal/config"
 )
 
-const credentialVersion = 1
-
 // ErrNoCredential means no Canvas token is stored or supplied.
 var ErrNoCredential = errors.New("no Canvas token found; run corum configure canvas")
 
 type credentialFile struct {
-	Version int    `json:"version"`
-	Token   string `json:"token"`
+	Token string `json:"token"`
 }
 
 // CredentialPathFor returns the project-local credential path.
@@ -57,9 +54,6 @@ func readCredential(path string) (string, error) {
 	if err := json.Unmarshal(data, &value); err != nil {
 		return "", fmt.Errorf("Canvas credential is corrupt: %w", err)
 	}
-	if value.Version != credentialVersion {
-		return "", fmt.Errorf("unsupported Canvas credential version %d", value.Version)
-	}
 	if value.Token == "" {
 		return "", fmt.Errorf("Canvas credential has no token")
 	}
@@ -75,7 +69,7 @@ func SaveCredential(root, token string) error {
 	if err := config.EnsureProjectDir(root); err != nil {
 		return err
 	}
-	data, err := json.Marshal(credentialFile{Version: credentialVersion, Token: token})
+	data, err := json.Marshal(credentialFile{Token: token})
 	if err != nil {
 		return err
 	}

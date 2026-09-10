@@ -14,49 +14,26 @@ import (
 	"time"
 
 	"github.com/algebananazzzzz/Corum/internal/config"
-	"github.com/algebananazzzzz/Corum/internal/lockfile"
-)
-
-var (
-	writeCanvasManifest = func(path string, manifest RunManifest) error { return atomicJSON(path, manifest) }
-	writeCanvasState    = writeState
 )
 
 // Sync captures exactly the selected Canvas sources. It does not construct a
 // client, so disabled and dry-run paths never read credentials or touch HTTP.
 func Sync(ctx context.Context, root string, workspace config.Workspace, course config.Course, client SourceClient, dryRun bool) (StageResult, error) {
 	result := StageResult{Course: course.Code, DryRun: dryRun, Changes: []Change{}, Failures: []Failure{}, Sources: []SourceResult{}}
-	if !config.Effective(workspace, course).Canvas {
+	if !(workspace.Canvas != nil && course.Canvas != nil) {
 		result.Status = "disabled"
-		manifest := buildManifest("", workspace, course, result)
-		result.Manifest = &manifest
-		return result, nil
-	}
-	if course.Canvas == nil || workspace.Canvas == nil {
-		result.Status = "disabled"
-		manifest := buildManifest("", workspace, course, result)
-		result.Manifest = &manifest
 		return result, nil
 	}
 	if dryRun && client == nil {
 		result.Status = "pending"
-		manifest := buildManifest("", workspace, course, result)
-		result.Manifest = &manifest
 		return result, nil
 	}
 	if client == nil {
 		return failResult(result), fmt.Errorf("Canvas client is required")
 	}
-	statePath, manifestPath, err := canvasPaths(root, course, !dryRun)
+	statePath, err := canvasPath(root, course, !dryRun)
 	if err != nil {
 		return failResult(result), err
-	}
-	if !dryRun {
-		courseLock, lockErr := lockfile.TryAcquire(filepath.Join(filepath.Dir(statePath), ".course.lock"))
-		if lockErr != nil {
-			return failResult(result), fmt.Errorf("course %s: %w", course.Code, lockErr)
-		}
-		defer courseLock.Close()
 	}
 	state, err := readState(statePath, course.Canvas.Sources)
 	if err != nil {
@@ -118,8 +95,6 @@ func Sync(ctx context.Context, root string, workspace config.Workspace, course c
 		result.Status = "up_to_date"
 	}
 	sortedResult(&result)
-	manifest := buildManifest(manifestPath, workspace, course, result)
-	result.Manifest = &manifest
 	if dryRun {
 		return result, nil
 	}
@@ -141,17 +116,13 @@ func Sync(ctx context.Context, root string, workspace config.Workspace, course c
 		}
 		state.Sources[source] = existing
 	}
-	if err := writeCanvasManifest(manifestPath, manifest); err != nil {
-		return result, err
-	}
-	if err := writeCanvasState(statePath, state, workspace.Workspace.Timezone); err != nil {
-		return result, err
+	if err := atomicJSON(statePath, state); err != nil {
+		return failResult(result), err
 	}
 	return result, nil
 }
 
-// failResult marks a stage as failed so its run manifest stays schema-valid
-// when Sync aborts before producing its normal outcome.
+// failResult marks a capture as failed when it cannot finish.
 func failResult(result StageResult) StageResult {
 	if result.Status == "" {
 		result.Status = "failed"
@@ -594,54 +565,13 @@ func now(zone string) string {
 	}
 	return value.Format(time.RFC3339)
 }
-func buildManifest(path string, workspace config.Workspace, course config.Course, result StageResult) RunManifest {
-	features := config.Effective(workspace, course)
-	manifest := RunManifest{
-		Version:           2,
-		RunID:             time.Now().UTC().Format("20060102T150405Z0700"),
-		Course:            course.Code,
-		EffectiveFeatures: map[string]bool{"jira": features.Jira, "wiki": features.Wiki},
-		Canvas:            CanvasManifestStage{Status: result.Status, Changes: result.Changes, Failures: result.Failures, Sources: result.Sources},
-		Jira:              map[string]any{"status": featureStatus(features.Jira)},
-		Wiki:              map[string]any{"status": featureStatus(features.Wiki)},
-	}
-	if path != "" {
-		if data, err := os.ReadFile(path); err == nil {
-			var old map[string]json.RawMessage
-			if json.Unmarshal(data, &old) == nil {
-				if value, ok := old["jira"]; ok && canPreserveWorkflowStage(value, features.Jira) {
-					_ = json.Unmarshal(value, &manifest.Jira)
-				}
-				if value, ok := old["wiki"]; ok && canPreserveWorkflowStage(value, features.Wiki) {
-					_ = json.Unmarshal(value, &manifest.Wiki)
-				}
-			}
-		}
-	}
-	return manifest
-}
 
 // canPreserveWorkflowStage keeps a prior workflow result only while it agrees
 // with the configuration snapshot for this capture. A newly enabled workflow
 // must start as pending rather than inheriting its previous disabled stage.
-func canPreserveWorkflowStage(raw json.RawMessage, enabled bool) bool {
-	var stage struct {
-		Status string `json:"status"`
-	}
-	if json.Unmarshal(raw, &stage) != nil || stage.Status == "" {
-		return false
-	}
-	return (enabled && stage.Status != "disabled") || (!enabled && stage.Status == "disabled")
-}
 
 func instantAfter(left, right string) bool {
 	leftTime, leftErr := time.Parse(time.RFC3339, left)
 	rightTime, rightErr := time.Parse(time.RFC3339, right)
 	return leftErr == nil && rightErr == nil && leftTime.After(rightTime)
-}
-func featureStatus(enabled bool) string {
-	if enabled {
-		return "pending"
-	}
-	return "disabled"
 }

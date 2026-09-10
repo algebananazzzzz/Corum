@@ -111,11 +111,15 @@ func callbackBrowser(t *testing.T, calls *int) func(string) error {
 
 func TestOAuthSavingTokenSourcePersistsRefresh(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.json")
-	record := authRecord{Version: 1, ClientID: "client", Token: &oauth2.Token{AccessToken: "old", RefreshToken: "refresh", Expiry: time.Now().Add(-time.Hour)}}
+	record := authRecord{ClientID: "client", Token: &oauth2.Token{AccessToken: "old", RefreshToken: "refresh", Expiry: time.Now().Add(-time.Hour)}}
 	if err := saveAuthCache(path, record); err != nil {
 		t.Fatal(err)
 	}
-	source := newSavingTokenSource(oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "fresh", RefreshToken: "refresh", Expiry: time.Now().Add(time.Hour)}), path, record)
+	transaction := newAuthCacheTransaction(path)
+	if err := transaction.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	source := newTransactionalSavingTokenSource(oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "fresh", RefreshToken: "refresh", Expiry: time.Now().Add(time.Hour)}), record, transaction.Stage)
 	if _, err := source.Token(); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +145,7 @@ func TestOAuthFreshBootstrapReusesBearerForAllTools(t *testing.T) {
 func TestOAuthForceReauthIgnoresValidCachedToken(t *testing.T) {
 	fixture := newFreshOAuthMCPServer(t)
 	path := filepath.Join(t.TempDir(), "corum", "auth.json")
-	record := authRecord{Version: 1, ClientID: "cached-client", Token: &oauth2.Token{AccessToken: "fresh-bearer", Expiry: time.Now().Add(time.Hour)}}
+	record := authRecord{ClientID: "cached-client", Token: &oauth2.Token{AccessToken: "fresh-bearer", Expiry: time.Now().Add(time.Hour)}}
 	if err := saveAuthCache(path, record); err != nil {
 		t.Fatal(err)
 	}
@@ -211,12 +215,12 @@ func unauthorizedResponse() *http.Response {
 
 func TestOAuthCacheTransactionDefersReplacementUntilCommit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.json")
-	previous := authRecord{Version: 1, ClientID: "old-client", Token: &oauth2.Token{AccessToken: "old-access", RefreshToken: "old-refresh"}}
+	previous := authRecord{ClientID: "old-client", Token: &oauth2.Token{AccessToken: "old-access", RefreshToken: "old-refresh"}}
 	if err := saveAuthCache(path, previous); err != nil {
 		t.Fatal(err)
 	}
 	transaction := newAuthCacheTransaction(path)
-	if err := transaction.Stage(authRecord{Version: 1, ClientID: "new-client", Token: &oauth2.Token{AccessToken: "new-access", RefreshToken: "new-refresh"}}); err != nil {
+	if err := transaction.Stage(authRecord{ClientID: "new-client", Token: &oauth2.Token{AccessToken: "new-access", RefreshToken: "new-refresh"}}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := loadAuthCache(path)
@@ -229,23 +233,6 @@ func TestOAuthCacheTransactionDefersReplacementUntilCommit(t *testing.T) {
 	got, err = loadAuthCache(path)
 	if err != nil || got.ClientID != "new-client" {
 		t.Fatalf("cache after commit = %+v, err = %v", got, err)
-	}
-}
-
-func TestOAuthCacheTransactionCancellationPreservesPreviousCache(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "auth.json")
-	previous := authRecord{Version: 1, ClientID: "old-client", Token: &oauth2.Token{AccessToken: "old-access", RefreshToken: "old-refresh"}}
-	if err := saveAuthCache(path, previous); err != nil {
-		t.Fatal(err)
-	}
-	transaction := newAuthCacheTransaction(path)
-	if err := transaction.Stage(authRecord{Version: 1, ClientID: "new-client", Token: &oauth2.Token{AccessToken: "new-access", RefreshToken: "new-refresh"}}); err != nil {
-		t.Fatal(err)
-	}
-	transaction.Rollback()
-	got, err := loadAuthCache(path)
-	if err != nil || got.ClientID != "old-client" || got.Token.AccessToken != "old-access" {
-		t.Fatalf("cache after cancellation = %+v, err = %v", got, err)
 	}
 }
 
@@ -278,7 +265,7 @@ func TestOAuthBootstrapsCanonicalEndpointBeforeAllTools(t *testing.T) {
 	}))
 	defer httpServer.Close()
 	path := filepath.Join(t.TempDir(), "auth.json")
-	if err := saveAuthCache(path, authRecord{Version: 1, ClientID: "client", RedirectURL: "http://127.0.0.1/callback", Token: &oauth2.Token{AccessToken: "cached", Expiry: time.Now().Add(time.Hour)}}); err != nil {
+	if err := saveAuthCache(path, authRecord{ClientID: "client", RedirectURL: "http://127.0.0.1/callback", Token: &oauth2.Token{AccessToken: "cached", Expiry: time.Now().Add(time.Hour)}}); err != nil {
 		t.Fatal(err)
 	}
 	session, err := Open(context.Background(), OpenOptions{Endpoint: httpServer.URL, CachePath: path})

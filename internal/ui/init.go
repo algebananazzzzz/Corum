@@ -15,19 +15,7 @@ import (
 	"github.com/algebananazzzzz/Corum/internal/vault"
 )
 
-type InitDependencies struct {
-	Prompts        Prompter
-	Assets         fs.FS
-	ToolkitVersion string
-	Initialize     func(string, config.Workspace, fs.FS, string) error
-}
-
 var initializeVault = vault.Initialize
-
-var (
-	setupTimezones = []Choice{{Label: "Asia/Singapore"}}
-	setupTerms     = []Choice{{Label: "AY2026/27 Semester 1"}, {Label: "AY2026/27 Semester 2"}}
-)
 
 type initAnswers struct {
 	root      string
@@ -39,10 +27,8 @@ type initAnswers struct {
 
 func (a initAnswers) workspace() config.Workspace {
 	workspace := config.Workspace{
-		Version:   2,
 		Workspace: config.WorkspaceDetails{Timezone: a.timezone, Term: a.term},
 		Canvas:    &config.CanvasWorkspace{URL: a.canvasURL},
-		Calendar:  config.Calendar{Timetable: "Timetable.md", Term: "Term_Calendar.md"},
 	}
 	return workspace
 }
@@ -77,7 +63,7 @@ func nonblank(value string) error {
 	return nil
 }
 
-func RunInitFullscreen(root string, assets fs.FS, toolkitVersion string, in io.Reader, out io.Writer) error {
+func RunInitFullscreen(root string, assets fs.FS, in io.Reader, out io.Writer) error {
 	screen, answers := newInitScreen(root)
 	if err := RunScreen("Corum Setup", screen.form, in, out); err != nil {
 		return err
@@ -89,76 +75,7 @@ func RunInitFullscreen(root string, assets fs.FS, toolkitVersion string, in io.R
 	if err := config.ValidateWorkspace(workspace); err != nil {
 		return err
 	}
-	return initializeVault(answers.root, workspace, assets, toolkitVersion)
-}
-
-func DefaultInitDependencies(in io.Reader, out io.Writer, assets fs.FS, toolkitVersion string) InitDependencies {
-	return InitDependencies{
-		Prompts:        NewHuhPrompter(in, out),
-		Assets:         assets,
-		ToolkitVersion: toolkitVersion,
-		Initialize:     initializeVault,
-	}
-}
-
-// RunInit collects all setup fields, validates them, and writes only after the
-// final confirmation.
-func RunInit(ctx context.Context, proposedRoot string, deps InitDependencies) (err error) {
-	if deps.Prompts == nil || deps.Initialize == nil {
-		return fmt.Errorf("interactive initialization is unavailable")
-	}
-	root, err := deps.Prompts.Input("Vault path", proposedRoot)
-	if err != nil {
-		return promptError(err)
-	}
-	timezoneIndex, err := deps.Prompts.Select("Workspace timezone", setupTimezones)
-	if err != nil {
-		return promptError(err)
-	}
-	timezone, err := selectedSetupChoice("workspace timezone", setupTimezones, timezoneIndex)
-	if err != nil {
-		return err
-	}
-	termIndex, err := deps.Prompts.Select("Academic term", setupTerms)
-	if err != nil {
-		return promptError(err)
-	}
-	term, err := selectedSetupChoice("academic term", setupTerms, termIndex)
-	if err != nil {
-		return err
-	}
-	canvasURL, err := deps.Prompts.Input("Canvas URL", "https://canvas.nus.edu.sg")
-	if err != nil {
-		return promptError(err)
-	}
-	workspace := config.Workspace{
-		Version:   2,
-		Workspace: config.WorkspaceDetails{Timezone: timezone, Term: term},
-		Canvas:    &config.CanvasWorkspace{URL: canvasURL},
-		Calendar:  config.Calendar{Timetable: "Timetable.md", Term: "Term_Calendar.md"},
-	}
-	if err := config.ValidateWorkspace(workspace); err != nil {
-		return err
-	}
-	confirmed, err := deps.Prompts.Confirm(initSummary(workspace)+"\n\nCreate this vault?", true)
-	if err != nil {
-		return promptError(err)
-	}
-	if !confirmed {
-		return ErrCancelled
-	}
-	return deps.Initialize(root, workspace, deps.Assets, deps.ToolkitVersion)
-}
-
-func selectedSetupChoice(label string, choices []Choice, index int) (string, error) {
-	if index < 0 || index >= len(choices) {
-		return "", fmt.Errorf("invalid %s selection", label)
-	}
-	return choices[index].Label, nil
-}
-
-func initSummary(workspace config.Workspace) string {
-	return "Configuration ready: Canvas configured; Jira and wiki disabled. Run corum configure to connect services."
+	return initializeVault(answers.root, workspace, assets)
 }
 
 // JiraAuthDependencies drives the interactive Jira authentication flow.

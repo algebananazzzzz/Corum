@@ -2,7 +2,6 @@ package canvas
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -12,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/algebananazzzzz/Corum/internal/config"
-	"github.com/algebananazzzzz/Corum/internal/lockfile"
 )
 
 func initializedCanvasVault(t *testing.T) (string, config.Workspace, config.Course) {
@@ -21,8 +19,8 @@ func initializedCanvasVault(t *testing.T) (string, config.Workspace, config.Cour
 	if err := os.MkdirAll(filepath.Join(root, "courses", "CS3103", "raw"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	workspace := config.Workspace{Version: 2, Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "T"}, Canvas: &config.CanvasWorkspace{URL: "https://canvas.example.edu"}, Calendar: config.Calendar{Timetable: "Timetable.md", Term: "Term.md"}}
-	course := config.Course{Version: 2, Code: "CS3103", Canvas: &config.CanvasCourse{ID: 1, Sources: []string{"announcements"}, Folders: map[string]string{}}}
+	workspace := config.Workspace{Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "T"}, Canvas: &config.CanvasWorkspace{URL: "https://canvas.example.edu"}}
+	course := config.Course{Code: "CS3103", Canvas: &config.CanvasCourse{ID: 1, Sources: []string{"announcements"}, Folders: map[string]string{}}}
 	return root, workspace, course
 }
 
@@ -44,7 +42,7 @@ func TestDryRunDoesNotWriteFiles(t *testing.T) {
 
 func TestAtomicJSONPreservesStateOnEncodingFailure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
-	before := []byte("{\"version\":2}\n")
+	before := []byte("{\"sources\":{}}\n")
 	if err := os.WriteFile(path, before, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -268,112 +266,24 @@ func TestSyncRestoresNormalizedCaptureMetadata(t *testing.T) {
 	}
 }
 
-func TestSyncPersistsManifestBeforeAdvancingCanvasState(t *testing.T) {
+func TestSyncKeepsOnlyCaptureCache(t *testing.T) {
 	root, workspace, course := initializedCanvasVault(t)
-	client := &syncClient{lists: map[string][]map[string]any{"/api/v1/courses/1/discussion_topics": {}}}
-	originalManifest := writeCanvasManifest
-	originalState := writeCanvasState
-	t.Cleanup(func() {
-		writeCanvasManifest = originalManifest
-		writeCanvasState = originalState
-	})
-	order := []string{}
-	writeCanvasManifest = func(path string, manifest RunManifest) error {
-		order = append(order, "manifest")
-		return originalManifest(path, manifest)
-	}
-	writeCanvasState = func(path string, state CanvasState, zone string) error {
-		order = append(order, "state")
-		return originalState(path, state, zone)
-	}
-	if _, err := Sync(context.Background(), root, workspace, course, client, false); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(order, ",") != "manifest,state" {
-		t.Fatalf("persistence order = %v", order)
-	}
-}
-
-func TestSyncManifestFailureLeavesCanvasStateUnadvanced(t *testing.T) {
-	root, workspace, course := initializedCanvasVault(t)
-	client := &syncClient{lists: map[string][]map[string]any{"/api/v1/courses/1/discussion_topics": {}}}
-	originalManifest := writeCanvasManifest
-	originalState := writeCanvasState
-	t.Cleanup(func() {
-		writeCanvasManifest = originalManifest
-		writeCanvasState = originalState
-	})
-	writeCanvasManifest = func(string, RunManifest) error { return errors.New("injected manifest failure") }
-	stateCalled := false
-	writeCanvasState = func(string, CanvasState, string) error { stateCalled = true; return nil }
-	if _, err := Sync(context.Background(), root, workspace, course, client, false); err == nil || !strings.Contains(err.Error(), "injected manifest failure") {
-		t.Fatalf("Sync() error = %v", err)
-	}
-	if stateCalled {
-		t.Fatal("Canvas state advanced after manifest failure")
-	}
-}
-
-func TestSyncReturnsFullRunManifest(t *testing.T) {
-	root, workspace, course := initializedCanvasVault(t)
-	client := &syncClient{lists: map[string][]map[string]any{"/api/v1/courses/1/discussion_topics": {}}}
+	client := &syncClient{lists: map[string][]map[string]any{
+		"/api/v1/courses/1/discussion_topics": {{"id": float64(1), "title": "News", "message": "<p>Hello</p>"}},
+	}}
 	result, err := Sync(context.Background(), root, workspace, course, client, false)
+	if err != nil || len(result.Changes) != 1 {
+		t.Fatalf("capture = %+v, %v", result, err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "courses", course.Code, "state"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := json.Marshal(result.Manifest)
-	if err != nil {
-		t.Fatal(err)
+	if len(entries) != 1 || entries[0].Name() != "canvas.json" {
+		t.Fatalf("unexpected bookkeeping files: %v", entries)
 	}
-	var manifest map[string]any
-	if err := json.Unmarshal(encoded, &manifest); err != nil {
-		t.Fatal(err)
-	}
-	if manifest["run_id"] == "" || manifest["course"] != "CS3103" || manifest["jira"] == nil || manifest["wiki"] == nil || manifest["effective_features"] == nil {
-		t.Fatalf("manifest = %#v", manifest)
-	}
-}
-
-func TestSyncReplacesDisabledWorkflowStagesAfterConfigurationEnablesThem(t *testing.T) {
-	root, workspace, course := initializedCanvasVault(t)
-	manifestPath := filepath.Join(root, "courses", course.Code, "state", "latest-run.json")
-	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	previous := "{\"version\":2,\"run_id\":\"old\",\"course\":\"CS3103\",\"effective_features\":{\"jira\":false,\"wiki\":false},\"canvas\":{\"status\":\"up_to_date\",\"changes\":[],\"failures\":[],\"sources\":[]},\"jira\":{\"status\":\"disabled\"},\"wiki\":{\"status\":\"disabled\"}}\n"
-	if err := os.WriteFile(manifestPath, []byte(previous), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	workspace.Jira = &config.JiraWorkspace{CloudID: "cloud-1", Project: "STUDY"}
-	workspace.Wiki = &config.WikiWorkspace{}
-	course.Jira = &config.JiraCourse{Epic: "STUDY-1"}
-
-	client := &syncClient{lists: map[string][]map[string]any{"/api/v1/courses/1/discussion_topics": {}}}
-	result, err := Sync(context.Background(), root, workspace, course, client, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := result.Manifest.Jira.(map[string]any)["status"]; got != "pending" {
-		t.Fatalf("Jira status = %q, want pending", got)
-	}
-	if got := result.Manifest.Wiki.(map[string]any)["status"]; got != "pending" {
-		t.Fatalf("Wiki status = %q, want pending", got)
-	}
-}
-
-func TestSyncUsesSharedCourseLockBeforeReadingOrWritingState(t *testing.T) {
-	root, workspace, course := initializedCanvasVault(t)
-	stateDir := filepath.Join(root, "courses", "CS3103", "state")
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	lock, err := lockfile.TryAcquire(filepath.Join(stateDir, ".course.lock"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lock.Close()
-	client := &syncClient{lists: map[string][]map[string]any{"/api/v1/courses/1/discussion_topics": {}}}
-	if _, err := Sync(context.Background(), root, workspace, course, client, false); !errors.Is(err, lockfile.ErrLocked) {
-		t.Fatalf("Sync() error = %v, want ErrLocked", err)
+	result, err = Sync(context.Background(), root, workspace, course, client, false)
+	if err != nil || result.Status != "up_to_date" || len(result.Changes) != 0 {
+		t.Fatalf("repeat capture = %+v, %v", result, err)
 	}
 }

@@ -13,12 +13,9 @@ import (
 
 // Workspace is the project-wide .config/corum/corum.yaml document.
 type Workspace struct {
-	Version   int              `yaml:"version"`
 	Workspace WorkspaceDetails `yaml:"workspace"`
 	Canvas    *CanvasWorkspace `yaml:"canvas,omitempty"`
 	Jira      *JiraWorkspace   `yaml:"jira,omitempty"`
-	Wiki      *WikiWorkspace   `yaml:"wiki,omitempty"`
-	Calendar  Calendar         `yaml:"calendar"`
 }
 
 type WorkspaceDetails struct {
@@ -31,16 +28,8 @@ type CanvasWorkspace struct {
 }
 
 type JiraWorkspace struct {
-	CloudID     string            `yaml:"cloud_id"`
-	Project     string            `yaml:"project"`
-	Transitions map[string]string `yaml:"transitions"`
-}
-
-type WikiWorkspace struct{}
-
-type Calendar struct {
-	Timetable string `yaml:"timetable"`
-	Term      string `yaml:"term"`
+	CloudID string `yaml:"cloud_id"`
+	Project string `yaml:"project"`
 }
 
 const projectGitignore = "/auth.json\n/canvas.json\n/.auth-*.json\n"
@@ -100,18 +89,8 @@ func decodeFile(path string, target any) error {
 		return err
 	}
 	var node yaml.Node
-	if err := yaml.Unmarshal(data, &node); err != nil {
-		return err
-	}
-	if err := rejectNullServiceBlocks(&node); err != nil {
-		return err
-	}
-	if err := rejectCredentialKeys(&node); err != nil {
-		return err
-	}
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(target); err != nil {
+	if err := decoder.Decode(&node); err != nil {
 		return err
 	}
 	var extra any
@@ -121,5 +100,13 @@ func decodeFile(path string, target any) error {
 		}
 		return err
 	}
-	return nil
+	if err := rejectNullServiceBlocks(&node); err != nil {
+		return err
+	}
+	if err := rejectCredentialKeys(&node); err != nil {
+		return err
+	}
+	decoder = yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	return decoder.Decode(target)
 }

@@ -2,6 +2,7 @@ package jira
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,8 +31,12 @@ func TestSyncEpicWritesDeterministicState(t *testing.T) {
 	if result.IssueCount != 2 {
 		t.Fatalf("IssueCount = %d", result.IssueCount)
 	}
-	state, err := readJiraState(filepath.Join(courseDir, "jira.json"))
+	data, err := os.ReadFile(filepath.Join(courseDir, "jira.json"))
 	if err != nil {
+		t.Fatal(err)
+	}
+	var state JiraState
+	if err := json.Unmarshal(data, &state); err != nil {
 		t.Fatal(err)
 	}
 	if len(state.Issues) != 2 || state.Issues[0].Key != "STUDY-2" || state.Issues[1].Key != "STUDY-10" {
@@ -46,7 +51,7 @@ func TestSyncEpicFailurePreservesExistingState(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(stateDir, "jira.json")
-	original := []byte(`{"version":2,"reconciled_at":null,"issues":[]}`)
+	original := []byte(`{"reconciled_at":null,"issues":[]}`)
 	if err := os.WriteFile(path, original, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -93,6 +98,31 @@ func (f *fakeSyncClient) EpicChildren(context.Context, string) ([]map[string]any
 	}
 	return f.children, nil
 }
-func (*fakeSyncClient) CreateIssue(context.Context, map[string]any) (string, error) { panic("unused") }
-func (*fakeSyncClient) UpdateFields(context.Context, string, map[string]any) error  { panic("unused") }
-func (*fakeSyncClient) TransitionIssue(context.Context, string, string) error       { panic("unused") }
+
+func TestJiraCacheOmitsAbsentFieldsAndPreservesPopulatedFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jira.json")
+	due, description, updated := "2026-09-30", "Submit report", "2026-09-10T00:00:00Z"
+	state := JiraState{Issues: []IssueState{
+		{Key: "STUDY-1", Type: "Task", Summary: "Minimal", Status: "To Do"},
+		{Key: "STUDY-2", Type: "Task", Summary: "Full", Status: "To Do", Due: &due, Description: &description, UpdatedAt: &updated, Labels: []string{"assessment"}},
+	}}
+	if err := writeJiraState(path, state); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Issues []map[string]any `json:"issues"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Issues[0]) != 4 {
+		t.Fatalf("empty fields persisted: %s", data)
+	}
+	if got.Issues[1]["due"] != due || got.Issues[1]["description"] != description || got.Issues[1]["updated_at"] != updated || len(got.Issues[1]["labels"].([]any)) != 1 {
+		t.Fatalf("populated fields lost: %s", data)
+	}
+}

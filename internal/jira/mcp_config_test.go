@@ -59,3 +59,46 @@ func TestProjectMCPConfigPreservesUnrelatedEntriesAndIsIdempotent(t *testing.T) 
 		t.Fatal("config contains a token field")
 	}
 }
+
+func TestRemoveProjectMCPPreservesUnrelatedSettings(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexConfigPath(root), []byte("model = \"gpt\"\n[mcp_servers.other]\nurl = \"https://example.test\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(claudeConfigPath(root), []byte(`{"enabled":true,"mcpServers":{"other":{"url":"https://example.test"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfigureProjectMCP(root); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(codexConfigPath(root), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("\n[mcp_servers.atlassian-jira.http_headers]\nX-Custom = \"value\"\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := RemoveProjectMCP(root); err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range []string{codexConfigPath(root), claudeConfigPath(root)} {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), "atlassian-jira") || !strings.Contains(string(data), "https://example.test") {
+				t.Fatalf("incorrect remaining config: %s", data)
+			}
+		}
+	}
+	if err := RemoveProjectMCP(t.TempDir()); err != nil {
+		t.Fatalf("unconfigured vault: %v", err)
+	}
+}

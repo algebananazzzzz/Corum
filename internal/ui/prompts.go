@@ -27,6 +27,7 @@ type Prompter interface {
 	Confirm(label string, defaultValue bool) (bool, error)
 	Select(label string, choices []Choice) (int, error)
 	MultiSelect(label string, choices []Choice) ([]int, error)
+	ConfigureServices(current ServiceSettings) (ServiceSettings, error)
 }
 
 // HuhPrompter implements Prompter with Huh.
@@ -116,4 +117,26 @@ func NonTTYGuidance(command string) string {
 		return "interactive init requires a terminal; use corum init --defaults PATH"
 	}
 	return "interactive Jira login requires a terminal"
+}
+
+// ServiceSettings holds the optional features selected on the configuration page.
+type ServiceSettings struct {
+	Integration string
+}
+
+func newServicesForm(settings *ServiceSettings) *huh.Form {
+	return huh.NewForm(huh.NewGroup(
+		huh.NewSelect[string]().Title("Jira Integration").Options(
+			huh.NewOption("None", "none"),
+			huh.NewOption("Jira", "jira"),
+		).Value(&settings.Integration),
+	))
+}
+
+func (p HuhPrompter) ConfigureServices(current ServiceSettings) (ServiceSettings, error) {
+	form := newServicesForm(&current).WithAccessible(p.Accessible)
+	if err := RunScreen("Corum Configuration", form, p.In, p.Out); err != nil {
+		return ServiceSettings{}, promptError(err)
+	}
+	return current, nil
 }

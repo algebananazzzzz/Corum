@@ -220,7 +220,6 @@ func newAllToolsOAuthHandler(record authRecord, initial oauth2.TokenSource, clie
 
 func recordFromOAuthConfig(record authRecord, oauthConfig *oauth2.Config, token *oauth2.Token) authRecord {
 	updated := record
-	updated.Version = authCacheVersion
 	updated.ClientID = oauthConfig.ClientID
 	updated.ClientSecret = oauthConfig.ClientSecret
 	updated.AuthURL = oauthConfig.Endpoint.AuthURL
@@ -241,10 +240,6 @@ type savingTokenSource struct {
 	source oauth2.TokenSource
 	record authRecord
 	save   func(authRecord) error
-}
-
-func newSavingTokenSource(source oauth2.TokenSource, path string, record authRecord) oauth2.TokenSource {
-	return newTransactionalSavingTokenSource(source, record, func(updated authRecord) error { return saveAuthCache(path, updated) })
 }
 
 func newTransactionalSavingTokenSource(source oauth2.TokenSource, record authRecord, save func(authRecord) error) oauth2.TokenSource {
@@ -292,8 +287,6 @@ func (t *authCacheTransaction) Commit() error {
 	t.committed = true
 	return nil
 }
-
-func (t *authCacheTransaction) Rollback() { t.pending = nil }
 
 func (t *authCacheTransaction) Staged() (authRecord, bool) {
 	if t.pending == nil {

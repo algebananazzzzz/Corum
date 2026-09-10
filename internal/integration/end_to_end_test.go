@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,7 +17,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync/atomic"
 	"testing"
 )
 
@@ -78,71 +76,6 @@ func TestInstallerUsesVerifiedLocalReleaseArtifacts(t *testing.T) {
 	})
 }
 
-func TestReleaseBinarySelfUpdateAgainstLocalArtifacts(t *testing.T) {
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
-		t.Skip("self-update supports Linux and macOS")
-	}
-	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
-		t.Skip("self-update supports amd64 and arm64")
-	}
-
-	t.Run("atomically replaces, reexecutes once, and then skips the daily check", func(t *testing.T) {
-		installed := buildBinaryVersion(t, "v2.0.0")
-		next := buildBinaryVersion(t, "v2.0.1")
-		server, hits := updateServer(t, archiveBinary(t, next), false)
-		environment := updateEnvironment(t, server.URL, false)
-
-		result := runBinary(installed, environment, "", "", "version")
-		mustSucceed(t, result)
-		if result.stdout != "v2.0.1\n" || result.stderr != "" {
-			t.Fatalf("updated invocation stdout = %q, stderr = %q", result.stdout, result.stderr)
-		}
-		if got := hits.Load(); got != 3 {
-			t.Fatalf("update request count = %d, want metadata, archive, and checksums", got)
-		}
-
-		server.Close()
-		result = runBinary(installed, environment, "", "", "version")
-		mustSucceed(t, result)
-		if result.stdout != "v2.0.1\n" || result.stderr != "" {
-			t.Fatalf("daily-skip stdout = %q, stderr = %q", result.stdout, result.stderr)
-		}
-	})
-
-	t.Run("opt-out prevents the release check", func(t *testing.T) {
-		installed := buildBinaryVersion(t, "v2.0.0")
-		next := buildBinaryVersion(t, "v2.0.1")
-		server, hits := updateServer(t, archiveBinary(t, next), false)
-		environment := updateEnvironment(t, server.URL, true)
-
-		result := runBinary(installed, environment, "", "", "version")
-		mustSucceed(t, result)
-		if result.stdout != "v2.0.0\n" || result.stderr != "" || hits.Load() != 0 {
-			t.Fatalf("opt-out stdout = %q, stderr = %q, requests = %d", result.stdout, result.stderr, hits.Load())
-		}
-	})
-
-	t.Run("checksum failure preserves the installed binary", func(t *testing.T) {
-		installed := buildBinaryVersion(t, "v2.0.0")
-		next := buildBinaryVersion(t, "v2.0.1")
-		server, _ := updateServer(t, archiveBinary(t, next), true)
-		environment := updateEnvironment(t, server.URL, false)
-
-		result := runBinary(installed, environment, "", "", "version")
-		mustSucceed(t, result)
-		if result.stdout != "v2.0.0\n" || !strings.Contains(result.stderr, "checksum mismatch") {
-			t.Fatalf("checksum rejection stdout = %q, stderr = %q", result.stdout, result.stderr)
-		}
-
-		environment = updateEnvironment(t, server.URL, true)
-		result = runBinary(installed, environment, "", "", "version")
-		mustSucceed(t, result)
-		if result.stdout != "v2.0.0\n" {
-			t.Fatalf("preserved binary version = %q", result.stdout)
-		}
-	})
-}
-
 func TestInstalledBinary(t *testing.T) {
 	binary := buildBinary(t)
 
@@ -188,6 +121,11 @@ func TestInstalledBinary(t *testing.T) {
 				t.Fatalf("discover sync-course via %s: %v", directory, err)
 			}
 		}
+		for _, name := range []string{"authoring-wiki", "drawio-diagrams", "linting-wiki"} {
+			if _, err := os.Stat(filepath.Join(vault, "skills", name)); !os.IsNotExist(err) {
+				t.Fatalf("archived skill installed: %s, %v", name, err)
+			}
+		}
 		syncSkill, err := os.ReadFile(filepath.Join(vault, "skills", "sync-course", "SKILL.md"))
 		if err != nil || !strings.Contains(string(syncSkill), "corum jira sync-epic {{COURSE}}") {
 			t.Fatalf("installed sync-course skill does not reconcile Jira epics: %v", err)
@@ -206,6 +144,10 @@ func TestInstalledBinary(t *testing.T) {
 		vault := filepath.Join(environment.root, "vault")
 		mustSucceed(t, runBinary(binary, environment, "", "", "init", "--defaults", vault))
 		mustWrite(t, filepath.Join(vault, "AGENTS.md"), "stale toolkit\n")
+		mustSucceed(t, runBinary(binary, environment, "", "", "doctor", vault))
+		if got := mustRead(t, filepath.Join(vault, "AGENTS.md")); got != "stale toolkit\n" {
+			t.Fatal("doctor unexpectedly refreshed toolkit")
+		}
 
 		result := runBinary(binary, environment, "", "", "toolkit", "update", vault)
 		mustSucceed(t, result)
@@ -213,7 +155,7 @@ func TestInstalledBinary(t *testing.T) {
 			t.Fatalf("toolkit update stdout = %q", result.stdout)
 		}
 		agents := mustRead(t, filepath.Join(vault, "AGENTS.md"))
-		if !strings.Contains(agents, "# Corum Wiki Guide") || strings.Contains(agents, "stale toolkit") {
+		if !strings.Contains(agents, "# Corum Course Sync") || strings.Contains(agents, "stale toolkit") {
 			t.Fatalf("AGENTS.md was not refreshed: %q", agents)
 		}
 		if target, err := os.Readlink(filepath.Join(vault, "CLAUDE.md")); err != nil || target != "AGENTS.md" {
@@ -221,88 +163,6 @@ func TestInstalledBinary(t *testing.T) {
 		}
 	})
 
-	t.Run("Jira-disabled validation does not require OAuth", func(t *testing.T) {
-		t.Skip("legacy corum jira apply command removed; Jira MCP owns mutations")
-		environment := isolatedEnvironment(t)
-		vault := filepath.Join(environment.root, "vault")
-		mustSucceed(t, runBinary(binary, environment, "", "", "init", "--defaults", vault))
-		mustWrite(t, filepath.Join(vault, "courses", "COURSE", "course.yaml"), "version: 2\ncode: COURSE\n")
-		plan := `{"version":2,"course":"COURSE","epic":"STUDY-1","actions":[]}`
-
-		result := runBinary(binary, environment, vault, plan, "jira", "apply", "COURSE", "--dry-run")
-		mustExit(t, result, 1)
-		if !strings.Contains(result.stderr, "Jira is disabled for COURSE") {
-			t.Fatalf("Jira-disabled stderr = %q", result.stderr)
-		}
-		assertNoGlobalCorumConfig(t, environment.config)
-	})
-
-	t.Run("Jira dry-run validates without OAuth or state writes", func(t *testing.T) {
-		t.Skip("legacy corum jira apply command removed; Jira MCP owns mutations")
-		environment := isolatedEnvironment(t)
-		vault := filepath.Join(environment.root, "vault")
-		mustWrite(t, filepath.Join(vault, ".config", "corum", "corum.yaml"), "version: 2\nworkspace:\n  timezone: Asia/Singapore\n  term: AY2026/27 Semester 1\njira:\n  cloud_id: cloud-1\n  project: STUDY\ncalendar:\n  timetable: Timetable.md\n  term: Term_Calendar.md\n")
-		mustWrite(t, filepath.Join(vault, "courses", "COURSE", "course.yaml"), "version: 2\ncode: COURSE\njira:\n  epic: STUDY-1\n")
-		plan := `{"version":2,"course":"COURSE","epic":"STUDY-1","actions":[]}`
-
-		result := runBinary(binary, environment, vault, plan, "jira", "apply", "COURSE", "--dry-run")
-		mustSucceed(t, result)
-		var echoed map[string]any
-		if err := json.Unmarshal([]byte(result.stdout), &echoed); err != nil {
-			t.Fatalf("decode dry-run output: %v; output = %q", err, result.stdout)
-		}
-		if echoed["version"] != float64(2) {
-			t.Fatalf("dry-run plan = %#v", echoed)
-		}
-		if _, err := os.Stat(filepath.Join(vault, "courses", "COURSE", "state")); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("dry-run state path exists: %v", err)
-		}
-		assertNoGlobalCorumConfig(t, environment.config)
-	})
-
-	t.Run("release startup refreshes only the active project toolkit", func(t *testing.T) {
-		environment := isolatedEnvironment(t)
-		vaults := []string{filepath.Join(environment.root, "vault-b"), filepath.Join(environment.root, "vault-a")}
-		for _, vault := range vaults {
-			mustSucceed(t, runBinary(binary, environment, "", "", "init", "--defaults", vault))
-			mustWrite(t, filepath.Join(vault, "AGENTS.md"), "stale owned toolkit\n")
-			mustWrite(t, filepath.Join(vault, "skills", "obsolete", "SKILL.md"), "stale owned skill\n")
-			mustWrite(t, filepath.Join(vault, ".config", "corum", "toolkit-version"), "v1.9.0\n")
-			mustWrite(t, filepath.Join(vault, "user-sentinel.md"), "preserve root file\n")
-			mustWrite(t, filepath.Join(vault, "courses", "user-sentinel.md"), "preserve course file\n")
-		}
-		mustSucceed(t, runBinary(binary, environment, "", "", "version"))
-		for _, vault := range vaults {
-			if got := mustRead(t, filepath.Join(vault, ".config", "corum", "toolkit-version")); got != "v1.9.0\n" {
-				t.Fatalf("version command changed %s toolkit to %q", vault, got)
-			}
-		}
-
-		mustSucceed(t, runBinary(binary, environment, "", "", "doctor", vaults[0]))
-		if got := mustRead(t, filepath.Join(vaults[1], ".config", "corum", "toolkit-version")); got != "v1.9.0\n" {
-			t.Fatalf("inactive project toolkit changed to %q", got)
-		}
-		mustSucceed(t, runBinary(binary, environment, "", "", "doctor", vaults[1]))
-		for _, vault := range vaults {
-			agents := mustRead(t, filepath.Join(vault, "AGENTS.md"))
-			if !strings.Contains(agents, "# Corum Wiki Guide") || strings.Contains(agents, "stale owned toolkit") {
-				t.Fatalf("%s AGENTS.md was not replaced: %q", vault, agents)
-			}
-			if _, err := os.Stat(filepath.Join(vault, "skills", "obsolete")); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("%s obsolete owned skill remains: %v", vault, err)
-			}
-			if got := mustRead(t, filepath.Join(vault, ".config", "corum", "toolkit-version")); got != integrationVersion+"\n" {
-				t.Fatalf("%s toolkit version = %q", vault, got)
-			}
-			if got := mustRead(t, filepath.Join(vault, "user-sentinel.md")); got != "preserve root file\n" {
-				t.Fatalf("%s root sentinel = %q", vault, got)
-			}
-			if got := mustRead(t, filepath.Join(vault, "courses", "user-sentinel.md")); got != "preserve course file\n" {
-				t.Fatalf("%s course sentinel = %q", vault, got)
-			}
-		}
-		assertNoGlobalCorumConfig(t, environment.config)
-	})
 }
 
 type testEnvironment struct {
@@ -317,12 +177,11 @@ func isolatedEnvironment(t *testing.T) testEnvironment {
 	config := filepath.Join(root, "config")
 	cache := filepath.Join(root, "cache")
 	home := filepath.Join(root, "home")
-	values := filteredEnvironment("HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "DISABLE_AUTO_UPDATES", "CORUM_UPDATE_REEXEC", "CORUM_CANVAS_TOKEN")
+	values := filteredEnvironment("HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "CORUM_CANVAS_TOKEN")
 	values = append(values,
 		"HOME="+home,
 		"XDG_CONFIG_HOME="+config,
 		"XDG_CACHE_HOME="+cache,
-		"DISABLE_AUTO_UPDATES=1",
 	)
 	return testEnvironment{root: root, config: config, values: values}
 }
@@ -358,62 +217,6 @@ func buildBinaryVersion(t *testing.T, version string) string {
 		t.Fatalf("build installed binary: %v\n%s", err, output)
 	}
 	return binary
-}
-
-func updateServer(t *testing.T, archive []byte, badChecksum bool) (*httptest.Server, *atomic.Int64) {
-	t.Helper()
-	asset := fmt.Sprintf("corum_2.0.1_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
-	digest := fmt.Sprintf("%x", sha256.Sum256(archive))
-	if badChecksum {
-		digest = fmt.Sprintf("%x", sha256.Sum256([]byte("not the archive")))
-	}
-	hits := &atomic.Int64{}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/algebananazzzzz/Corum/releases/latest", func(w http.ResponseWriter, request *http.Request) {
-		hits.Add(1)
-		base := "http://" + request.Host
-		fmt.Fprintf(w, `{"tag_name":"v2.0.1","assets":[{"name":%q,"browser_download_url":%q},{"name":"checksums.txt","browser_download_url":%q}]}`, asset, base+"/archive", base+"/checksums")
-	})
-	mux.HandleFunc("/archive", func(w http.ResponseWriter, _ *http.Request) {
-		hits.Add(1)
-		_, _ = w.Write(archive)
-	})
-	mux.HandleFunc("/checksums", func(w http.ResponseWriter, _ *http.Request) {
-		hits.Add(1)
-		fmt.Fprintf(w, "%s  %s\n", digest, asset)
-	})
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	return server, hits
-}
-
-func updateEnvironment(t *testing.T, serverURL string, disabled bool) testEnvironment {
-	t.Helper()
-	environment := isolatedEnvironment(t)
-	environment.values = filterValues(environment.values, "DISABLE_AUTO_UPDATES", "_CORUM_TEST_UPDATE_API_BASE", "HTTPS_PROXY", "https_proxy")
-	environment.values = append(environment.values,
-		"_CORUM_TEST_UPDATE_API_BASE="+serverURL,
-		"HTTPS_PROXY=http://127.0.0.1:1",
-	)
-	if disabled {
-		environment.values = append(environment.values, "DISABLE_AUTO_UPDATES=1")
-	}
-	return environment
-}
-
-func filterValues(values []string, keys ...string) []string {
-	blocked := make(map[string]bool, len(keys))
-	for _, key := range keys {
-		blocked[key] = true
-	}
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		name, _, _ := strings.Cut(value, "=")
-		if !blocked[name] {
-			result = append(result, value)
-		}
-	}
-	return result
 }
 
 func repositoryRoot(t *testing.T) string {

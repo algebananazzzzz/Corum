@@ -48,7 +48,7 @@ func TestAuthCachePathRequiresProjectRoot(t *testing.T) {
 
 func TestAuthCacheRoundTripIsPrivate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "auth.json")
-	want := authRecord{Version: 1, ClientID: "client", Issuer: "https://issuer.example", AuthURL: "https://issuer.example/auth", TokenURL: "https://issuer.example/token", RedirectURL: "http://127.0.0.1:1234/callback", Scopes: []string{"read"}, Token: &oauth2.Token{AccessToken: "synthetic-access", RefreshToken: "synthetic-refresh", Expiry: time.Now().Add(time.Hour)}}
+	want := authRecord{ClientID: "client", Issuer: "https://issuer.example", AuthURL: "https://issuer.example/auth", TokenURL: "https://issuer.example/token", RedirectURL: "http://127.0.0.1:1234/callback", Scopes: []string{"read"}, Token: &oauth2.Token{AccessToken: "synthetic-access", RefreshToken: "synthetic-refresh", Expiry: time.Now().Add(time.Hour)}}
 	if err := saveAuthCache(path, want); err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestAuthCacheRoundTripIsPrivate(t *testing.T) {
 
 func TestAuthCacheRejectsPublicPermissions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.json")
-	if err := os.WriteFile(path, []byte(`{"version":1}`), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := loadAuthCache(path)
@@ -83,7 +83,7 @@ func TestAuthCacheRejectsPublicPermissions(t *testing.T) {
 func TestAuthCacheRejectsPublicDirectoryPermissions(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "corum")
 	path := filepath.Join(dir, "auth.json")
-	if err := saveAuthCache(path, authRecord{Version: 1, ClientID: "client", Token: &oauth2.Token{AccessToken: "synthetic"}}); err != nil {
+	if err := saveAuthCache(path, authRecord{ClientID: "client", Token: &oauth2.Token{AccessToken: "synthetic"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(dir, 0o755); err != nil {
@@ -108,10 +108,10 @@ func TestAuthCacheCorruptionDoesNotExposeContents(t *testing.T) {
 
 func TestAuthCacheAtomicReplacementLeavesCompleteRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.json")
-	if err := saveAuthCache(path, authRecord{Version: 1, ClientID: "first", Token: &oauth2.Token{AccessToken: "one"}}); err != nil {
+	if err := saveAuthCache(path, authRecord{ClientID: "first", Token: &oauth2.Token{AccessToken: "one"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveAuthCache(path, authRecord{Version: 1, ClientID: "second", Token: &oauth2.Token{AccessToken: "two"}}); err != nil {
+	if err := saveAuthCache(path, authRecord{ClientID: "second", Token: &oauth2.Token{AccessToken: "two"}}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := loadAuthCache(path)
@@ -122,7 +122,7 @@ func TestAuthCacheAtomicReplacementLeavesCompleteRecord(t *testing.T) {
 
 func TestAuthCacheClearIsIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.json")
-	if err := saveAuthCache(path, authRecord{Version: 1, ClientID: "client", Token: &oauth2.Token{AccessToken: "synthetic"}}); err != nil {
+	if err := saveAuthCache(path, authRecord{ClientID: "client", Token: &oauth2.Token{AccessToken: "synthetic"}}); err != nil {
 		t.Fatal(err)
 	}
 	if removed, err := clearAuth(path); err != nil || !removed {

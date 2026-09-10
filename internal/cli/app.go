@@ -6,10 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	corum "github.com/algebananazzzzz/Corum"
 	"github.com/algebananazzzzz/Corum/internal/buildinfo"
@@ -17,95 +15,19 @@ import (
 	"github.com/algebananazzzzz/Corum/internal/config"
 	"github.com/algebananazzzzz/Corum/internal/jira"
 	"github.com/algebananazzzzz/Corum/internal/ui"
-	"github.com/algebananazzzzz/Corum/internal/update"
 	"github.com/algebananazzzzz/Corum/internal/vault"
 )
 
 var (
-	openJiraSession  = jira.Open
-	makeJiraClient   = jira.NewJiraClient
-	ensureCourseEpic = func(ctx context.Context, session *jira.RovoSession, workspace config.Workspace, course config.Course, reconcile bool) (jira.EpicResult, error) {
-		client, err := makeJiraClient(session, workspace.Jira.CloudID)
-		if err != nil {
-			return jira.EpicResult{}, err
-		}
-		if reconcile {
-			return client.ReconcileEpic(ctx, workspace.Jira.Project, course.Code+" — "+course.Canvas.Name)
-		}
-		return client.EnsureEpic(ctx, workspace.Jira.Project, course.Code+" — "+course.Canvas.Name)
-	}
-	maybeUpdate                                           = update.Maybe
-	syncVaultToolkit    func(string, fs.FS, string) error = vault.SyncToolkit
-	refreshVaultToolkit func(string, fs.FS, string) error = vault.RefreshToolkit
-	syncCanvas                                            = canvas.Sync
+	openJiraSession = jira.Open
+	makeJiraClient  = jira.NewJiraClient
+	syncCanvas      = canvas.Sync
 )
-
-// RunProcess performs invocation-time update and toolkit work before dispatching
-// the requested command. argv must include the executable name.
-func RunProcess(ctx context.Context, argv []string, in io.Reader, out, errOut io.Writer) int {
-	if len(argv) == 0 {
-		argv = []string{"corum"}
-	}
-	args := argv[1:]
-	fullscreen := isTerminal(in) && fullscreenCommand(args)
-	explicitUpdate := len(args) == 1 && args[0] == "update"
-	if !explicitUpdate && os.Getenv(update.ReexecEnv) != "1" {
-		outcome, err := maybeUpdate(ctx, update.Options{
-			Version: buildinfo.Version,
-			APIBase: os.Getenv("_CORUM_TEST_UPDATE_API_BASE"),
-			Args:    argv,
-			Env:     os.Environ(),
-		})
-		if err != nil && !fullscreen {
-			fmt.Fprintf(errOut, "warning: automatic update check failed: %v\n", err)
-		} else if outcome.Warning != "" && !fullscreen {
-			fmt.Fprintf(errOut, "warning: %s\n", outcome.Warning)
-		}
-	}
-	if buildinfo.Version != "dev" {
-		if path, ok := commandVaultPath(args); ok {
-			root, err := filepath.Abs(path)
-			if err == nil {
-				if _, _, validateErr := vault.Validate(root); validateErr == nil {
-					if syncErr := syncVaultToolkit(root, corum.Assets, buildinfo.Version); syncErr != nil && !fullscreen {
-						fmt.Fprintf(errOut, "warning: toolkit update failed for %s: %v\n", root, syncErr)
-					}
-				}
-			}
-		}
-	}
-	return Run(ctx, args, in, out, errOut)
-}
 
 // Run dispatches the complete local Corum command surface.
 func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
 	if len(args) == 1 && args[0] == "--help" {
-		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira sync-epic COURSE")
-		return 0
-	}
-	if len(args) == 1 && args[0] == "update" {
-		outcome, err := update.Run(ctx, update.Options{
-			Version: buildinfo.Version,
-			APIBase: os.Getenv("_CORUM_TEST_UPDATE_API_BASE"),
-		})
-		if err != nil {
-			fmt.Fprintln(errOut, err)
-			return 1
-		}
-		switch {
-		case outcome.Updated:
-			fmt.Fprintf(out, "corum updated to %s\n", withV(outcome.Latest))
-		case outcome.Skipped != "":
-			fmt.Fprintln(out, outcome.Skipped)
-		default:
-			fmt.Fprintf(out, "corum %s is up to date\n", withV(buildinfo.Version))
-		}
-		return 0
-	}
-	if len(args) == 1 && args[0] == update.ContinuationArg {
-		// The updated binary re-executed itself after an explicit update.
-		// Report the result without another metadata request.
-		fmt.Fprintf(out, "corum updated to %s\n", withV(buildinfo.Version))
+		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira sync-epic COURSE")
 		return 0
 	}
 	if len(args) == 1 && args[0] == "version" {
@@ -122,7 +44,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			fmt.Fprintln(errOut, "vault validation failed")
 			return 1
 		}
-		if err := refreshVaultToolkit(root, corum.Assets, buildinfo.Version); err != nil {
+		if err := vault.RefreshToolkit(root, corum.Assets); err != nil {
 			fmt.Fprintln(errOut, "toolkit update failed")
 			return 1
 		}
@@ -134,7 +56,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		return 0
 	}
 	if root, ok := defaultInitRoot(args); ok {
-		if err := vault.Initialize(root, defaultWorkspace(), corum.Assets, buildinfo.Version); err != nil {
+		if err := vault.Initialize(root, defaultWorkspace(), corum.Assets); err != nil {
 			fmt.Fprintln(errOut, "could not initialize vault")
 			return 1
 		}
@@ -146,7 +68,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			fmt.Fprintln(errOut, ui.NonTTYGuidance("init"))
 			return 2
 		}
-		if err := ui.RunInitFullscreen(root, corum.Assets, buildinfo.Version, in, out); err != nil {
+		if err := ui.RunInitFullscreen(root, corum.Assets, in, out); err != nil {
 			if errors.Is(err, ui.ErrCancelled) {
 				_ = ui.ShowNotice("Corum Setup", "Setup cancelled.", in, out)
 				return 1
@@ -185,7 +107,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if code, handled := runCanvasSync(ctx, args, out, errOut); handled {
 		return code
 	}
-	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira sync-epic COURSE")
+	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira sync-epic COURSE")
 	return 2
 }
 
@@ -260,16 +182,6 @@ func runConfigure(ctx context.Context, args []string, in io.Reader, out, errOut 
 		}
 		_ = ui.ShowNotice("Canvas Authentication", "Canvas authenticated.", in, out)
 		return 0, true
-	case "jira":
-		deps := ui.DefaultJiraAuthDependencies(in, out, root)
-		if err := ui.RunJiraAuthFullscreen(ctx, root, deps, in, out); err != nil {
-			if errors.Is(err, ui.ErrCancelled) {
-				return fail("Jira Authentication", "Jira authentication cancelled.", nil)
-			}
-			return fail("Jira Authentication", "Could not configure Jira.", err)
-		}
-		_ = ui.ShowNotice("Jira Authentication", "Jira configured.", in, out)
-		return 0, true
 	default:
 		deps := ui.DefaultAuthDependencies(in, out, root)
 		if err := ui.RunAuth(ctx, root, deps); err != nil {
@@ -281,13 +193,6 @@ func runConfigure(ctx context.Context, args []string, in io.Reader, out, errOut 
 		_ = ui.ShowNotice("Corum Configuration", "Configuration complete.", in, out)
 		return 0, true
 	}
-}
-
-func withV(version string) string {
-	if len(version) > 0 && version[0] == 'v' {
-		return version
-	}
-	return "v" + version
 }
 
 func runCanvasSync(ctx context.Context, args []string, out, errOut io.Writer) (int, bool) {
@@ -354,12 +259,12 @@ func runCanvasSync(ctx context.Context, args []string, out, errOut io.Writer) (i
 	var client canvas.SourceClient
 	failures := []string{}
 	for _, course := range courses {
-		if !dryRun && config.Effective(workspace, course).Canvas {
+		if !dryRun && (workspace.Canvas != nil && course.Canvas != nil) {
 			if client == nil {
 				constructed, constructErr := canvas.NewClientFromEnvironment(workspace.Canvas.URL, root)
 				if constructErr != nil {
 					fmt.Fprintln(errOut, constructErr)
-					if flushErr := flushSyncResults(jsonOutput, out, workspace, courses, results); flushErr != nil {
+					if flushErr := flushSyncResults(jsonOutput, out, results); flushErr != nil {
 						fmt.Fprintln(errOut, "could not write sync result")
 						return 1, true
 					}
@@ -374,7 +279,7 @@ func runCanvasSync(ctx context.Context, args []string, out, errOut io.Writer) (i
 			failures = append(failures, fmt.Sprintf("%s: %v", course.Code, syncErr))
 		}
 	}
-	if err := flushSyncResults(jsonOutput, out, workspace, courses, results); err != nil {
+	if err := flushSyncResults(jsonOutput, out, results); err != nil {
 		fmt.Fprintln(errOut, "could not write sync result")
 		return 1, true
 	}
@@ -393,14 +298,11 @@ func runCanvasSync(ctx context.Context, args []string, out, errOut io.Writer) (i
 }
 
 // flushSyncResults preserves completed course results even when a later course fails.
-func flushSyncResults(jsonOutput bool, out io.Writer, workspace config.Workspace, courses []config.Course, results []canvas.StageResult) error {
+func flushSyncResults(jsonOutput bool, out io.Writer, results []canvas.StageResult) error {
 	if jsonOutput {
-		manifests := make([]any, 0, len(results))
-		for index, result := range results {
-			manifests = append(manifests, result.ManifestOf(workspace, courses[index]))
-		}
-		return json.NewEncoder(out).Encode(manifests)
+		return json.NewEncoder(out).Encode(results)
 	}
+
 	for _, result := range results {
 		fmt.Fprintf(out, "%s: %s\n", result.Course, result.Status)
 	}
@@ -425,69 +327,6 @@ func openVault(path string) (string, error) {
 
 // commandVaultPath identifies commands that operate on one project so process
 // startup can refresh only that project's toolkit without a global registry.
-func commandVaultPath(args []string) (string, bool) {
-	if len(args) == 0 {
-		return "", false
-	}
-	switch args[0] {
-	case "doctor":
-		if len(args) == 1 {
-			return ".", true
-		}
-		if len(args) == 2 {
-			return args[1], true
-		}
-	case "configure":
-		if len(args) == 1 {
-			return ".", true
-		}
-		if len(args) == 2 && args[1] != "--help" {
-			if args[1] == "jira" || args[1] == "canvas" {
-				return ".", true
-			}
-			return args[1], true
-		}
-		if len(args) == 3 && (args[1] == "jira" || args[1] == "canvas") {
-			return args[2], true
-		}
-	case "sync":
-		return ".", true
-	case "toolkit":
-		if len(args) == 2 && args[1] == "update" {
-			return ".", true
-		}
-		if len(args) == 3 && args[1] == "update" {
-			return args[2], true
-		}
-	case "jira":
-		if len(args) >= 2 && args[1] == "sync-epic" {
-			return ".", true
-		}
-	}
-	return "", false
-}
-
-func fullscreenCommand(args []string) bool {
-	if _, ok := interactiveInitRoot(args); ok {
-		return true
-	}
-	if len(args) == 0 || args[0] != "configure" {
-		return false
-	}
-	if len(args) == 1 {
-		return true
-	}
-	if len(args) == 2 {
-		return args[1] != "--help"
-	}
-	return len(args) == 3 && (args[1] == "jira" || args[1] == "canvas")
-}
-
-type ensuredEpicOutput struct {
-	Course  string `json:"course"`
-	Epic    string `json:"epic"`
-	Created bool   `json:"created"`
-}
 
 func runJiraSyncEpic(ctx context.Context, args []string, out, errOut io.Writer) (int, bool) {
 	if len(args) != 3 || args[0] != "jira" || args[1] != "sync-epic" {
@@ -510,7 +349,7 @@ func runJiraSyncEpic(ctx context.Context, args []string, out, errOut io.Writer) 
 	}
 	session, err := openJiraSession(ctx, jira.OpenOptions{Interactive: false, CachePath: jiraCacheFor(root), Out: errOut})
 	if err != nil {
-		fmt.Fprintln(errOut, "could not connect to Atlassian; run corum configure jira")
+		fmt.Fprintln(errOut, "could not connect to Atlassian; run corum configure")
 		return 1, true
 	}
 	defer session.Close()
@@ -528,180 +367,6 @@ func runJiraSyncEpic(ctx context.Context, args []string, out, errOut io.Writer) 
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(result); err != nil {
 		fmt.Fprintln(errOut, "could not write Jira sync result")
-		return 1, true
-	}
-	return 0, true
-}
-
-func runJiraCreateEpic(ctx context.Context, args []string, out, errOut io.Writer) (int, bool) {
-	if len(args) != 3 || args[0] != "jira" || args[1] != "create-epic" {
-		return 0, false
-	}
-	root, err := openVault(".")
-	if err != nil {
-		fmt.Fprintln(errOut, "could not locate vault")
-		return 1, true
-	}
-	workspace, err := config.LoadWorkspace(root)
-	if err != nil {
-		fmt.Fprintln(errOut, "could not load workspace configuration")
-		return 1, true
-	}
-	if workspace.Jira == nil {
-		fmt.Fprintf(errOut, "Jira is disabled for %s\n", args[2])
-		return 1, true
-	}
-	course, err := config.LoadCourse(root, args[2])
-	if err != nil {
-		fmt.Fprintln(errOut, "could not load course configuration")
-		return 1, true
-	}
-	encoder := json.NewEncoder(out)
-	encoder.SetIndent("", "  ")
-	if course.Jira != nil {
-		if err := encoder.Encode(ensuredEpicOutput{Course: course.Code, Epic: course.Jira.Epic}); err != nil {
-			fmt.Fprintln(errOut, "could not write Jira epic result")
-			return 1, true
-		}
-		return 0, true
-	}
-	if course.Canvas == nil || strings.TrimSpace(course.Canvas.Name) == "" {
-		fmt.Fprintln(errOut, "Jira epic initialization requires a Canvas course name")
-		return 1, true
-	}
-	lock, err := jira.AcquireCourseLock(root, course)
-	if err != nil {
-		fmt.Fprintln(errOut, "Jira epic initialization is already running for this course")
-		return 1, true
-	}
-	defer lock.Close()
-	reconcile, err := jira.BeginEpicProvisioning(root, course, course.Code+" — "+course.Canvas.Name)
-	if err != nil {
-		fmt.Fprintln(errOut, "could not record Jira epic provisioning state")
-		return 1, true
-	}
-	session, err := openJiraSession(ctx, jira.OpenOptions{Interactive: false, CachePath: jiraCacheFor(root), Out: errOut})
-	if err != nil {
-		if !reconcile {
-			if clearErr := jira.ClearEpicProvisioning(root, course); clearErr != nil {
-				fmt.Fprintln(errOut, "could not clear Jira epic provisioning state")
-				return 1, true
-			}
-		}
-		if errors.Is(err, jira.LoginRequired) {
-			fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum configure jira")
-		} else {
-			fmt.Fprintln(errOut, "could not connect to Atlassian")
-		}
-		return 1, true
-	}
-	defer session.Close()
-	result, err := ensureCourseEpic(ctx, session, workspace, course, reconcile)
-	if err != nil {
-		var mutation *jira.MutationError
-		if !reconcile && !errors.As(err, &mutation) {
-			if clearErr := jira.ClearEpicProvisioning(root, course); clearErr != nil {
-				fmt.Fprintln(errOut, "could not clear Jira epic provisioning state")
-				return 1, true
-			}
-		}
-		fmt.Fprintln(errOut, "could not initialize Jira epic")
-		return 1, true
-	}
-	course.Jira = &config.JiraCourse{Epic: result.Key}
-	if err := vault.WriteCourse(root, course); err != nil {
-		fmt.Fprintln(errOut, "could not save Jira epic configuration")
-		return 1, true
-	}
-	if err := jira.ClearEpicProvisioning(root, course); err != nil {
-		fmt.Fprintln(errOut, "could not clear Jira epic provisioning state")
-		return 1, true
-	}
-	if err := encoder.Encode(ensuredEpicOutput{Course: course.Code, Epic: result.Key, Created: result.Created}); err != nil {
-		fmt.Fprintln(errOut, "could not write Jira epic result")
-		return 1, true
-	}
-	return 0, true
-}
-
-func runJiraApply(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) (int, bool) {
-	if len(args) != 3 && len(args) != 4 {
-		return 0, false
-	}
-	if args[0] != "jira" || args[1] != "apply" {
-		return 0, false
-	}
-	dryRun := len(args) == 4 && args[3] == "--dry-run"
-	if len(args) == 4 && !dryRun {
-		return 0, false
-	}
-	if in == nil {
-		fmt.Fprintln(errOut, "could not read Jira plan")
-		return 1, true
-	}
-	root, err := openVault(".")
-	if err != nil {
-		fmt.Fprintln(errOut, "could not locate vault")
-		return 1, true
-	}
-	workspace, err := config.LoadWorkspace(root)
-	if err != nil {
-		fmt.Fprintln(errOut, "could not load workspace configuration")
-		return 1, true
-	}
-	course, err := config.LoadCourse(root, args[2])
-	if err != nil {
-		fmt.Fprintln(errOut, "could not load course configuration")
-		return 1, true
-	}
-	plan, err := jira.DecodePlan(in)
-	if err != nil {
-		fmt.Fprintln(errOut, "invalid Jira plan")
-		return 1, true
-	}
-	if err := jira.ValidatePlan(workspace, course, plan, !dryRun); err != nil {
-		fmt.Fprintln(errOut, err)
-		return 1, true
-	}
-	encoder := json.NewEncoder(out)
-	encoder.SetIndent("", "  ")
-	if dryRun {
-		if _, err := jira.Apply(ctx, root, workspace, course, plan, nil, true); err != nil {
-			fmt.Fprintln(errOut, err)
-			return 1, true
-		}
-		if err := encoder.Encode(plan); err != nil {
-			fmt.Fprintln(errOut, "could not write Jira plan")
-			return 1, true
-		}
-		return 0, true
-	}
-	session, err := openJiraSession(ctx, jira.OpenOptions{Interactive: false, CachePath: jiraCacheFor(root), Out: errOut})
-	if err != nil {
-		if errors.Is(err, jira.LoginRequired) {
-			fmt.Fprintln(errOut, "Jira session is missing or revoked; run corum configure jira")
-		} else {
-			fmt.Fprintln(errOut, "could not connect to Atlassian")
-		}
-		return 1, true
-	}
-	defer session.Close()
-	client, err := makeJiraClient(session, workspace.Jira.CloudID)
-	if err != nil {
-		fmt.Fprintln(errOut, "invalid Jira configuration")
-		return 1, true
-	}
-	result, applyErr := jira.Apply(ctx, root, workspace, course, plan, client, false)
-	if result.Course != "" {
-		if err := encoder.Encode(result); err != nil {
-			fmt.Fprintln(errOut, "could not write Jira result")
-			return 1, true
-		}
-	}
-	if applyErr != nil || result.Status == "partial" || result.Status == "failed" {
-		if result.Course == "" {
-			fmt.Fprintln(errOut, applyErr)
-		}
 		return 1, true
 	}
 	return 0, true
@@ -741,10 +406,7 @@ func defaultInitRoot(args []string) (string, bool) {
 
 func defaultWorkspace() config.Workspace {
 	return config.Workspace{
-		Version:   2,
 		Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "AY2026/27 Semester 1"},
 		Canvas:    &config.CanvasWorkspace{URL: "https://canvas.nus.edu.sg"},
-		Wiki:      &config.WikiWorkspace{},
-		Calendar:  config.Calendar{Timetable: "Timetable.md", Term: "Term_Calendar.md"},
 	}
 }

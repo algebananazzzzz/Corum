@@ -37,7 +37,7 @@ func TestLoadCredentialUsesOnlyEnvironmentThenProjectLocal(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(globalPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(globalPath, []byte(`{"version":1,"token":"global-token"}`), 0o600); err != nil {
+	if err := os.WriteFile(globalPath, []byte(`{"token":"global-token"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(project); err != nil {

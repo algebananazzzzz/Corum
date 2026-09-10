@@ -8,15 +8,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/algebananazzzzz/Corum/internal/config"
 )
 
 type CanvasState struct {
-	Version  int            `json:"version"`
-	SyncedAt *string        `json:"synced_at"`
-	Sources  map[string]any `json:"sources"`
+	Sources map[string]any `json:"sources"`
 }
 type Change struct {
 	ID      string         `json:"id"`
@@ -51,69 +48,40 @@ type StageResult struct {
 	Changes  []Change       `json:"changes"`
 	Failures []Failure      `json:"failures"`
 	Sources  []SourceResult `json:"sources"`
-	Manifest *RunManifest   `json:"-"`
 }
 
-type CanvasManifestStage struct {
-	Status   string         `json:"status"`
-	Changes  []Change       `json:"changes"`
-	Failures []Failure      `json:"failures"`
-	Sources  []SourceResult `json:"sources"`
-}
-
-// RunManifest is the complete per-course machine-readable sync result.
-type RunManifest struct {
-	Version           int                 `json:"version"`
-	RunID             string              `json:"run_id"`
-	Course            string              `json:"course"`
-	EffectiveFeatures map[string]bool     `json:"effective_features"`
-	Canvas            CanvasManifestStage `json:"canvas"`
-	Jira              any                 `json:"jira"`
-	Wiki              any                 `json:"wiki"`
-}
-
-// ManifestOf returns the stage result's complete run manifest, building a
-// minimal one when the sync failed before producing its own manifest.
-func (result StageResult) ManifestOf(workspace config.Workspace, course config.Course) *RunManifest {
-	if result.Manifest != nil {
-		return result.Manifest
-	}
-	manifest := buildManifest("", workspace, course, result)
-	return &manifest
-}
-
-func canvasPaths(root string, course config.Course, create bool) (string, string, error) {
+func canvasPath(root string, course config.Course, create bool) (string, error) {
 	if course.Code == "" || filepath.Base(course.Code) != course.Code || course.Code == "." || course.Code == ".." {
-		return "", "", fmt.Errorf("invalid course code")
+		return "", fmt.Errorf("invalid course code")
 	}
 	absolute, err := filepath.Abs(root)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	absolute, err = filepath.EvalSymlinks(absolute)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	courseDir, err := filepath.EvalSymlinks(filepath.Join(absolute, "courses", course.Code))
 	if err != nil {
-		return "", "", fmt.Errorf("resolve course directory: %w", err)
+		return "", fmt.Errorf("resolve course directory: %w", err)
 	}
 	rel, err := filepath.Rel(filepath.Join(absolute, "courses"), courseDir)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", "", fmt.Errorf("course directory resolves outside vault")
+		return "", fmt.Errorf("course directory resolves outside vault")
 	}
 	stateDir := filepath.Join(courseDir, "state")
 	if info, statErr := os.Lstat(stateDir); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
-		return "", "", fmt.Errorf("state directory must not be a symlink")
+		return "", fmt.Errorf("state directory must not be a symlink")
 	} else if statErr != nil && !os.IsNotExist(statErr) {
-		return "", "", statErr
+		return "", statErr
 	}
 	if create {
 		if err := os.MkdirAll(stateDir, 0755); err != nil {
-			return "", "", err
+			return "", err
 		}
 	}
-	return filepath.Join(stateDir, "canvas.json"), filepath.Join(stateDir, "latest-run.json"), nil
+	return filepath.Join(stateDir, "canvas.json"), nil
 }
 func readState(path string, selected []string) (CanvasState, error) {
 	data, err := os.ReadFile(path)
@@ -126,7 +94,7 @@ func readState(path string, selected []string) (CanvasState, error) {
 				sources[source] = map[string]any{}
 			}
 		}
-		return CanvasState{Version: 2, Sources: sources}, nil
+		return CanvasState{Sources: sources}, nil
 	}
 	if err != nil {
 		return CanvasState{}, err
@@ -144,9 +112,6 @@ func readState(path string, selected []string) (CanvasState, error) {
 		}
 		return CanvasState{}, err
 	}
-	if state.Version != 2 {
-		return CanvasState{}, fmt.Errorf("canvas state version must be 2")
-	}
 	if state.Sources == nil {
 		state.Sources = map[string]any{}
 	}
@@ -158,16 +123,6 @@ func atomicJSON(path string, value any) error {
 		return err
 	}
 	return atomicWriteFile(path, append(data, '\n'), 0o600, ".canvas-write-*")
-}
-func writeState(path string, state CanvasState, zone string) error {
-	state.Version = 2
-	now := time.Now()
-	if location, err := time.LoadLocation(zone); err == nil {
-		now = now.In(location)
-	}
-	formatted := now.Format(time.RFC3339)
-	state.SyncedAt = &formatted
-	return atomicJSON(path, state)
 }
 func sortedResult(result *StageResult) {
 	sort.Slice(result.Changes, func(i, j int) bool { return result.Changes[i].ID < result.Changes[j].ID })

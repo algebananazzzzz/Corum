@@ -3,34 +3,65 @@
   "title": "Corum Jira state",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "reconciled_at", "issues"],
+  "required": [
+    "issues"
+  ],
   "properties": {
-    "version": {"const": 2},
-    "reconciled_at": {"type": ["string", "null"], "format": "date-time"},
+    "reconciled_at": {
+      "type": "string",
+      "format": "date-time"
+    },
     "issues": {
       "type": "array",
-      "items": {"$ref": "#/$defs/issue"}
+      "items": {
+        "$ref": "#/$defs/issue"
+      }
     }
   },
   "$defs": {
     "issue": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["key", "type", "summary", "status", "due", "labels", "description", "updated_at"],
+      "required": [
+        "key",
+        "type",
+        "summary",
+        "status"
+      ],
       "properties": {
-        "key": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$"},
-        "type": {"type": "string", "pattern": "\\S"},
-        "summary": {"type": "string", "pattern": "\\S"},
-        "status": {"type": "string", "pattern": "\\S"},
-        "due": {"type": ["string", "null"], "format": "date"},
-        "labels": {
-          "oneOf": [
-            {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-            {"type": "null"}
-          ]
+        "key": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$"
         },
-        "description": {"type": ["string", "null"]},
-        "updated_at": {"type": ["string", "null"], "format": "date-time"}
+        "type": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "summary": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "status": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "due": {
+          "type": "string",
+          "format": "date"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
       }
     }
   }

@@ -1,17 +1,10 @@
-# Scope Course Error Handling
+# Incomplete evidence
 
-Use this reference when scope inputs or prior Jira results require follow-up.
+Report failed captures, unreadable sources, stale issue caches and ambiguous
+matches explicitly. Scope supported obligations from successful captures, but do
+not infer cancellation or completion from absent data. Preserve exact source
+paths so the missing evidence can be revisited.
 
-## Required inputs
-
-Return `status: error` with a stable code and exact path for an unavailable required enabled input. Report successful source evidence and unresolved capture evidence from the selected manifest.
-
-When the enabled Jira cache is absent, return `jira_cache_missing` with the `state/jira.json` path. `sync-course` initializes the cache through its empty-plan workflow, then invokes `scope-course` again with the selected manifest.
-
-## Jira history
-
-Use reconciled Jira `applied` and `failures` results as prior-write evidence. Use the refreshed cache as the current Jira state. Return a manual-reconciliation error when the cache cannot identify the result of an uncertain create.
-
-## Service changes
-
-Use the selected manifest’s `effective_features` values as the scope workflow states. A fresh capture creates the manifest snapshot after a Jira or wiki configuration change.
+If a required date or venue conflicts across sources, present the conflict and
+its sources instead of silently choosing a value. If no Jira cache or epic is
+configured, report local obligations without claiming they are new remote issues.

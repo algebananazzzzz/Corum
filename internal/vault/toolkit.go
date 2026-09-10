@@ -1,25 +1,12 @@
 package vault
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
-
-	"github.com/algebananazzzzz/Corum/internal/config"
-	"github.com/algebananazzzzz/Corum/internal/lockfile"
 )
-
-const toolkitTemporaryPrefix = ".corum-toolkit-"
-
-const toolkitLockName = ".toolkit.lock"
-
-const toolkitVersionPath = ".config/corum/toolkit-version"
-
-var removeAll = os.RemoveAll
 
 var toolkitLinks = []struct{ path, target string }{
 	{"CLAUDE.md", "AGENTS.md"},
@@ -31,227 +18,101 @@ var toolkitLinks = []struct{ path, target string }{
 type assetFile struct {
 	path string
 	data []byte
-	mode fs.FileMode
 }
 
-type replacement struct {
-	target    string
-	stage     string
-	backup    string
-	hadOld    bool
-	installed bool
-}
-
-// SyncToolkit updates the toolkit only for the active project. Current
-// toolkits are left untouched.
-func SyncToolkit(root string, assets fs.FS, version string) error {
-	if toolkitIsCurrent(root, version) {
-		return nil
-	}
-	return syncToolkit(root, assets, version, os.Rename)
-}
-
-// RefreshToolkit replaces the complete toolkit with the version embedded in Corum.
-func RefreshToolkit(root string, assets fs.FS, version string) error {
-	return syncToolkit(root, assets, version, os.Rename)
-}
-
-func toolkitIsCurrent(root, version string) bool {
-	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(toolkitVersionPath)))
-	if err != nil || string(data) != version+"\n" {
-		return false
-	}
-	for _, link := range toolkitLinks {
-		path := filepath.Join(root, link.path)
-		if parent := filepath.Dir(path); parent != filepath.Clean(root) {
-			if info, err := os.Lstat(parent); err != nil || !info.IsDir() {
-				return false
-			}
-		}
-		target, err := os.Readlink(path)
-		if err != nil || target != link.target {
-			return false
-		}
-		if _, err := os.Stat(path); err != nil {
-			return false
-		}
-	}
-	return true
-}
-
-func syncToolkit(root string, assets fs.FS, version string, rename func(string, string) error) error {
-	toolkitDir := config.ProjectDir(root)
-	if err := os.MkdirAll(toolkitDir, 0o700); err != nil {
-		return err
-	}
-	lock, err := lockfile.TryAcquire(filepath.Join(toolkitDir, toolkitLockName))
+// RefreshToolkit explicitly installs the embedded instructions and skills.
+// Course content and unrelated user skills are never replaced.
+func RefreshToolkit(root string, assets fs.FS) error {
+	payload, err := collectToolkit(assets)
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
-	payload, err := collectToolkit(assets, version)
-	if err != nil {
+	if err := installPayload(root, payload); err != nil {
 		return err
 	}
-	// Under the lock, stale stages are disposable; backups may still be needed for recovery.
-	if err := cleanToolkitTemporaryFiles(root, false); err != nil {
-		return err
-	}
-	id := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
-	stageRoot := filepath.Join(toolkitDir, toolkitTemporaryPrefix+"stage-"+id)
-	defer removeAll(stageRoot)
-	if err := installPayload(stageRoot, payload); err != nil {
-		return err
-	}
-	items := []string{"AGENTS.md", "skills", "templates"}
-	for _, link := range toolkitLinks {
-		items = append(items, link.path)
-	}
-	items = append(items, toolkitVersionPath)
-	replacements := make([]replacement, 0, len(items))
-	for _, item := range items {
-		parent := filepath.Dir(filepath.Join(root, item))
-		if info, err := os.Lstat(parent); err == nil {
-			if parent != filepath.Clean(root) && !info.IsDir() {
-				return fmt.Errorf("toolkit parent %s must be a directory, not a symlink or file", parent)
-			}
-		} else if !os.IsNotExist(err) {
+	// Remove only the former bundled authoring skills, not user skills or pages.
+	for _, name := range []string{"authoring-wiki", "drawio-diagrams", "linting-wiki"} {
+		path, err := toolkitPath(root, "skills/"+name)
+		if err != nil {
 			return err
 		}
-		name := strings.ReplaceAll(item, "/", "-")
-		replacements = append(replacements, replacement{
-			target: filepath.Join(root, filepath.FromSlash(item)),
-			stage:  filepath.Join(stageRoot, filepath.FromSlash(item)),
-			backup: filepath.Join(toolkitDir, toolkitTemporaryPrefix+"backup-"+id+"-"+name),
-		})
-	}
-	for index := range replacements {
-		item := &replacements[index]
-		if err := os.MkdirAll(filepath.Dir(item.target), 0o755); err != nil {
-			return rollbackResult(err, rollback(replacements, rename))
-		}
-		if _, err := os.Lstat(item.target); err == nil {
-			if err := rename(item.target, item.backup); err != nil {
-				return rollbackResult(fmt.Errorf("backup %s: %w", item.target, err), rollback(replacements, rename))
-			}
-			item.hadOld = true
-		} else if !os.IsNotExist(err) {
-			return rollbackResult(err, rollback(replacements, rename))
-		}
-		if err := rename(item.stage, item.target); err != nil {
-			return rollbackResult(fmt.Errorf("install %s: %w", item.target, err), rollback(replacements, rename))
-		}
-		item.installed = true
-	}
-	for _, item := range replacements {
-		if item.hadOld {
-			_ = removeAll(item.backup)
-		}
-	}
-	if err := cleanToolkitTemporaryFiles(root, true); err != nil {
-		return fmt.Errorf("clean completed toolkit transaction: %w", err)
-	}
-	return nil
-}
-
-func rollbackResult(cause, rollbackErr error) error {
-	if rollbackErr == nil {
-		return cause
-	}
-	return errors.Join(cause, fmt.Errorf("rollback failure: %w", rollbackErr))
-}
-
-func rollback(items []replacement, rename func(string, string) error) error {
-	var errs []error
-	for index := len(items) - 1; index >= 0; index-- {
-		item := items[index]
-		if item.installed {
-			if err := removeAll(item.target); err != nil {
-				errs = append(errs, fmt.Errorf("remove replacement %s: %w", item.target, err))
-				continue
-			}
-		}
-		if item.hadOld {
-			if err := rename(item.backup, item.target); err != nil {
-				errs = append(errs, fmt.Errorf("restore %s: %w", item.target, err))
-			}
-		}
-	}
-	return errors.Join(errs...)
-}
-
-func cleanToolkitTemporaryFiles(root string, cleanBackups bool) error {
-	toolkitDir := config.ProjectDir(root)
-	entries, err := os.ReadDir(toolkitDir)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if strings.HasPrefix(name, toolkitTemporaryPrefix+"stage-") || (cleanBackups && strings.HasPrefix(name, toolkitTemporaryPrefix+"backup-")) {
-			if err := removeAll(filepath.Join(toolkitDir, name)); err != nil {
-				return err
-			}
+		if err := os.RemoveAll(path); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func collectToolkit(assets fs.FS, version string) ([]assetFile, error) {
-	payload := []assetFile{}
+func collectToolkit(assets fs.FS) ([]assetFile, error) {
 	agents, err := fs.ReadFile(assets, "agent-kit/AGENTS.base.md")
 	if err != nil {
-		return nil, fmt.Errorf("read embedded AGENTS.md: %w", err)
+		return nil, err
 	}
-	payload = append(payload, assetFile{path: "AGENTS.md", data: agents, mode: 0o644})
-	for _, source := range []string{"agent-kit/skills", "agent-kit/templates"} {
-		err := fs.WalkDir(assets, source, func(item string, entry fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if entry.IsDir() {
-				return nil
-			}
-			data, err := fs.ReadFile(assets, item)
-			if err != nil {
-				return err
-			}
-			rel := strings.TrimPrefix(item, "agent-kit/")
-			payload = append(payload, assetFile{path: filepath.FromSlash(rel), data: data, mode: entry.Type().Perm()})
-			return nil
-		})
+	payload := []assetFile{{path: "AGENTS.md", data: agents}}
+	err = fs.WalkDir(assets, "agent-kit/skills", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
-			return nil, fmt.Errorf("read embedded toolkit %s: %w", source, err)
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		data, err := fs.ReadFile(assets, path)
+		if err != nil {
+			return err
+		}
+		payload = append(payload, assetFile{path: strings.TrimPrefix(path, "agent-kit/"), data: data})
+		return nil
+	})
+	return payload, err
+}
+
+// toolkitPath rejects symlinks in managed paths before writing or removing.
+func toolkitPath(root, relative string) (string, error) {
+	path := root
+	for _, part := range strings.Split(filepath.ToSlash(relative), "/") {
+		if part == ".." || part == "" {
+			return "", fmt.Errorf("invalid toolkit path")
+		}
+		path = filepath.Join(path, part)
+		info, err := os.Lstat(path)
+		if err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+		if err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("toolkit path must not be a symlink: %s", relative)
 		}
 	}
-	payload = append(payload, assetFile{path: filepath.FromSlash(toolkitVersionPath), data: []byte(version + "\n"), mode: 0o600})
-	return payload, nil
+	return path, nil
 }
 
 func installPayload(root string, payload []assetFile) error {
 	for _, file := range payload {
-		target := filepath.Join(root, file.path)
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		target, err := toolkitPath(root, file.path)
+		if err != nil {
 			return err
 		}
-		mode := file.mode.Perm()
-		if mode == 0 {
-			mode = 0o644
-		}
-		if err := os.WriteFile(target, file.data, mode); err != nil {
+		if err := writeConfigAtomic(target, file.data); err != nil {
 			return err
 		}
 	}
 	for _, link := range toolkitLinks {
-		target := filepath.Join(root, link.path)
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		if _, err := toolkitPath(root, filepath.Dir(link.path)); err != nil {
 			return err
 		}
-		if err := os.Symlink(link.target, target); err != nil {
-			return fmt.Errorf("link %s: %w", target, err)
+		path := filepath.Join(root, link.path)
+		if target, err := os.Readlink(path); err == nil && target == link.target {
+			continue
+		}
+		if _, err := os.Lstat(path); err == nil {
+			return fmt.Errorf("refusing to replace existing path: %s", link.path)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := os.Symlink(link.target, path); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -165,3 +165,7 @@ func nestedNonblank(value any, key string) (string, bool) {
 	text, ok := object[key].(string)
 	return text, ok && strings.TrimSpace(text) != ""
 }
+
+type ValidationError struct{ Message string }
+
+func (e *ValidationError) Error() string { return e.Message }

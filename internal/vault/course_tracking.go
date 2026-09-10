@@ -136,7 +136,7 @@ func configureCanvasCourses(root string, current []CanvasCourseChoice, selectedI
 		if err != nil {
 			return CanvasTrackingResult{}, err
 		}
-		course := config.Course{Version: 2, Code: code, Canvas: newCanvasCourse(id, choice.Name)}
+		course := config.Course{Code: code, Canvas: newCanvasCourse(id, choice.Name)}
 		courses = append(courses, course)
 		byCode[code] = len(courses) - 1
 		changed[code] = course

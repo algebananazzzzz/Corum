@@ -75,13 +75,18 @@ func writeClaudeMCPConfig(path string) error {
 }
 
 func removeTOMLTable(content, table string) string {
+	return removeTOMLTables(content, table, false)
+}
+
+func removeTOMLTables(content, table string, descendants bool) string {
 	lines := strings.Split(content, "\n")
 	var kept []string
 	inTarget := false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
-			inTarget = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "["), "]")) == table
+			name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "["), "]"))
+			inTarget = name == table || (descendants && strings.HasPrefix(name, table+"."))
 		}
 		if !inTarget {
 			kept = append(kept, line)
@@ -119,3 +124,51 @@ func atomicConfigWrite(path string, data []byte, mode os.FileMode) error {
 }
 
 func errorsIsNotExist(err error) bool { return err != nil && os.IsNotExist(err) }
+
+// RemoveProjectMCP removes Corum's Jira entries while preserving other client settings.
+func RemoveProjectMCP(root string) error {
+	path := codexConfigPath(root)
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err == nil {
+		content := removeTOMLTables(string(data), "mcp_servers."+projectJiraMCPName, true)
+		if content != strings.TrimRight(string(data), "\n") {
+			if err := atomicConfigWrite(path, []byte(content+"\n"), 0o644); err != nil {
+				return err
+			}
+		}
+	}
+	path = claudeConfigPath(root)
+	data, err = os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	document := map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &document); err != nil {
+		return err
+	}
+	servers := map[string]json.RawMessage{}
+	if raw, ok := document["mcpServers"]; ok {
+		if err := json.Unmarshal(raw, &servers); err != nil {
+			return err
+		}
+	}
+	if _, ok := servers[projectJiraMCPName]; !ok {
+		return nil
+	}
+	delete(servers, projectJiraMCPName)
+	document["mcpServers"], err = json.Marshal(servers)
+	if err != nil {
+		return err
+	}
+	result, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicConfigWrite(path, append(result, '\n'), 0o644)
+}

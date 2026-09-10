@@ -7,37 +7,20 @@ import (
 
 // Course is courses/<code>/course.yaml.
 type Course struct {
-	Version int           `yaml:"version"`
-	Code    string        `yaml:"code"`
-	Canvas  *CanvasCourse `yaml:"canvas,omitempty"`
-	Jira    *JiraCourse   `yaml:"jira,omitempty"`
+	Code   string        `yaml:"code"`
+	Canvas *CanvasCourse `yaml:"canvas,omitempty"`
+	Jira   *JiraCourse   `yaml:"jira,omitempty"`
 }
 
 type CanvasCourse struct {
 	ID      int               `yaml:"id"`
 	Name    string            `yaml:"name,omitempty"`
 	Sources []string          `yaml:"sources"`
-	Folders map[string]string `yaml:"folders"`
+	Folders map[string]string `yaml:"folders,omitempty"`
 }
 
 type JiraCourse struct {
 	Epic string `yaml:"epic"`
-}
-
-// Services is the effective set for a course.
-type Services struct {
-	Canvas bool
-	Jira   bool
-	Wiki   bool
-}
-
-// Effective uses vault-wide Jira and wiki settings. Canvas remains course-specific.
-func Effective(workspace Workspace, course Course) Services {
-	return Services{
-		Canvas: workspace.Canvas != nil && course.Canvas != nil,
-		Jira:   workspace.Jira != nil,
-		Wiki:   workspace.Wiki != nil,
-	}
 }
 
 // LoadCourse reads one course configuration below root without changing the vault.

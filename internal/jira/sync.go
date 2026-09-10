@@ -144,7 +144,7 @@ func SyncEpic(ctx context.Context, root, courseCode, epicKey string, options Syn
 		return SyncResult{}, err
 	}
 	course := config.Course{Code: courseCode}
-	cachePath, _, err := statePaths(root, course)
+	cachePath, err := statePath(root, course)
 	if err != nil {
 		return SyncResult{}, err
 	}
@@ -173,7 +173,7 @@ func SyncEpic(ctx context.Context, root, courseCode, epicKey string, options Syn
 		now = options.Now
 	}
 	reconciledAt := now().Format(time.RFC3339Nano)
-	if err := writeJiraState(cachePath, JiraState{Version: 2, ReconciledAt: &reconciledAt, Issues: issues}); err != nil {
+	if err := writeJiraState(cachePath, JiraState{ReconciledAt: &reconciledAt, Issues: issues}); err != nil {
 		return SyncResult{}, fmt.Errorf("could not write Jira state: %w", err)
 	}
 	return SyncResult{Course: courseCode, Epic: epicKey, IssueCount: len(issues), CachePath: cachePath}, nil

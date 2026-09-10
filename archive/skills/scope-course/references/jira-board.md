@@ -16,11 +16,11 @@ Every create uses the course epic from `course.yaml`. Summaries start with `{{CO
 
 ## Dates
 
-Convert source timestamps to the timezone in `.config/corum/corum.yaml`. Use `Term_Calendar.md`, installed from the selected academic term, for week numbers. Check that its term matches the workspace; if no matching calendar is available, report the gap and use exact dates without inventing week numbers. For a `Task` whose true local deadline is before 1500, use the preceding date as Jira `due`; this leaves a usable workday. Sessions and milestones use the date on which they occur.
+Convert source timestamps to the timezone in `.config/corum/corum.yaml`. Look up week numbers in the configured term-calendar file. For a `Task` whose true local deadline is before 1500, use the preceding date as Jira `due`; this leaves a usable workday. Sessions and milestones use the date on which they occur.
 
 ## Status
 
-New issues use the board default. When an issue must move, read the available transitions through Jira MCP before proposing one.
+New issues use the board default. When an issue must move, call the Jira MCP transition tool with the transition declared under the workspace Jira configuration.
 
 ## Details
 

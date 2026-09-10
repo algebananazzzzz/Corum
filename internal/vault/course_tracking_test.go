@@ -13,8 +13,8 @@ import (
 
 func TestConfigureCanvasCoursesReconcilesOnlyVisibleSelection(t *testing.T) {
 	root := initializedVault(t, "test")
-	writeCourseFixture(t, root, "OLD", "version: 2\ncode: OLD\ncanvas:\n  id: 1\n  sources: [assignments]\njira:\n  epic: TODO-1\n")
-	writeCourseFixture(t, root, "ABSENT", "version: 2\ncode: ABSENT\ncanvas:\n  id: 3\n  sources: [pages]\n")
+	writeCourseFixture(t, root, "OLD", "code: OLD\ncanvas:\n  id: 1\n  sources: [assignments]\njira:\n  epic: TODO-1\n")
+	writeCourseFixture(t, root, "ABSENT", "code: ABSENT\ncanvas:\n  id: 3\n  sources: [pages]\n")
 	sentinel := filepath.Join(root, "courses", "OLD", "state", "keep")
 	if err := os.MkdirAll(filepath.Dir(sentinel), 0o755); err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestConfigureCanvasCoursesNormalizesIDs(t *testing.T) {
 
 func TestConfigureCanvasCoursesBackfillsTrackedCanvasName(t *testing.T) {
 	root := initializedVault(t, "test")
-	writeCourseFixture(t, root, "CS3103", "version: 2\ncode: CS3103\ncanvas:\n  id: 1\n  sources: [assignments]\n")
+	writeCourseFixture(t, root, "CS3103", "code: CS3103\ncanvas:\n  id: 1\n  sources: [assignments]\n")
 	result, err := ConfigureCanvasCourses(root, []CanvasCourseChoice{{ID: "1", Code: "CS3103", Name: "Computer Networks"}}, []string{"1"})
 	if err != nil || !reflect.DeepEqual(result.Unchanged, []string{"CS3103"}) {
 		t.Fatalf("ConfigureCanvasCourses() = %+v, %v", result, err)
@@ -90,8 +90,8 @@ func TestConfigureCanvasCoursesBackfillsTrackedCanvasName(t *testing.T) {
 
 func TestConfigureCanvasCoursesRollsBackEarlierWrites(t *testing.T) {
 	root := initializedVault(t, "test")
-	writeCourseFixture(t, root, "ONE", "version: 2\ncode: ONE\ncanvas:\n  id: 1\n  sources: [assignments]\n")
-	writeCourseFixture(t, root, "TWO", "version: 2\ncode: TWO\ncanvas:\n  id: 2\n  sources: [assignments]\n")
+	writeCourseFixture(t, root, "ONE", "code: ONE\ncanvas:\n  id: 1\n  sources: [assignments]\n")
+	writeCourseFixture(t, root, "TWO", "code: TWO\ncanvas:\n  id: 2\n  sources: [assignments]\n")
 	onePath := filepath.Join(root, "courses", "ONE", "course.yaml")
 	oneBefore, err := os.ReadFile(onePath)
 	if err != nil {
@@ -116,7 +116,7 @@ func TestConfigureCanvasCoursesRollsBackEarlierWrites(t *testing.T) {
 
 func TestConfigureCanvasCoursesRemovesNewDirectoryOnRollback(t *testing.T) {
 	root := initializedVault(t, "test")
-	writeCourseFixture(t, root, "OLD", "version: 2\ncode: OLD\ncanvas:\n  id: 1\n  sources: [assignments]\n")
+	writeCourseFixture(t, root, "OLD", "code: OLD\ncanvas:\n  id: 1\n  sources: [assignments]\n")
 	newDirectory := filepath.Join(root, "courses", "ANEW")
 	writes := 0
 
@@ -155,7 +155,7 @@ func TestConfigureCanvasCoursesCleansDirectoryCreatedByFailingWrite(t *testing.T
 
 func TestConfigureCanvasCoursesSuffixesConflictingCourseCode(t *testing.T) {
 	root := initializedVault(t, "test")
-	writeCourseFixture(t, root, "CS1010", "version: 2\ncode: CS1010\ncanvas:\n  id: 1\n  sources: [assignments]\n")
+	writeCourseFixture(t, root, "CS1010", "code: CS1010\ncanvas:\n  id: 1\n  sources: [assignments]\n")
 
 	result, err := ConfigureCanvasCourses(root, []CanvasCourseChoice{{ID: "2", Code: "CS1010", Name: "Programming Methodology"}}, []string{"2"})
 	if err != nil {
@@ -176,7 +176,7 @@ func TestConfigureCanvasCoursesSuffixesConflictingCourseCode(t *testing.T) {
 
 func TestConfigureCanvasCoursesDoesNotGraftOntoNonCanvasCourse(t *testing.T) {
 	root := initializedVault(t, "test")
-	writeCourseFixture(t, root, "CS1010", "version: 2\ncode: CS1010\njira:\n  epic: TODO-1\n")
+	writeCourseFixture(t, root, "CS1010", "code: CS1010\njira:\n  epic: TODO-1\n")
 
 	result, err := ConfigureCanvasCourses(root, []CanvasCourseChoice{{ID: "2", Code: "CS1010"}}, []string{"2"})
 	if err != nil {

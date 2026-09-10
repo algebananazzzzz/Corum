@@ -57,18 +57,6 @@ func (s rovoSelectionSession) Projects(ctx context.Context, cloudID string) ([]P
 
 func (s rovoSelectionSession) Close() error { return s.session.Close() }
 
-// SelectJira selects an accessible Jira resource and project from a Rovo session.
-func SelectJira(ctx context.Context, session *jira.RovoSession, prompts Prompter) (config.JiraWorkspace, error) {
-	if session == nil {
-		return config.JiraWorkspace{}, fmt.Errorf("Jira session is unavailable")
-	}
-	return selectJira(ctx, rovoSelectionSession{session}, prompts)
-}
-
-func selectJira(ctx context.Context, session JiraSession, prompts Prompter) (config.JiraWorkspace, error) {
-	return selectJiraWithLoading(ctx, session, prompts, nil)
-}
-
 func selectJiraWithLoading(ctx context.Context, session JiraSession, prompts Prompter, loading LoadingRunner) (config.JiraWorkspace, error) {
 	var resources []Resource
 	err := runLoadingTask(loading, ctx, "Loading Jira sites…", func(ctx context.Context) error {
