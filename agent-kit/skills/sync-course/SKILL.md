@@ -70,7 +70,7 @@ For each approved Jira action, call the corresponding Jira MCP tool directly. Af
 
 ## 6. Apply wiki work
 
-Consolidate approved wiki actions by target page and invoke `authoring-wiki` for the specified tier. Provide each author with its target, coverage, source paths, provenance labels, and page ranges.
+Consolidate approved wiki actions by target page. Invoke `authoring-wiki` for concepts and explainers; use the matching template for other page types. Provide each author with its target, coverage, source paths, provenance labels, and page ranges.
 
 Add each new page and gloss to `courses/{{COURSE}}/wiki/index.md`. Add approved source ranges to the index. Invoke `linting-wiki` to review page content, links, index entries, provenance, coverage, and consistency.
 

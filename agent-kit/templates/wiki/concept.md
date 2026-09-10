@@ -11,40 +11,22 @@ prereqs:
 # {{CONCEPT}}
 
 > [!note]
-> Intermediate tier: deep and concise. Complete every successfully read source in frontmatter; each page range belongs below a section or in the index's deliberate skipped table. Put an exact `%% {{SOURCE_LABEL}} p{{RANGE}} %%` below each supported heading. Use the authoring-wiki Markdown rules. Practice uses `[!tool]` for commands and observations and `[!example]` for worked examples. `[!research]` names material outside captured course sources. Order sections by the mechanism's lifecycle or path, not the source outline. Strip this callout when instantiating.
+> Authoring scaffold: use `authoring-wiki` for research and coverage, and Authoring Markdown for block choices. Keep the frontmatter and choose headings from the subject's logical parts. Replace this note and placeholders with the finished explanation.
 
-> [!abstract]
-> {{WHAT_IT_IS_AND_WHY_IT_EXISTS}}
+**{{CONCEPT}}:** {{ONE_SENTENCE_DEFINITION}}
 
----
-
-## {{MECHANISM_PART}}
+## {{DEFINING_MECHANISM}}
 %% {{SOURCE_LABEL}} p{{RANGE}} %%
 
-| Dimension | Value |
-| --- | --- |
-| Mechanism | {{MECHANISM}} |
-| When | {{WHEN}} |
-| Gotcha | {{GOTCHA}} |
+{{EXPLANATION_IN_THE_BLOCKS_THAT_BEST_FIT_THE_SUBJECT}}
 
-> [!example]
-> {{WORKED_EXAMPLE}}
+> [!example] {{CONCRETE_CASE}}
+> {{STARTING_CONDITIONS_STEPS_AND_RESULT}}
 
-> [!tool]
-> `{{COMMAND}}` — {{WHAT_TO_OBSERVE}}
-
-## {{WIRE_OR_DATA_PART}}
+## {{NEXT_LOGICAL_SECTION}}
 %% {{SOURCE_LABEL}} p{{RANGE}} %%
 
-| Field | Width | Value |
-| --- | --- | --- |
-| {{FIELD}} | {{WIDTH}} | {{VALUE}} |
-
-> [!warning]
-> {{ANSWER_CHANGING_MISTAKE}}
-
-> [!research]
-> {{RESEARCH_SOURCE}}. {{NECESSARY_GAP_FILLED}}
+{{EXPLANATION_WITH_RELEVANT_EXAMPLES_CONDITIONS_AND_LIMITATIONS}}
 
 ---
 

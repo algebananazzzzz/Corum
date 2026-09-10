@@ -28,8 +28,7 @@ Inspect both files before editing. Use one graph model for the editable source a
 ## Draw the content
 
 - Use sharp 90-degree corners for boxes, cells, and connector turns.
-- Put field names and widths inside boxes.
-- Put high-value constants in one compact legend line.
+- Follow [Authoring Markdown](../authoring-wiki/references/authoring-markdown.md#packet-layouts) for packet field labels, common values, and bit rulers.
 - Name payloads by their contents.
 - Use blue for link, purple for network, orange or yellow for transport, green for payload, and gray for neutral overhead when a layer palette helps.
 - Use colons or sentences for explanations and en dashes for ranges.

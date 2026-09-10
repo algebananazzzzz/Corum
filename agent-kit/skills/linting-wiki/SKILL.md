@@ -5,7 +5,7 @@ description: Use when reviewing a course wiki for coverage, provenance, links, i
 
 # Review a Course Wiki
 
-Review the selected course wiki and return clear findings. `sync-course` or the page author applies the resulting fixes and records the completed work. Read [Markdown conventions](../authoring-wiki/references/markdown-conventions.md) before reviewing page structure.
+Review the selected course wiki and return clear findings. `sync-course` or the page author applies the resulting fixes and records the completed work. Read [Authoring Markdown](../authoring-wiki/references/authoring-markdown.md) before reviewing page structure.
 
 ## 1. Establish the review set
 

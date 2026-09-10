@@ -1,298 +1,504 @@
-# Authoring with Markdown
+# Authoring Markdown
 
-Read [Markdown conventions](markdown-conventions.md) for the vault syntax contract. This guide shows how to shape knowledge into pages that can be understood, scanned, and reused. It applies to every wiki tier; the target-specific teaching, research, and compression rules live in `SKILL.md`.
+Write a page the reader can understand and scan. Lead with the subject's defining mechanism; use short conventions and concrete examples to shape each block.
 
-## Core principle
+Each block uses a subject suited to its purpose. Read the complete [ARP example](../examples/arp.md) for page-level pacing and block composition. Page-specific scope, research, and teaching requirements live in [Authoring Wiki](../SKILL.md).
 
-Choose the representation that makes the idea easiest to understand. A page is not a transcript of its course source. For a concept page, course material establishes why the topic matters in the course; reputable secondary explanations may provide the teaching backbone and the additional scope needed to understand the concept itself.
+## Page Order and Headings
 
-Use a block only when it serves a distinct reading job. Do not add headings, callouts, tables, or figures merely to make a page look structured.
+Use one `#` title, `##` for the subject's logical parts, and `###` for their subdivisions. Name headings with familiar subject terms, such as Algorithm and Complexity. Start with a one-line definition, then the defining mechanism.
 
-## Quick selection guide
-
-| Knowledge shape | Best representation |
-| --- | --- |
-| A term and its meaning | `**Term** — definition` |
-| A small set of parallel facts | Bullets with bold scan labels |
-| A meaningful sequence | Numbered list |
-| Repeated comparison dimensions | Table |
-| A formula or compact relationship | Mathematics with symbols defined nearby |
-| Messages, state changes, or branching | Mermaid |
-| Spatial, technical, or nested structure | Draw.io diagram |
-| A real command and its observation | `[!tool]` |
-| A worked application or trace | `[!example]` |
-| A material outside-course addition or disagreement | `[!research]` |
-| An answer-changing trap | `[!warning]` |
-| A visual that earns reading space | `[!figure]` |
-
-## Research, sources, and scope
-
-### Give sources different jobs
-
-| Source | Job in a concept page |
-| --- | --- |
-| Course material | Course relevance, terminology, emphasis, and assessed knowledge |
-| Reputable secondary explainer | Digestible teaching model, expanded context, examples, visuals, and a coherent concept-level scope |
-| Primary or official source | Exact semantics, standards, APIs, registered values, security-sensitive claims, and disagreements |
-
-Write every concept from a reputable secondary explanation as well as its course material. The secondary source must shape the teaching, not sit unused in the Sources list. Do not merely paraphrase the slides and append a research paragraph. Expand through the prerequisites, normal operation, important variants, limitations, failure modes, and examples needed to understand the named concept. When another idea becomes independently useful, link to the concept that owns it instead of absorbing it.
-
-A slide-derived summary is not a finished concept page. If time or access prevents the required secondary research, leave the item as a source note or draft rather than publishing it as a concept. A deadline changes how concisely the page is written; it does not turn the course source into the page's teaching backbone.
-
-GeeksforGeeks can be a useful secondary explainer for approachable computing concepts. It is not the authority for protocol semantics, standards, security claims, or disputed details; verify those against an RFC, standard, vendor documentation, paper, or another primary source.
-
-### Place evidence where it helps
-
-Keep the complete source inventory in the page metadata or Sources section required by its template. Keep captured-course provenance in its `%% {{source}} p{{range}} %%` comment beneath the heading it supports.
-
-For researched material, link or footnote the claim or paragraph that depends on it. Use `[!research]` only when the reader benefits from knowing that material is an important external addition, qualification, or conflict.
-
-**Weak**
+**Bad**
 
 ```markdown
-> [!research]
-> ARP entries can be poisoned. Source: RFC 826.
+# Binary Search
+
+## Halving the Search Interval
+## Following One Search
+## Handling Missing Values
+## Search Cost
 ```
 
-**Better**
+**Good**
 
 ```markdown
-An unsolicited ARP reply can overwrite a cached mapping on many hosts, which
-creates the basis for ARP spoofing.[^arp-spoofing]
+# Binary Search
 
-[^arp-spoofing]: [ARP and its security limitations](https://datatracker.ietf.org/doc/html/rfc826)
+**Binary search:** finds a target in sorted data by repeatedly halving the search interval.
+
+## Algorithm
+### Preconditions
+### Procedure
+## Complexity
+### Time Complexity
+### Space Complexity
 ```
 
-The evidence is adjacent to the claim; the page-level source inventory still records the source as a whole.
+Let section boundaries follow logical seams in the subject. Place worked examples and edge cases within the section they explain. The subject determines which sections are useful.
 
-## Page structure
+## Definitions and Paragraphs
 
-Use one `#` title. Use `##` for the page's meaningful divisions and `###` for genuine subdivisions; do not go deeper. Heading names should identify retrievable knowledge, not generic containers.
+Write definitions as `**Term:** meaning`. Keep paragraphs to three sentences or fewer; use them to introduce, connect, or interpret the surrounding blocks. Use colons, commas, parentheses, and full stops for punctuation.
 
-**Weak**
+**Bad**
 
 ```markdown
-## ARP
-
-### Process
-
-#### More details
+Caching is an extremely important technique that plays a crucial role in
+improving performance across a wide range of systems, and understanding it
+requires us to explore many aspects of computing.
 ```
 
-**Better**
+**Good**
 
 ```markdown
-## Resolving a Local Destination
+**Cache:** stores a reusable copy of data that is expensive to retrieve or compute.
 
-### Cache Miss
+A cache hit returns the stored result. A cache miss requires fetching or computing it first.
 ```
 
-There is no required concept-page anatomy. Choose a structure that fits the idea: a protocol may follow a packet's path, a proof technique may follow its reasoning steps, and a financial statement may follow what it represents and how to read it. An `[!abstract]` callout is useful when a short orientation helps; it is never required decoration.
+## Inline Formatting
 
-Use `---` to separate substantial regions, such as an opening orientation from the main explanation or the explanation from sources. Do not put one between every neighbouring heading.
+Use bold for terms and scan labels, inline code for literal values and syntax, and italics for a small distinction. Highlight the page's main takeaway once with `==…==`.
 
-## Prose, definitions, and lists
-
-Paragraphs introduce, connect, or interpret blocks. Keep them to three sentences or fewer. If a sentence contains parallel facts, use a list instead.
-
-**Weak**
+**Bad**
 
 ```markdown
-ARP is used on local networks, sends a request, receives a reply, stores the
-result, and can be attacked with spoofed replies.
+Use **reverse=True** with sorted because **this is extremely important**.
 ```
 
-**Better**
+**Good**
 
 ```markdown
-- **Scope:** resolves an IPv4 address only on the local link.
-- **Request:** asks which host owns the target address.
-- **Cache:** remembers a discovered mapping for later frames.
-- **Risk:** accepts a mapping model that can be abused by spoofed replies.
+**Descending order:** `sorted(values, reverse=True)` returns a *new* list ordered from largest to smallest.
+
+==`sorted()` preserves the original list.==
 ```
 
-Every bullet and numbered item starts with a bold scan label of fewer than five words followed by a colon. Use bullets for a family of facts and numbered lists only when reordering changes the meaning.
+## Lists and Steps
+
+Begin each item with a bold label of one to four words and a colon. Use bullets for parallel facts, numbering for a meaningful sequence, and checkboxes for verifiable completion.
+
+**Bad**
 
 ```markdown
-1. **Check Cache:** look for a fresh mapping of the next-hop IPv4 address.
-2. **Broadcast Request:** ask every host on the local link for the owner.
-3. **Store Reply:** cache the owner's MAC address before sending the frame.
+1. Change the amount of light.
+2. Measure plant growth.
+3. Keep watering consistent.
 ```
 
-Write definitions as the term followed by its meaning.
+**Good: parallel facts**
 
 ```markdown
-**ARP** — resolves a local IPv4 address to the link-layer address used to send a frame.
+- **Independent variable:** daily light exposure.
+- **Dependent variable:** plant height after two weeks.
+- **Controlled variable:** water supplied per day.
 ```
 
-Use inline code for literal commands, fields, filenames, flags, and values. Use emphasis to expose scan structure, not to make ordinary prose look important. Use mathematics only when it compresses a relationship without hiding its meaning, and define every symbol near its first use.
+**Good: sequence**
 
 ```markdown
-Transmission delay is $L/R$, where $L$ is packet length and $R$ is link rate.
+1. **Tare balance:** zero the reading with the empty container in place.
+2. **Add sample:** place the sample inside the container.
+3. **Record mass:** read the stable measurement and include its unit.
 ```
 
-## Callouts
-
-Callouts give a block a special reading role. Use them where that role helps; do not place one of each type on every page.
+**Bad: completion**
 
 ```markdown
-> [!{{type}}] {{optional title}}
-> {{content}}
+- [ ] Understand everything.
 ```
 
-| Callout | Use it for |
-| --- | --- |
-| `[!abstract]` | A compact orientation: what this is and why it exists |
-| `[!example]` | A worked example, trace, or application |
-| `[!example]-` | A folded answer for self-testing |
-| `[!tool]` | A command and the observation it should produce |
-| `[!research]` | A significant external addition, qualification, or conflict |
-| `[!warning]` | A likely mistake or answer-changing edge case |
-| `[!tip]` | An intuition, analogy, or mnemonic |
-| `[!quote]` | A short attributed primary-source quotation |
-| `[!figure]` | A visual with optional explanatory text |
-
-**Weak warning**
+**Good: completion**
 
 ```markdown
-> [!warning]
-> ARP uses a broadcast.
-```
-
-**Useful warning**
-
-```markdown
-> [!warning]
-> ARP resolves the next hop on the local link, not necessarily the final IP destination.
+- [ ] **Labels present:** each graph axis names its quantity and unit.
+- [ ] **Data matched:** plotted values agree with the measurement table.
 ```
 
 ## Tables
 
-Use a table when the reader needs to compare several subjects across the same dimensions. Give every column one stable meaning and place the identifying dimension first. Keep qualitative tables to five rows or fewer; enumerative material such as fields, values, and ordered records may run to its natural length. Never hide a paragraph in a table cell.
+Compare subjects across logical dimensions such as description, complexity, and applications. Give each subject one short description sentence that includes its operations. Express applications as concrete actions the reader can recognize. Put the dimension first and state assumptions beside implementation-dependent claims. Keep qualitative comparisons to five data rows or fewer; field inventories and schedules use as many rows as the content requires.
 
-**Weak**
+**Bad**
 
 ```markdown
-| Protocol | Details |
+| Structure | Details |
 | --- | --- |
-| ARP | It maps IPv4 to MAC addresses, broadcasts requests, replies unicast, caches entries, and can be spoofed. |
+| Stack | Stores items, supports adding and removing them, and is useful for undo history. |
 ```
 
-**Better**
+**Good**
 
 ```markdown
-| Aspect | ARP |
+|  | Stack | Queue |
+| --- | --- | --- |
+| Description | Adds and removes items at the top, so the newest item leaves first. | Adds items at the back and removes them from the front, so the oldest item leaves first. |
+| Time complexity | Push, pop, peek: $O(1)$ | Enqueue, dequeue, peek: $O(1)$ |
+| Space complexity | $O(n)$ | $O(n)$ |
+| Applications | Reversing the most recent edit in a text editor | Printing documents in the order they were submitted |
+
+Here, $n$ is the number of stored items. Complexities assume a linked stack with a top pointer and a linked queue with front and rear pointers.
+```
+
+Keep each cell to a compact fact. Refer to the relevant table row when a use case needs information already presented there.
+
+**Bad: repeating the table**
+
+```markdown
+Stacks add and remove items at the top, so the newest item leaves first. Queues add items at the back and remove them from the front, so the oldest item leaves first. Both use $O(n)$ space.
+```
+
+**Good: referring to the table**
+
+```markdown
+To choose a structure for a text editor's Undo feature, refer to the comparison table above.
+```
+
+## Callouts
+
+Give each callout one reading purpose and a short, specific title.
+
+| Type | Purpose |
 | --- | --- |
-| Purpose | Resolve local IPv4 addresses to link-layer addresses |
-| Request | Broadcast to the local link |
-| Reply | Usually unicast to the requester |
-| Result | Cached IPv4-to-MAC mapping |
-| Limitation | No built-in authentication |
-```
+| `[!abstract]` | Orientation when the subject benefits from it |
+| `[!example]` | Concrete input, steps, and result |
+| `[!example]-` | Folded question and answer |
+| `[!tool]` | Command and interpretation of its output |
+| `[!warning]` | Likely mistake that changes the answer |
+| `[!tip]` | Intuition, analogy, or memory aid |
+| `[!research]` | Significant external addition or source disagreement |
+| `[!quote]` | Exact attributed quotation |
+| `[!figure]` | Diagram or explanatory image |
 
-## Links, embeds, and ownership
-
-Link supporting knowledge with a short readable alias. Link to a section when the reader needs one exact idea.
-
-```markdown
-See [[courses/{{COURSE}}/wiki/concepts/IP Addressing|IP addressing]].
-See [[courses/{{COURSE}}/wiki/concepts/IP Addressing#Local Delivery|IP addressing: local delivery]].
-```
-
-Embed a section only when the reader needs its content in the current reading path. Do not copy shared material into multiple pages; update the owning page instead.
+**Bad**
 
 ```markdown
-![[courses/{{COURSE}}/wiki/concepts/IP Addressing#Subnet Mask]]
+> [!warning] Important
+> Averages are useful in statistics.
 ```
 
-Use footnotes for optional qualifications or citation detail, not for definitions or answer-changing exceptions.
+**Good**
 
-## Visuals and diagrams
+```markdown
+> [!warning] An Outlier Can Shift the Mean
+> For `3, 4, 5, 6, 82`, the mean is `20`, while the median is `5`. The median better represents the middle of this particular set.
+```
 
-Actively look for a visual while researching a concept. Include one when a diagram, illustration, packet layout, trace, graph, or annotated example makes the model materially clearer. Do not manufacture a visual for an idea that is already clearest as a short definition, list, formula, or table.
+### Worked Examples and Self-Checks
 
-Choose the format that matches the knowledge:
+Supply a concrete starting situation and a result the reader can follow.
 
-| Visual shape | Use |
-| --- | --- |
-| Process, messages, branches, or state transitions | Mermaid |
-| Packet layout, topology, nesting, or component structure | Editable Draw.io pair |
-| Real-world or irreducible explanatory image | Source image in a `[!figure]` callout |
-| Stable repeated dimensions | Table, not a diagram |
+**Bad**
 
-Use a secondary source's visual when its reuse terms permit it and record that source at page level. If reuse is unclear, link or embed it from the source where suitable. If neither option is appropriate, recreate the factual content in Mermaid or Draw.io without copying the visual's expressive design. A figure caption is optional; add one only when it directs the reader to a useful observation.
+```markdown
+> [!example]
+> Imagine solving an equation.
+```
 
-**Weak Mermaid use**
+**Good**
+
+```markdown
+> [!example] Solve $3x + 6 = 18$
+> Apply the same operation to both sides to preserve equality.
+>
+> 1. **Subtract six:** $3x = 12$.
+> 2. **Divide by three:** $x = 4$.
+> 3. **Check:** $3(4) + 6 = 18$.
+
+> [!example]- Check Your Understanding
+> **Question:** solve $2x + 5 = 13$.
+>
+> **Answer:** subtract five, then divide by two: $x = 4$.
+```
+
+### Quotations and Research
+
+Use exact quotations with attribution. Integrate ordinary sourced facts into the explanation; reserve research callouts for a distinction the reader benefits from recognizing.
+
+**Bad**
+
+```markdown
+> [!quote]
+> Readability matters.
+
+> [!research]
+> Python can sort lists.
+```
+
+**Good**
+
+```markdown
+> [!quote] Tim Peters: The Zen of Python
+> “Readability counts.”
+>
+> [PEP 20](https://peps.python.org/pep-0020/).
+
+> [!research] Equal Sort Keys Preserve Input Order
+> Beyond arranging keys, Python guarantees a stable sort: records with equal keys retain their original order. This supports sorting on a secondary key before a primary key. [Python Sorting HOWTO](https://docs.python.org/3/howto/sorting.html#sort-stability-and-complex-sorts)
+```
+
+## Commands and Code
+
+Label every fence with its language. Keep executable input and illustrative output in separate blocks. Explain what the reader should observe.
+
+**Bad**
+
+```markdown
+Run Python to sort the values and it prints the answer.
+```
+
+**Good**
+
+````markdown
+> [!tool] Sort a List in Python
+> ```bash
+> python3 -c 'print(sorted([3, 1, 2]))'
+> ```
+>
+> Expected output:
+>
+> ```text
+> [1, 2, 3]
+> ```
+>
+> The returned list contains the same values in ascending order.
+````
+
+Use a code fence for material the reader will reproduce or inspect literally. Describe an algorithm with ordered steps when its reasoning is the focus.
+
+## Mathematics
+
+Use `$…$` inline and `$$…$$` for a displayed relationship. Define symbols and units beside the formula.
+
+**Bad: inline delimiters**
+
+```markdown
+For (P(A\mid B)), condition on (B).
+```
+
+**Good: inline delimiters**
+
+```markdown
+For $P(A\mid B)$, condition on $B$.
+```
+
+**Bad**
+
+```markdown
+Energy is half m v squared.
+```
+
+**Good**
+
+```markdown
+**Kinetic energy:** $E_k = \tfrac{1}{2}mv^2$, where $m$ is mass in kilograms and $v$ is speed in metres per second.
+
+For a $2\,\text{kg}$ object moving at $3\,\text{m/s}$:
+
+$
+E_k = \tfrac{1}{2}(2)(3^2) = 9\,\text{J}
+$
+```
+
+## Diagrams and Figures
+
+Use Mermaid for exchanges, sequences, branches, and state changes. Use editable Draw.io for packet layouts, topology, and spatial structure.
+
+Give each diagram participant one concrete role. Show alternative paths as branches or separate examples.
+
+**Bad: process diagram**
 
 ```mermaid
 flowchart LR
-  A[ARP] --> B[IPv4]
-  A --> C[MAC]
+    A[Document] --> B[Words]
+    A --> C[Paragraphs]
 ```
 
-**Useful Mermaid use**
+**Good: process diagram**
 
 ```mermaid
-sequenceDiagram
-    participant S as Sender
-    participant L as Local Link
-    participant O as Target Owner
-    S->>L: Broadcast ARP request for target IPv4
-    L->>O: Deliver broadcast
-    O->>S: Unicast ARP reply with MAC address
-    S->>S: Cache mapping
+flowchart LR
+    D[Draft] --> R{Review decision}
+    R -->|Changes requested| E[Revise]
+    E --> R
+    R -->|Approved| P[Publish]
 ```
 
-The second diagram reveals message order and actors; the first merely restates a relationship that prose can say faster.
+### Packet Layouts
 
-## Commands, code, and figures
+Keep each address field whole. Put common values in parentheses. Use a bit ruler where box widths represent bit widths; identify which rows it describes.
 
-Use a code block only for material the reader must reproduce or inspect literally. Label every fence and separate a command from expected output.
+| Element | Bad | Good |
+| --- | --- | --- |
+| Hardware type | Hardware type: 2 bytes | Hardware type (Ethernet = 1) |
+| Protocol type | Protocol type: 2 bytes | Protocol type (IPv4 = 0x0800) |
+| Address length | Hardware length (6) | Hardware length (6 bytes) |
+| Address field | Sender MAC, first 4 bytes; Sender MAC, last 2 bytes | Sender MAC |
+| Header ruler | An unlabeled scale spanning variable-length rows | 0, 8, 16, 24, 32 above the fixed header |
 
-````markdown
-```console
-arp -a
-```
+Use square corners. Keep the SVG and its editable `.svg.xml` sidecar synchronized through the Draw.io workflow. See the approved [ARP diagram](../examples/assets/arp-message-format.svg) and [editable source](../examples/assets/arp-message-format.svg.xml).
 
-Expected result:
+### Figure Embeds
 
-```text
-? (192.0.2.10) at 00:11:22:33:44:55 on en0
-```
-````
+Place figures in `courses/{{COURSE}}/wiki/assets/` and embed them in a figure callout. A caption earns its place by directing attention to an observation.
 
-Wrap a chosen visual in `[!figure]` when that makes it a deliberate part of the reading path. The source belongs in the page-level inventory; add a caption only if it improves interpretation.
+**Bad**
 
 ```markdown
-> [!figure]
-> ![[courses/{{COURSE}}/wiki/assets/arp-exchange.drawio.svg]]
-> The reply is unicast, but the request reaches every host on the local link.
+> [!figure] Leaf Cross-Section
+> ![[courses/{{COURSE}}/wiki/assets/leaf-cross-section.svg]]
+> This diagram shows a leaf cross-section.
 ```
 
-## Complete pattern
+**Good**
 
 ```markdown
-## Resolving a Local Destination
-%% {{LECTURE}} p18-22 %%
-
-**ARP** — resolves the IPv4 address of a local next hop to the link-layer
-address needed for frame delivery.
-
-1. **Check Cache:** look for a fresh mapping before sending a request.
-2. **Broadcast Request:** ask the local link which host owns the target IPv4 address.
-3. **Cache Reply:** store the owner's MAC address after receiving its reply.
-
-> [!figure]
-> ![[courses/{{COURSE}}/wiki/assets/arp-exchange.drawio.svg]]
-
-> [!warning]
-> The target is the next hop on the local link. A remote destination is reached
-> through the default gateway's MAC address instead.
-
-An unsolicited reply can replace a cached mapping on many hosts, which makes
-ARP spoofing possible.[^spoofing]
-
-[^spoofing]: [ARP](https://datatracker.ietf.org/doc/html/rfc826)
+> [!figure] Leaf Cross-Section
+> ![[courses/{{COURSE}}/wiki/assets/leaf-cross-section.svg]]
 ```
 
-The heading identifies the idea, the definition supplies the model, the ordered list preserves the mechanism, the visual earns its place, the warning prevents a common error, and the external claim carries local evidence.
+## Links and Footnotes
+
+Give vault links readable aliases. Link to a section for one precise idea; embed the owning section when its content belongs in the current reading path. Place external citations beside the claims they support.
+
+**Bad**
+
+```markdown
+Read more [here](https://docs.python.org/3/howto/sorting.html).
+See Sorting.
+```
+
+**Good**
+
+```markdown
+Python preserves the relative order of equal sort keys. [Python Sorting HOWTO](https://docs.python.org/3/howto/sorting.html#sort-stability-and-complex-sorts)
+
+See [[courses/{{COURSE}}/wiki/concepts/Sorting#Stable Sorts|sorting: stability]].
+
+![[courses/{{COURSE}}/wiki/concepts/Sorting#Comparison Keys]]
+```
+
+Keep essential definitions and exceptions in the reading path. Use footnotes for optional detail.
+
+**Bad**
+
+```markdown
+Calculate the median.[^meaning]
+
+[^meaning]: The median is the middle value after sorting, or the mean of the two middle values for an even count.
+```
+
+**Good**
+
+```markdown
+**Median:** the middle value after sorting, or the mean of the two middle values for an even count.
+
+The median of `3, 4, 5, 6, 82` is `5`.[^notation]
+
+[^notation]: The median is also called the second quartile, $Q_2$.
+```
+
+## Metadata and Provenance
+
+Start course pages with the selected template's YAML frontmatter. Quote wiki links inside YAML. Place exact course-source markers directly beneath the supported heading. Use digits and an ASCII hyphen for a contiguous range, such as `p6-7`; put disjoint ranges in separate markers.
+
+**Bad**
+
+```markdown
+# Conservation of Energy
+Source: lecture somewhere around pages 6 to 12.
+```
+
+**Good**
+
+```markdown
+---
+tier: concept
+course: "{{COURSE}}"
+sources:
+  - "[[courses/{{COURSE}}/raw/lectures/{{LECTURE}}.pdf]]"
+---
+
+# Conservation of Energy
+
+## Exchanging Potential and Kinetic Energy
+%% {{LECTURE}} p6-7 %%
+%% {{LECTURE}} p11-12 %%
+
+A falling object converts gravitational potential energy into kinetic energy.
+```
+
+Keep the complete source inventory in the template's metadata or Sources section. Ordinary standalone notes follow their task's metadata requirements.
+
+## Spacing, Separators, and Escapes
+
+Use blank lines between headings and content, between paragraphs and lists, and around fenced blocks. Keep a course provenance marker attached to its heading. Use horizontal rules for substantial boundaries such as the start of Sources.
+
+**Bad**
+
+```markdown
+## Measurement Results
+The samples differ in mass.
+- **Largest mass:** sample C.
+---
+## Measurement Uncertainty
+---
+## Instrument Precision
+```
+
+**Good**
+
+```markdown
+## Measurement Results
+
+The samples differ in mass.
+
+- **Largest mass:** sample C.
+
+## Measurement Uncertainty
+
+Record the balance's precision alongside each reading.
+
+---
+
+## Sources
+```
+
+| Syntax | Bad | Good |
+| --- | --- | --- |
+| Placeholder | `<COURSE>` | `{{COURSE}}` |
+| Prose arrow | `Draft -> Review` | `Draft → Review` |
+| Table-cell pipe | An unescaped alias separator | `[[Page\|Alias]]` |
+| HTML tag name | A bare tag in prose | The tag in inline code |
+
+Keep diagram and code syntax native to their language, such as Mermaid's `->>` message arrow.
+
+### Dates in Tables
+
+Convert captured times to the workspace timezone and obtain week numbers from the configured term calendar.
+
+**Bad**
+
+```markdown
+| Event | When |
+| --- | --- |
+| Lab | Next Tuesday afternoon |
+```
+
+**Good**
+
+```markdown
+| Event | When |
+| --- | --- |
+| {{EVENT}} | Week {{number}} \| {{Day}} {{day}} {{month}}, {{start}}-{{end}} |
+```
+
+## Review Before Delivery
+
+- **Opening:** the definition and defining mechanism appear first.
+- **Headings:** familiar subject terms identify logical sections and subdivisions.
+- **Blocks:** each block explains, compares, demonstrates, or supports a specific idea.
+- **Examples:** inputs and results are concrete and consistent.
+- **Punctuation:** use colons, commas, parentheses, full stops, hyphens, and en dashes.
+- **Visuals:** diagrams render clearly and their editable sources match.
+- **Evidence:** source links support the adjacent claims.
