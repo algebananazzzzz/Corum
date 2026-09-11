@@ -38,7 +38,7 @@ func (u configureUI) connectGoogle(ctx context.Context, force bool) error {
 		return err
 	}
 	if !force && status.Method != "" && status.Method != "none" {
-		index, e := u.prompts.Select("Google connection needs attention", []Choice{{Label: "Sign in again"}, {Label: "Back — check API access or administrator restrictions"}})
+		index, e := withDescription(u.prompts, "Reconnect your account, or go back to review Google access settings.").Select("Google connection needs attention", []Choice{{Label: "Sign in again"}, {Label: "Back — check API access or administrator restrictions"}})
 		if e != nil {
 			return e
 		}
@@ -76,7 +76,7 @@ func (u configureUI) googleClientSetup(target string) error {
 			return err
 		}
 	}
-	path, err := u.prompts.Input("Path to downloaded Google client JSON", "")
+	path, err := withDescription(u.prompts, "Enter the path to the Desktop app JSON downloaded from Google Cloud.").Input("Path to downloaded Google client JSON", "")
 	if err != nil {
 		return err
 	}

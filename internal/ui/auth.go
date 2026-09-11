@@ -67,7 +67,7 @@ func RunCanvasAuth(ctx context.Context, deps CanvasAuthDependencies) (err error)
 	}
 	token := storedToken
 	if !deps.ReuseCredential || token == "" {
-		token, err = deps.Prompts.Password("Canvas API token", storedToken)
+		token, err = withDescription(deps.Prompts, "Paste a token from Canvas Settings → Approved Integrations.").Password("Canvas API token", storedToken)
 		if err != nil {
 			return promptError(err)
 		}
@@ -112,7 +112,7 @@ func RunCanvasAuth(ctx context.Context, deps CanvasAuthDependencies) (err error)
 		return err
 	}
 	choices := courseChoices(current, tracked)
-	selected, err := deps.Prompts.MultiSelect("Select current Canvas courses to track", choices)
+	selected, err := withDescription(deps.Prompts, "Choose the courses to sync into this vault.").MultiSelect("Select current Canvas courses to track", choices)
 	if err != nil {
 		return promptError(err)
 	}

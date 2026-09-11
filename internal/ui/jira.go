@@ -70,7 +70,7 @@ func selectJiraWithLoading(ctx context.Context, session JiraSession, prompts Pro
 	if len(resources) == 0 {
 		return config.JiraWorkspace{}, fmt.Errorf("no accessible Jira sites")
 	}
-	resource, err := selectValue(prompts, "Atlassian site", resources, func(value Resource) string {
+	resource, err := selectValue(withDescription(prompts, "Choose the Jira site that contains your course project."), "Atlassian site", resources, func(value Resource) string {
 		if value.Name != "" {
 			return value.Name
 		}
@@ -94,7 +94,7 @@ func selectJiraWithLoading(ctx context.Context, session JiraSession, prompts Pro
 	if len(projects) == 0 {
 		return config.JiraWorkspace{}, fmt.Errorf("selected Jira site has no projects")
 	}
-	project, err := selectValue(prompts, "Jira project", projects, func(value Project) string {
+	project, err := selectValue(withDescription(prompts, "Choose the project that holds your course epics."), "Jira project", projects, func(value Project) string {
 		if value.Name == "" {
 			return value.Key
 		}

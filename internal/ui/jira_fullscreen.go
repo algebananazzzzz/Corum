@@ -232,8 +232,8 @@ func (s *jiraAuthScreen) selectionForm() *huh.Form {
 		choices[index] = huh.NewOption(option.label, index)
 	}
 	return huh.NewForm(huh.NewGroup(
-		huh.NewSelect[int]().Title("Jira project").Options(choices...).Value(&s.selected),
-		huh.NewConfirm().Title("Save this Jira configuration?").WithButtonAlignment(lipgloss.Left).Value(&s.confirmed),
+		huh.NewSelect[int]().Title("Jira project").Description("Choose the project that holds your course epics.").Options(choices...).Value(&s.selected),
+		huh.NewConfirm().Title("Save this Jira configuration?").Description("Use the selected project for this vault.").WithButtonAlignment(lipgloss.Left).Value(&s.confirmed),
 	)).WithShowHelp(false).WithShowErrors(false).WithWidth(s.formWidth())
 }
 

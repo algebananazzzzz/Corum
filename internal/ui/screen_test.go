@@ -35,18 +35,17 @@ func TestScreenRendersOdysseyStyleFullscreenFrame(t *testing.T) {
 	}
 }
 
-func TestMappingPaneFitsWideAndNarrowTerminals(t *testing.T) {
+func TestMappingDescriptionFitsWideAndNarrowTerminals(t *testing.T) {
 	for _, width := range []int{110, 65} {
 		value := ""
-		s := NewScreen("Course mapping", huh.NewForm(huh.NewGroup(huh.NewInput().Title("Destination name").Value(&value))))
-		s.sidebar = "CS101 → Existing\nCS102 → Unmapped"
+		s := NewScreen("Course mapping", huh.NewForm(huh.NewGroup(huh.NewInput().Title("Destination name").Description("CS101 — Computer Science\nCurrent: Existing").Value(&value))))
 		s.Init()
 		s.Update(tea.WindowSizeMsg{Width: width, Height: 30})
 		view := ansi.Strip(s.View().Content)
 		if !strings.Contains(view, "Destination name") {
 			t.Fatal(view)
 		}
-		if strings.Contains(view, "CS101") != (width >= 85) {
+		if !strings.Contains(view, "CS101 — Computer Science") || !strings.Contains(view, "Current: Existing") {
 			t.Fatalf("width %d: %s", width, view)
 		}
 		if lipgloss.Width(view) > width {

@@ -32,10 +32,25 @@ type Prompter interface {
 
 // HuhPrompter implements Prompter with Huh.
 type HuhPrompter struct {
-	Sidebar    string
-	In         io.Reader
-	Out        io.Writer
-	Accessible bool
+	Description string
+	In          io.Reader
+	Out         io.Writer
+	Accessible  bool
+}
+
+// withDescription adds field guidance without changing orchestration prompts.
+func withDescription(p Prompter, description string) Prompter {
+	switch hp := p.(type) {
+	case HuhPrompter:
+		hp.Description = description
+		return hp
+	case *HuhPrompter:
+		copy := *hp
+		copy.Description = description
+		return copy
+	default:
+		return p
+	}
 }
 
 func NewHuhPrompter(in io.Reader, out io.Writer) HuhPrompter {
@@ -44,7 +59,7 @@ func NewHuhPrompter(in io.Reader, out io.Writer) HuhPrompter {
 
 func (p HuhPrompter) Input(label, defaultValue string) (string, error) {
 	value := defaultValue
-	if err := p.run(huh.NewInput().Title(label).Value(&value)); err != nil {
+	if err := p.run(huh.NewInput().Title(label).Description(p.Description).Value(&value)); err != nil {
 		return "", promptError(err)
 	}
 	return value, nil
@@ -52,7 +67,7 @@ func (p HuhPrompter) Input(label, defaultValue string) (string, error) {
 
 func (p HuhPrompter) Password(label, defaultValue string) (string, error) {
 	value := defaultValue
-	if err := p.run(huh.NewInput().Title(label).Value(&value).EchoMode(huh.EchoModePassword)); err != nil {
+	if err := p.run(huh.NewInput().Title(label).Description(p.Description).Value(&value).EchoMode(huh.EchoModePassword)); err != nil {
 		return "", promptError(err)
 	}
 	return value, nil
@@ -60,7 +75,7 @@ func (p HuhPrompter) Password(label, defaultValue string) (string, error) {
 
 func (p HuhPrompter) Confirm(label string, defaultValue bool) (bool, error) {
 	value := defaultValue
-	if err := p.run(huh.NewConfirm().Title(label).WithButtonAlignment(lipgloss.Left).Value(&value)); err != nil {
+	if err := p.run(huh.NewConfirm().Title(label).Description(p.Description).WithButtonAlignment(lipgloss.Left).Value(&value)); err != nil {
 		return false, promptError(err)
 	}
 	return value, nil
@@ -75,7 +90,7 @@ func (p HuhPrompter) Select(label string, choices []Choice) (int, error) {
 	for i, choice := range choices {
 		options[i] = huh.NewOption(choice.Label, i)
 	}
-	if err := p.run(huh.NewSelect[int]().Title(label).Options(options...).Value(&value)); err != nil {
+	if err := p.run(huh.NewSelect[int]().Title(label).Description(p.Description).Options(options...).Value(&value)); err != nil {
 		return 0, promptError(err)
 	}
 	return value, nil
@@ -93,7 +108,7 @@ func (p HuhPrompter) MultiSelect(label string, choices []Choice) ([]int, error) 
 			value = append(value, i)
 		}
 	}
-	field := huh.NewMultiSelect[int]().Title(label).Options(options...).Value(&value).Filterable(true)
+	field := huh.NewMultiSelect[int]().Title(label).Description(p.Description).Options(options...).Value(&value).Filterable(true)
 	if err := p.run(field); err != nil {
 		return nil, promptError(err)
 	}
@@ -102,9 +117,6 @@ func (p HuhPrompter) MultiSelect(label string, choices []Choice) ([]int, error) 
 
 func (p HuhPrompter) run(field huh.Field) error {
 	form := huh.NewForm(huh.NewGroup(field)).WithAccessible(p.Accessible)
-	if p.Sidebar != "" {
-		return runMappingForm(form, p.Sidebar, p.In, p.Out)
-	}
 	return RunScreen("Corum", form, p.In, p.Out)
 }
 
@@ -130,7 +142,7 @@ type ServiceSettings struct {
 
 func newServicesForm(settings *ServiceSettings) *huh.Form {
 	return huh.NewForm(huh.NewGroup(
-		huh.NewSelect[string]().Title("Jira Integration").Options(
+		huh.NewSelect[string]().Title("Jira Integration").Description("Connect Jira to track course tasks in epics.").Options(
 			huh.NewOption("None", "none"),
 			huh.NewOption("Jira", "jira"),
 		).Value(&settings.Integration),

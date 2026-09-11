@@ -39,13 +39,13 @@ func newInitScreen(root string) (*Screen, *initAnswers) {
 		canvasURL: "https://canvas.nus.edu.sg", confirmed: true,
 	}
 	form := huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("Vault path").Validate(nonblank).Value(&answers.root),
+		huh.NewInput().Title("Vault path").Description("Folder where Corum will store your courses and notes.").Validate(nonblank).Value(&answers.root),
 		huh.NewSelect[string]().Title("Workspace timezone").Options(huh.NewOption("Asia/Singapore", "Asia/Singapore")).Value(&answers.timezone),
-		huh.NewSelect[string]().Title("Academic term").Options(
+		huh.NewSelect[string]().Title("Academic term").Description("Choose the semester you’re organizing.").Options(
 			huh.NewOption("AY2026/27 Semester 1", "AY2026/27 Semester 1"),
 			huh.NewOption("AY2026/27 Semester 2", "AY2026/27 Semester 2"),
 		).Value(&answers.term),
-		huh.NewInput().Title("Canvas URL").Value(&answers.canvasURL),
+		huh.NewInput().Title("Canvas URL").Description("Your university’s Canvas address.").Value(&answers.canvasURL),
 		huh.NewConfirm().Title("Create this vault?").Validate(func(confirmed bool) error {
 			if !confirmed {
 				return errors.New("confirmation is required")

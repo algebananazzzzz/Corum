@@ -90,7 +90,7 @@ func (u configureUI) mapping(ctx context.Context) error {
 			choices = append(choices, Choice{Label: c.Code + " → " + mappingLabel(c, provider, destinations)})
 		}
 		choices = append(choices, Choice{Label: "Back"})
-		index, err := u.prompts.Select("Select a course to map", choices)
+		index, err := withDescription(u.prompts, "Choose a course to change where its tasks are tracked.").Select("Select a course to map", choices)
 		if err != nil {
 			return err
 		}
@@ -100,16 +100,7 @@ func (u configureUI) mapping(ctx context.Context) error {
 		if index < 0 || index >= len(courses) {
 			return fmt.Errorf("invalid course")
 		}
-		p := u.prompts
-		if hp, ok := p.(HuhPrompter); ok {
-			lines := []string{}
-			for _, choice := range choices[:len(courses)] {
-				lines = append(lines, choice.Label)
-			}
-			hp.Sidebar = strings.Join(lines, "\n")
-			p = hp
-		}
-		err = mapCourse(ctx, u.root, courses[index], provider, destinations, store, p)
+		err = mapCourse(ctx, u.root, courses[index], provider, destinations, store, u.prompts)
 		u.report(err)
 	}
 }
@@ -137,7 +128,15 @@ func mappingLabel(c config.Course, provider string, items []destination) string 
 }
 
 func mapCourse(ctx context.Context, root string, course config.Course, provider string, items []destination, store destinationStore, p Prompter) error {
-	action, err := p.Select(course.Code+" destination — changes save immediately", []Choice{{Label: "Select existing"}, {Label: "Create new"}, {Label: "Leave unmapped / remove mapping"}, {Label: "Back"}})
+	if hp, ok := p.(HuhPrompter); ok {
+		hp.Description = course.Code
+		if course.Canvas != nil && course.Canvas.Name != "" {
+			hp.Description += " — " + course.Canvas.Name
+		}
+		hp.Description += "\nCurrent: " + mappingLabel(course, provider, items) + "\nChanges save immediately."
+		p = hp
+	}
+	action, err := p.Select("Map course", []Choice{{Label: "Select existing"}, {Label: "Create new"}, {Label: "Leave unmapped / remove mapping"}, {Label: "Back"}})
 	if err != nil {
 		return err
 	}
@@ -154,7 +153,7 @@ func mapCourse(ctx context.Context, root string, course config.Course, provider 
 		for _, d := range items {
 			choices = append(choices, Choice{Label: d.Name + " (" + d.ID + ")"})
 		}
-		index, err := p.Select("Existing destinations (/ to search)", choices)
+		index, err := p.Select("Choose a destination", choices)
 		if err != nil {
 			return err
 		}
