@@ -169,7 +169,7 @@ func loadingTickCmd() tea.Cmd {
 }
 
 func (s *Screen) Init() tea.Cmd {
-	return tea.Batch(s.form.Init(), tea.RequestBackgroundColor)
+	return s.form.Init()
 }
 
 func (s *Screen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

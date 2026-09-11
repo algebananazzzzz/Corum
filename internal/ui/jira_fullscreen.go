@@ -167,7 +167,7 @@ func (s *jiraAuthScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if s.height > 0 {
 			s.form = s.form.WithHeight(max(s.height-s.style.base.GetVerticalFrameSize()-5, 5))
 		}
-		return s, s.Screen.Init()
+		return s, s.form.Init()
 	case jiraLinkResult:
 		if msg.url != "" {
 			s.link = msg.url

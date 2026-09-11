@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -145,19 +144,4 @@ func TestLoadingScreenUsesTheFullscreenFrame(t *testing.T) {
 	if !view.AltScreen || !strings.Contains(view.Content, "Loading Canvas courses…") {
 		t.Fatalf("loading screen is not fullscreen:\n%s", view.Content)
 	}
-}
-
-func TestScreenRequestsTerminalBackgroundForDefaultTheme(t *testing.T) {
-	s := NewScreen("Corum", huh.NewForm(huh.NewGroup(huh.NewNote().Title("Settings"))))
-	msg := s.Init()()
-	commands, ok := msg.(tea.BatchMsg)
-	if !ok {
-		t.Fatal("screen initialization must request terminal background alongside form initialization")
-	}
-	for _, cmd := range commands {
-		if reflect.TypeOf(cmd()) == reflect.TypeOf(tea.RequestBackgroundColor()) {
-			return
-		}
-	}
-	t.Fatal("screen did not request terminal background for Huh's default theme")
 }
