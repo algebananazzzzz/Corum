@@ -7,9 +7,10 @@ import (
 
 // Course is courses/<code>/course.yaml.
 type Course struct {
-	Code   string        `yaml:"code"`
-	Canvas *CanvasCourse `yaml:"canvas,omitempty"`
-	Jira   *JiraCourse   `yaml:"jira,omitempty"`
+	Code        string             `yaml:"code"`
+	Canvas      *CanvasCourse      `yaml:"canvas,omitempty"`
+	Jira        *JiraCourse        `yaml:"jira,omitempty"`
+	GoogleTasks *GoogleTasksCourse `yaml:"google_tasks,omitempty"`
 }
 
 type CanvasCourse struct {
@@ -21,6 +22,10 @@ type CanvasCourse struct {
 
 type JiraCourse struct {
 	Epic string `yaml:"epic"`
+}
+
+type GoogleTasksCourse struct {
+	ListID string `yaml:"list_id"`
 }
 
 // LoadCourse reads one course configuration below root without changing the vault.

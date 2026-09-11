@@ -7,6 +7,7 @@ import (
 
 	"github.com/algebananazzzzz/Corum/internal/canvas"
 	"github.com/algebananazzzzz/Corum/internal/config"
+	googletasks "github.com/algebananazzzzz/Corum/internal/google"
 	"github.com/algebananazzzzz/Corum/internal/jira"
 	"github.com/google/jsonschema-go/jsonschema"
 	"gopkg.in/yaml.v3"
@@ -24,6 +25,7 @@ func TestSchemasAcceptSerializedState(t *testing.T) {
 		{"course", config.Course{Code: "CS101", Canvas: &config.CanvasCourse{ID: 1, Name: "Algorithms", Sources: []string{"assignments"}}}, true},
 		{"canvas-state", canvas.CanvasState{Sources: map[string]any{"assignments": map[string]any{"1": "2026-09-30T00:00:00Z"}, "files": map[string]any{"2": "slides.pdf"}, "syllabus": nil}}, false},
 		{"jira-state", jira.JiraState{Issues: []jira.IssueState{{Key: "STUDY-1", Type: "Task", Summary: "Report", Status: "To Do"}}}, false},
+		{"google-tasks-state", googletasks.TaskState{Tasks: []googletasks.TaskStateItem{{ID: "task-1", Title: "Report", Status: "needsAction"}}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var value any
@@ -71,11 +73,13 @@ func TestSchemasRetainUsefulDataAndRejectInvalidShapes(t *testing.T) {
 		{"corum", `{"workspace":{"timezone":"Asia/Singapore","term":"AY2026/27 Semester 1"},"jira":{"cloud_id":"cloud-1","project":"STUDY"}}`, true},
 		{"corum", `{"workspace":{"timezone":"Asia/Singapore"}}`, false},
 		{"course", `{"code":"CS101","canvas":{"id":1,"name":"Algorithms","sources":["files"],"folders":{"Course Materials":"lectures"}},"jira":{"epic":"STUDY-1"}}`, true},
+		{"course", `{"code":"CS101","google_tasks":{"list_id":"@default"}}`, true},
 		{"course", `{"code":"CS101","canvas":{"id":1,"sources":["files"],"folders":{"Course Materials":"..\\outside"}}}`, false},
 		{"course", `{"code":"CS101","canvas":{"id":1,"sources":["files","files"]}}`, false},
 		{"jira-state", `{"issues":[{"key":"STUDY-1","type":"Task","summary":"Report","status":"To Do"}]}`, true},
 		{"jira-state", `{"issues":[{"key":"STUDY-1","type":"Task","summary":"Report","status":"To Do","due":"2026-09-30","labels":["assessment"],"description":"Submit the report","updated_at":"2026-09-10T00:00:00Z"}]}`, true},
 		{"jira-state", `{"issues":[{"key":"STUDY-1","summary":"Report"}]}`, false},
+		{"google-tasks-state", `{"tasks":[{"id":"task-1","title":"Report","status":"needsAction"}]}`, true},
 		{"canvas-state", `{"sources":{"announcements":{"1":"2026-09-10"},"assignments":{"2":null},"files":{"3":"lecture.pdf"},"pages":{"intro":"2026-09-10T00:00:00Z"},"modules":{"4":"hash"},"syllabus":"hash"}}`, true},
 		{"canvas-state", `{"sources":{"files":["lecture.pdf"]}}`, false},
 	} {

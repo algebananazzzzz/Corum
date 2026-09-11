@@ -19,6 +19,11 @@ var (
 )
 
 func ValidateWorkspace(value Workspace) error {
+	switch value.TaskTracker {
+	case "", "none", "jira", "google_tasks":
+	default:
+		return fmt.Errorf("invalid task tracker")
+	}
 	if strings.TrimSpace(value.Workspace.Term) == "" {
 		return fmt.Errorf("academic term is required")
 	}
@@ -78,6 +83,9 @@ func ValidateCourse(value Course) error {
 	if value.Jira != nil && !issueRE.MatchString(value.Jira.Epic) {
 		return fmt.Errorf("jira epic is invalid")
 	}
+	if value.GoogleTasks != nil && !identifierRE.MatchString(value.GoogleTasks.ListID) {
+		return fmt.Errorf("google_tasks list_id must be a non-blank identifier")
+	}
 	return nil
 }
 
@@ -91,7 +99,7 @@ func rejectNullServiceBlocks(node *yaml.Node) error {
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key, value := node.Content[i], node.Content[i+1]
 		switch key.Value {
-		case "canvas", "jira":
+		case "canvas", "jira", "google_tasks":
 			if value.Tag == "!!null" {
 				return fmt.Errorf("%s service block must be omitted or an object, not null", key.Value)
 			}

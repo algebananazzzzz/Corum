@@ -17,12 +17,13 @@ const screenMaxWidth = 120
 type LoadingRunner func(context.Context, string, func(context.Context) error) error
 
 type Screen struct {
-	title  string
-	form   *huh.Form
-	width  int
-	height int
-	done   bool
-	style  screenStyle
+	sidebar string
+	title   string
+	form    *huh.Form
+	width   int
+	height  int
+	done    bool
+	style   screenStyle
 }
 
 type screenStyle struct {
@@ -190,6 +191,9 @@ func (s *Screen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (s *Screen) formWidth() int {
+	if s.sidebar != "" && s.width >= 80 {
+		return s.width - 35
+	}
 	return s.width
 }
 
@@ -220,6 +224,10 @@ func (s *Screen) boundary(text string, failed bool) string {
 }
 
 func (s *Screen) frame(header, form, footer string) string {
+	if s.sidebar != "" && s.width >= 80 {
+		left := lipgloss.NewStyle().Width(32).MaxWidth(32).Render(s.sidebar)
+		form = lipgloss.JoinHorizontal(lipgloss.Top, left, "   ", form)
+	}
 	content := header + "\n\n" + form
 	gap := 2
 	if s.height > 0 {

@@ -13,10 +13,26 @@ cd path-to-vault
 corum configure
 ```
 
-`corum configure` authenticates Canvas and selects courses to track. It also lets
-you enable Jira, authenticate Corum's read client and select a Jira site/project.
-Jira MCP entries are installed for Codex and Claude; authenticate those clients
-separately when using their tools.
+The first `corum configure` guides you through Canvas connection, course selection,
+task tracker selection (Google Tasks, Jira, or None), course destinations, and an
+initial sync. Subsequent runs open a settings menu. Each section returns to that
+menu when finished; valid connections are reused. Select **Sign in again / switch
+account** to explicitly reconnect. Canvas uses an API token; setup explains where
+to create it. The Tracked courses section reuses the saved token.
+
+The mapping menu shows **Jira Epic mapping** or **Google Task List mapping**, with
+the number of tracked courses mapped. Select a course, then choose an existing
+destination (`/` searches), create one with a typed name, or remove its mapping.
+Wide terminals show course mappings beside the destination form. Every successful
+action saves immediately. Back discards only the unsubmitted form. Failed actions
+report an error and preserve existing mappings. Remote creation followed by a
+local save failure reports the destination ID; select that destination on retry.
+
+Changing trackers retains old mappings and does not migrate or delete remote tasks.
+The selected tracker is stored as `task_tracker`; no draft or setup-progress file
+is created. Existing Jira configurations open the settings menu directly.
+Jira MCP entries are installed for Codex and Claude; those clients may require
+their own authentication, separately from Corum's connection.
 
 Use `corum init --defaults PATH` for noninteractive initialization. Canvas defaults
 to NUS; edit `.config/corum/corum.yaml` for another Canvas URL or timezone. Set
@@ -94,12 +110,43 @@ is preserved. It does not create epics or write Jira issues.
 
 Agents can propose changes using the installed `sync-course` and `scope-course`
 skills. Approved writes go through the Jira MCP tools configured by Corum.
-`corum configure jira [PATH]` installs only the project-local MCP entries; use the
-combined `corum configure` flow to authenticate Corum's own Jira read client.
+`corum configure jira [PATH]` opens task tracker settings. Use the main configuration
+menu to change sites/projects or manage course mappings using your existing login.
 
 The cache currently uses Jira issue fields and provider-specific issue types.
-A provider-independent Todo/Session/Milestone model and Google Calendar integration
-are not implemented.
+
+## Google Tasks sync
+
+Use `corum configure` to connect Google and select or create course task lists.
+For manual configuration, add a Google Tasks list to `courses/CS101/course.yaml`:
+
+```yaml
+google_tasks:
+  list_id: '@default'
+```
+
+Then run:
+
+```console
+corum google sync-tasks CS101
+```
+
+Corum invokes the Google-maintained Workspace CLI (`gws`) and atomically writes
+the normalized snapshot to `state/google-tasks.json`. Tasks with due dates appear
+in Google Calendar automatically; the sync stores date-level granularity only.
+Corum reuses an installed `gws`, or obtains pinned version 0.22.5 through `npx`
+when Node.js is available. Set `CORUM_GWS_BIN` to use a specific CLI binary path.
+This release uses the CLI JSON interface; that version has no MCP subcommand.
+
+Corum does not yet distribute a registered Google OAuth client. On first Google
+connection, setup opens the relevant Google Console pages and guides you through
+project selection, enabling Tasks, consent settings, and downloading a Desktop
+OAuth client JSON. Corum imports that file with private permissions, launches
+Tasks-only login, and checks access. Existing Google credentials are reused.
+Account consent and any organization administrator approval remain user actions.
+Credentials stay in the Google CLI credential store, outside course files.
+This developer-client preparation is temporary until a Corum-owned OAuth app is
+registered and cleared for distribution.
 
 ## Maintenance
 

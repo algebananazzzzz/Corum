@@ -3,9 +3,10 @@
 | File | Stored fields |
 | --- | --- |
 | `.config/corum/corum.yaml` | Selected timezone and academic term; configured Canvas URL and Jira cloud/project |
-| `courses/<course>/course.yaml` | Course code; Canvas ID, source selection, optional name/folder mappings; optional Jira epic |
+| `courses/<course>/course.yaml` | Course code; Canvas ID, source selection, optional name/folder mappings; optional Jira epic or Google Tasks list |
 | `state/canvas.json` | Per-source comparison ledgers and syllabus hash |
 | `state/jira.json` | Current issue snapshot: key, type, summary, status; available due date, labels, description and update timestamp; snapshot freshness timestamp |
+| `state/google-tasks.json` | Current Google Tasks snapshot: ID, title, status, date-level due date, notes, parent and timestamps |
 
 SGT (`Asia/Singapore`) is the setup default. The selected academic term resolves
 its bundled calendar internally and installs `Term_Calendar.md` for week lookup.

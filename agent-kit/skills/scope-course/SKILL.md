@@ -15,6 +15,8 @@ Expand to related cached source material only when a specific changed obligation
 
 When available, read `courses/{{COURSE}}/state/jira.json`. Match each affected obligation to an existing issue using source links, course identity and assignment or session details. Compare the required deliverable, dates, times, locations and other actionable fields against that issue. Propose updates only for differing fields.
 
+When `task_tracker` selects `google_tasks`, use `state/google-tasks.json` instead. Match by notes/source links and course context. Propose title, notes, date-level `due`, parent and completion changes supported by Google Tasks; preserve exact deadline times in notes. Use the actual calendar date rather than Jira's preceding-date convention. Epics, Jira issue types, custom statuses and labels do not apply. Saved mappings are managed in `corum configure`.
+
 Apply explicit revisions to the identified obligation even when its original source is unchanged. Present unresolved source conflicts and uncertain issue matches for review.
 
 Identify required work, mandatory or graded sessions, and dated milestones. Keep optional resources in their source context. When Jira is enabled, use [Jira planning](references/jira-board.md) for provider fields and date conventions. With Jira disabled or its cache unavailable, return evidence-backed local obligations and mark remote matching as unresolved.

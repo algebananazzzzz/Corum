@@ -70,6 +70,17 @@
           "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$"
         }
       }
+    },
+    "google_tasks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["list_id"],
+      "properties": {
+        "list_id": {
+          "type": "string",
+          "pattern": "^\\S+$"
+        }
+      }
     }
   },
   "$defs": {

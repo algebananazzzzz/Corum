@@ -16,13 +16,14 @@ import (
 
 // CanvasAuthDependencies drives the interactive Canvas authentication flow.
 type CanvasAuthDependencies struct {
-	Prompts Prompter
-	Root    string
-	Load    func(config.Workspace, string) (*canvas.Client, error)
-	Save    func(string) error
-	Clear   func() error
-	Courses func(context.Context, *canvas.Client) ([]canvas.CourseInfo, error)
-	Loading LoadingRunner
+	ReuseCredential bool
+	Prompts         Prompter
+	Root            string
+	Load            func(config.Workspace, string) (*canvas.Client, error)
+	Save            func(string) error
+	Clear           func() error
+	Courses         func(context.Context, *canvas.Client) ([]canvas.CourseInfo, error)
+	Loading         LoadingRunner
 }
 
 func DefaultCanvasAuthDependencies(in io.Reader, out io.Writer, root string) CanvasAuthDependencies {
@@ -64,9 +65,12 @@ func RunCanvasAuth(ctx context.Context, deps CanvasAuthDependencies) (err error)
 	if credentialErr != nil && !errors.Is(credentialErr, canvas.ErrNoCredential) {
 		return credentialErr
 	}
-	token, err := deps.Prompts.Password("Canvas API token", storedToken)
-	if err != nil {
-		return promptError(err)
+	token := storedToken
+	if !deps.ReuseCredential || token == "" {
+		token, err = deps.Prompts.Password("Canvas API token", storedToken)
+		if err != nil {
+			return promptError(err)
+		}
 	}
 	if token == "" {
 		return ErrCancelled

@@ -32,6 +32,7 @@ type Prompter interface {
 
 // HuhPrompter implements Prompter with Huh.
 type HuhPrompter struct {
+	Sidebar    string
 	In         io.Reader
 	Out        io.Writer
 	Accessible bool
@@ -101,6 +102,9 @@ func (p HuhPrompter) MultiSelect(label string, choices []Choice) ([]int, error) 
 
 func (p HuhPrompter) run(field huh.Field) error {
 	form := huh.NewForm(huh.NewGroup(field)).WithAccessible(p.Accessible)
+	if p.Sidebar != "" {
+		return runMappingForm(form, p.Sidebar, p.In, p.Out)
+	}
 	return RunScreen("Corum", form, p.In, p.Out)
 }
 

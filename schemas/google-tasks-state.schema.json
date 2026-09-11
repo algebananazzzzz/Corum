@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Corum Google Tasks state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tasks"],
+  "properties": {
+    "reconciled_at": {"type": ["string", "null"], "format": "date-time"},
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "status"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "title": {"type": "string", "minLength": 1},
+          "status": {"enum": ["needsAction", "completed"]},
+          "due": {"type": "string", "format": "date"},
+          "notes": {"type": "string"},
+          "parent": {"type": "string"},
+          "completed_at": {"type": "string", "format": "date-time"},
+          "updated_at": {"type": "string", "format": "date-time"},
+          "web_view_link": {"type": "string", "format": "uri"}
+        }
+      }
+    }
+  }
+}

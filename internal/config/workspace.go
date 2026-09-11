@@ -13,9 +13,10 @@ import (
 
 // Workspace is the project-wide .config/corum/corum.yaml document.
 type Workspace struct {
-	Workspace WorkspaceDetails `yaml:"workspace"`
-	Canvas    *CanvasWorkspace `yaml:"canvas,omitempty"`
-	Jira      *JiraWorkspace   `yaml:"jira,omitempty"`
+	TaskTracker string           `yaml:"task_tracker,omitempty"`
+	Workspace   WorkspaceDetails `yaml:"workspace"`
+	Canvas      *CanvasWorkspace `yaml:"canvas,omitempty"`
+	Jira        *JiraWorkspace   `yaml:"jira,omitempty"`
 }
 
 type WorkspaceDetails struct {

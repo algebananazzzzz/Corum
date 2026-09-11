@@ -17,15 +17,14 @@ Verify the exit code and the selected course's `dry_run`, `status`, `failures`, 
 
 ## 2. Prepare current obligations
 
-Read `.config/corum/corum.yaml` and `courses/{{COURSE}}/course.yaml`. If the workspace has a `jira` block, resolve the epic below; otherwise, proceed to step 3.
+Read `.config/corum/corum.yaml` and `courses/{{COURSE}}/course.yaml`. Use `task_tracker` as the selected provider. For older configuration without that field, a `jira` block enables Jira; otherwise task tracking is disabled. An inactive provider's saved settings are retained for later reuse.
 
 When Jira is enabled, resolve the course epic:
 
 1. Use the epic already mapped in `course.yaml` when available.
-2. When the mapping is missing, use Jira MCP to search epics in the configured cloud and project with a matching course code. Verify the course identity, including the term when available. Reuse a unique matching epic; report ambiguous matches for resolution.
-3. When a successful, complete search finds no match, create a course epic through Jira MCP using the course code and available course name.
+2. For missing or invalid mappings, direct the user to `corum configure` → Jira Epic mapping. Suggestions may be offered, but configuration owns the mapping.
 
-Save the reused or created epic key as `jira.epic` in `course.yaml`, preserving its other settings. If a mapped epic is confirmed missing, repeat the lookup process. For unavailable Jira MCP, failed operations or ambiguous matches, follow [error handling](references/error-handling.md) and continue local scoping.
+For unavailable Jira MCP, failed operations or unmapped courses, follow [error handling](references/error-handling.md) and continue local scoping.
 
 With an epic mapped, refresh its cache:
 
@@ -35,6 +34,8 @@ corum jira sync-epic {{COURSE}}
 
 Verify success and pass `courses/{{COURSE}}/state/jira.json` to `scope-course` for comparison.
 
+For `google_tasks`, use the saved `google_tasks.list_id`. Run `corum google sync-tasks {{COURSE}}` and pass the successful `state/google-tasks.json` cache to scoping. Missing mappings are configured through Google Task List mapping in `corum configure`. Use Google Tasks date-level scheduling; request no Calendar access.
+
 ## 3. Scope and review
 
 Invoke `scope-course` with the retained changeset and available Jira cache. Present its plan for user review.
@@ -42,5 +43,7 @@ Invoke `scope-course` with the retained changeset and available Jira cache. Pres
 ## 4. Apply approved work
 
 When the user approves the scoped Jira actions, call the configured Jira MCP tools directly. After successful writes, run `corum jira sync-epic {{COURSE}}` again to refresh the cache. Report the observed results.
+
+For approved Google Tasks changes, use the authenticated Google Workspace CLI: `gws tasks tasks insert` or `patch`, with `--params` containing the mapped `tasklist` (and `task` for updates), and `--json` containing only approved fields. If `gws` is unavailable, use `npx --yes @googleworkspace/cli@0.22.5` as the command prefix. Introspect the command schema before writes. Store source links and exact deadlines in notes; use `due` for the calendar date and `status` for `needsAction` or `completed`. Refresh the Google Tasks cache after successful writes. Never retry an uncertain creation automatically.
 
 For command errors, partial captures or uncertain writes, read [error handling](references/error-handling.md).

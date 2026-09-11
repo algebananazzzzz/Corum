@@ -13,6 +13,7 @@ import (
 	"github.com/algebananazzzzz/Corum/internal/buildinfo"
 	"github.com/algebananazzzzz/Corum/internal/canvas"
 	"github.com/algebananazzzzz/Corum/internal/config"
+	googletasks "github.com/algebananazzzzz/Corum/internal/google"
 	"github.com/algebananazzzzz/Corum/internal/jira"
 	"github.com/algebananazzzzz/Corum/internal/ui"
 	"github.com/algebananazzzzz/Corum/internal/update"
@@ -23,12 +24,13 @@ var (
 	openJiraSession = jira.Open
 	makeJiraClient  = jira.NewJiraClient
 	syncCanvas      = canvas.Sync
+	syncGoogleTasks = googletasks.SyncTasks
 )
 
 // Run dispatches the complete local Corum command surface.
 func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer) int {
 	if len(args) == 1 && args[0] == "--help" {
-		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira sync-epic COURSE")
+		fmt.Fprintln(out, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira sync-epic COURSE | corum google sync-tasks COURSE")
 		return 0
 	}
 	if len(args) == 1 && args[0] == "version" {
@@ -119,10 +121,13 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if code, handled := runJiraSyncEpic(ctx, args, out, errOut); handled {
 		return code
 	}
+	if code, handled := runGoogleTasksSync(ctx, args, out, errOut); handled {
+		return code
+	}
 	if code, handled := runCanvasSync(ctx, args, out, errOut); handled {
 		return code
 	}
-	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira sync-epic COURSE")
+	fmt.Fprintln(errOut, "usage: corum init [PATH] | corum init --defaults PATH | corum doctor [PATH] | corum version | corum update | corum toolkit update [PATH] | corum configure [PATH]|jira [PATH]|canvas [PATH] | corum sync COURSE...|--all [--dry-run] [--json] | corum jira sync-epic COURSE | corum google sync-tasks COURSE")
 	return 2
 }
 
@@ -176,10 +181,13 @@ func runConfigure(ctx context.Context, args []string, in io.Reader, out, errOut 
 		return 1, true
 	}
 	if target == "jira" {
-		if err := jira.ConfigureProjectMCP(root); err != nil {
-			return fail("Jira MCP Configuration", "Could not configure project-local Jira MCP clients.", err)
+		if !isTerminal(in) {
+			fmt.Fprintln(errOut, "interactive configuration requires a terminal")
+			return 2, true
 		}
-		fmt.Fprintln(out, "Jira MCP configured for Codex and Claude. Authenticate from either client before use.")
+		if err := ui.RunTaskTrackerSettings(ctx, root, in, out); err != nil {
+			return fail("Task tracker", "Could not configure task tracker", err)
+		}
 		return 0, true
 	}
 	if !isTerminal(in) {
@@ -198,14 +206,12 @@ func runConfigure(ctx context.Context, args []string, in io.Reader, out, errOut 
 		_ = ui.ShowNotice("Canvas Authentication", "Canvas authenticated.", in, out)
 		return 0, true
 	default:
-		deps := ui.DefaultAuthDependencies(in, out, root)
-		if err := ui.RunAuth(ctx, root, deps); err != nil {
+		if err := ui.RunConfigure(ctx, root, in, out); err != nil {
 			if errors.Is(err, ui.ErrCancelled) {
 				return fail("Corum Configuration", "Configuration cancelled.", nil)
 			}
 			return fail("Corum Configuration", "Configuration failed.", err)
 		}
-		_ = ui.ShowNotice("Corum Configuration", "Configuration complete.", in, out)
 		return 0, true
 	}
 }
@@ -382,6 +388,34 @@ func runJiraSyncEpic(ctx context.Context, args []string, out, errOut io.Writer) 
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(result); err != nil {
 		fmt.Fprintln(errOut, "could not write Jira sync result")
+		return 1, true
+	}
+	return 0, true
+}
+
+func runGoogleTasksSync(ctx context.Context, args []string, out, errOut io.Writer) (int, bool) {
+	if len(args) != 3 || args[0] != "google" || args[1] != "sync-tasks" {
+		return 0, false
+	}
+	root, err := openVault(".")
+	if err != nil {
+		fmt.Fprintln(errOut, "could not locate vault")
+		return 1, true
+	}
+	course, err := config.LoadCourse(root, args[2])
+	if err != nil || course.GoogleTasks == nil {
+		fmt.Fprintln(errOut, "course has no configured Google Tasks list")
+		return 1, true
+	}
+	result, err := syncGoogleTasks(ctx, root, course.Code, course.GoogleTasks.ListID, googletasks.SyncOptions{Client: googletasks.DefaultCommandClient()})
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1, true
+	}
+	encoder := json.NewEncoder(out)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(result); err != nil {
+		fmt.Fprintln(errOut, "could not write Google Tasks sync result")
 		return 1, true
 	}
 	return 0, true
