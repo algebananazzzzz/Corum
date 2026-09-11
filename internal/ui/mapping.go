@@ -90,7 +90,7 @@ func (u configureUI) mapping(ctx context.Context) error {
 			choices = append(choices, Choice{Label: c.Code + " → " + mappingLabel(c, provider, destinations)})
 		}
 		choices = append(choices, Choice{Label: "Back"})
-		index, err := withDescription(u.prompts, "Choose a course to change where its tasks are tracked.").Select("Select a course to map", choices)
+		index, err := u.prompts.Select("Select a course to map", choices)
 		if err != nil {
 			return err
 		}
@@ -133,7 +133,7 @@ func mapCourse(ctx context.Context, root string, course config.Course, provider 
 		if course.Canvas != nil && course.Canvas.Name != "" {
 			hp.Description += " — " + course.Canvas.Name
 		}
-		hp.Description += "\nCurrent: " + mappingLabel(course, provider, items) + "\nChanges save immediately."
+		hp.Description += "\nCurrent: " + mappingLabel(course, provider, items)
 		p = hp
 	}
 	action, err := p.Select("Map course", []Choice{{Label: "Select existing"}, {Label: "Create new"}, {Label: "Leave unmapped / remove mapping"}, {Label: "Back"}})

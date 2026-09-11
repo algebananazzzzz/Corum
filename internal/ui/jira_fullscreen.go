@@ -167,7 +167,7 @@ func (s *jiraAuthScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if s.height > 0 {
 			s.form = s.form.WithHeight(max(s.height-s.style.base.GetVerticalFrameSize()-5, 5))
 		}
-		return s, s.form.Init()
+		return s, s.Screen.Init()
 	case jiraLinkResult:
 		if msg.url != "" {
 			s.link = msg.url
@@ -233,7 +233,7 @@ func (s *jiraAuthScreen) selectionForm() *huh.Form {
 	}
 	return huh.NewForm(huh.NewGroup(
 		huh.NewSelect[int]().Title("Jira project").Description("Choose the project that holds your course epics.").Options(choices...).Value(&s.selected),
-		huh.NewConfirm().Title("Save this Jira configuration?").Description("Use the selected project for this vault.").WithButtonAlignment(lipgloss.Left).Value(&s.confirmed),
+		huh.NewConfirm().Title("Save this Jira configuration?").WithButtonAlignment(lipgloss.Left).Value(&s.confirmed),
 	)).WithShowHelp(false).WithShowErrors(false).WithWidth(s.formWidth())
 }
 

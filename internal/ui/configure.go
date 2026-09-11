@@ -89,7 +89,7 @@ func RunConfigure(ctx context.Context, root string, in io.Reader, out io.Writer)
 			return err
 		}
 		choices := configurationChoices(ws, courses)
-		index, err := withDescription(u.prompts, "Manage your connections, tracked courses, and task destinations.").Select("Configure Corum", choices)
+		index, err := u.prompts.Select("Configure Corum", choices)
 		if errors.Is(err, ErrCancelled) {
 			return nil
 		}
@@ -124,7 +124,7 @@ func (u configureUI) report(err error) {
 }
 
 func (u configureUI) canvasConnection(ctx context.Context) error {
-	index, err := withDescription(u.prompts, "Check Canvas access or update the token used to sync courses.").Select("Canvas connection", []Choice{{Label: "Check connection"}, {Label: "Replace API token"}, {Label: "Back"}})
+	index, err := u.prompts.Select("Canvas connection", []Choice{{Label: "Check connection"}, {Label: "Replace API token"}, {Label: "Back"}})
 	if err != nil {
 		return err
 	}
@@ -188,7 +188,7 @@ func (u configureUI) tracker(ctx context.Context) error {
 		choices = append(choices, Choice{Label: "Change Jira site / project"})
 	}
 	choices = append(choices, Choice{Label: "Back"})
-	index, err := withDescription(u.prompts, "Manage the account and service used for course tasks.").Select("Task tracker: "+provider, choices)
+	index, err := u.prompts.Select("Task tracker: "+provider, choices)
 	if err != nil {
 		return err
 	}
@@ -240,7 +240,7 @@ func (u configureUI) tracker(ctx context.Context) error {
 }
 
 func (u configureUI) chooseTracker(ctx context.Context) error {
-	index, err := withDescription(u.prompts, "Choose a service now, or connect one later in configuration.").Select("Where would you like to track course tasks?", []Choice{{Label: "Google Tasks — simple lists, visible on Calendar"}, {Label: "Jira — epics and issue workflows"}, {Label: "None / set up later"}, {Label: "Back"}})
+	index, err := u.prompts.Select("Where would you like to track course tasks?", []Choice{{Label: "Google Tasks — simple lists, visible on Calendar"}, {Label: "Jira — epics and issue workflows"}, {Label: "None / set up later"}, {Label: "Back"}})
 	if err != nil {
 		return err
 	}
@@ -293,7 +293,7 @@ func (u configureUI) connectJira(ctx context.Context, force bool) error {
 				s.Close()
 				return jira.ConfigureProjectMCP(u.root)
 			}
-			index, e := withDescription(u.prompts, "Sign in through your browser to reconnect Jira.").Select("Jira needs reconnection", []Choice{{Label: "Sign in again"}, {Label: "Back"}})
+			index, e := u.prompts.Select("Jira needs reconnection", []Choice{{Label: "Sign in again"}, {Label: "Back"}})
 			if e != nil {
 				return e
 			}
