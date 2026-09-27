@@ -17,6 +17,7 @@ type Workspace struct {
 	Workspace   WorkspaceDetails `yaml:"workspace"`
 	Canvas      *CanvasWorkspace `yaml:"canvas,omitempty"`
 	Jira        *JiraWorkspace   `yaml:"jira,omitempty"`
+	Kaneo       *KaneoWorkspace  `yaml:"kaneo,omitempty"`
 }
 
 type WorkspaceDetails struct {
@@ -28,12 +29,23 @@ type CanvasWorkspace struct {
 	URL string `yaml:"url"`
 }
 
+// JiraWorkspace names the site and project whose epics hold course work.
+// Init saves the site; the agent adds the project on first sync. The
+// Atlassian MCP server accepts the site URL wherever a cloud ID is expected.
 type JiraWorkspace struct {
-	CloudID string `yaml:"cloud_id"`
-	Project string `yaml:"project"`
+	Site    string `yaml:"site"`
+	Project string `yaml:"project,omitempty"`
 }
 
-const projectGitignore = "/auth.json\n/canvas.json\n/.auth-*.json\n"
+// KaneoWorkspace names the self-hosted instance and the one project shared by
+// every course; course labels separate the courses inside it. Init saves the
+// URL for the MCP entry, and the agent adds the project on first sync.
+type KaneoWorkspace struct {
+	URL     string `yaml:"url"`
+	Project string `yaml:"project,omitempty"`
+}
+
+const projectGitignore = "/canvas.json\n"
 
 // ProjectDir returns the project-local directory for Corum configuration.
 func ProjectDir(root string) string {

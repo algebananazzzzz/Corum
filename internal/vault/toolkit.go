@@ -15,6 +15,15 @@ var toolkitLinks = []struct{ path, target string }{
 	{".agents/skills", "../skills"},
 }
 
+var retiredToolkitPaths = []string{
+	"skills/authoring-wiki",
+	"skills/drawio-diagrams",
+	"skills/linting-wiki",
+	"skills/scope-course",
+	"skills/sync-course/references/error-handling.md",
+	"skills/sync-course/references/tracker-snapshot.md",
+}
+
 type assetFile struct {
 	path string
 	data []byte
@@ -30,9 +39,9 @@ func RefreshToolkit(root string, assets fs.FS) error {
 	if err := installPayload(root, payload); err != nil {
 		return err
 	}
-	// Remove only the former bundled authoring skills, not user skills or pages.
-	for _, name := range []string{"authoring-wiki", "drawio-diagrams", "linting-wiki"} {
-		path, err := toolkitPath(root, "skills/"+name)
+	// Remove only formerly bundled files, not user skills or pages.
+	for _, retired := range retiredToolkitPaths {
+		path, err := toolkitPath(root, retired)
 		if err != nil {
 			return err
 		}
@@ -85,11 +94,38 @@ func toolkitPath(root, relative string) (string, error) {
 	return path, nil
 }
 
+// UserSectionMarker splits AGENTS.md: Corum owns the text above it, and the
+// user's own instructions below it survive toolkit updates.
+const UserSectionMarker = "<!-- Your instructions go below this line. corum toolkit update keeps them. -->"
+
+// mergeAgents keeps the user section of an installed AGENTS.md, or the base's
+// starter section when the vault has none yet.
+func mergeAgents(base, installed []byte) ([]byte, error) {
+	managed, _, found := strings.Cut(string(base), UserSectionMarker)
+	if !found {
+		return nil, fmt.Errorf("AGENTS.base.md is missing the user section marker")
+	}
+	_, user, found := strings.Cut(string(installed), UserSectionMarker)
+	if !found {
+		return base, nil
+	}
+	return []byte(managed + UserSectionMarker + user), nil
+}
+
 func installPayload(root string, payload []assetFile) error {
 	for _, file := range payload {
 		target, err := toolkitPath(root, file.path)
 		if err != nil {
 			return err
+		}
+		if file.path == "AGENTS.md" {
+			installed, err := os.ReadFile(target)
+			if err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			if file.data, err = mergeAgents(file.data, installed); err != nil {
+				return err
+			}
 		}
 		if err := writeConfigAtomic(target, file.data); err != nil {
 			return err

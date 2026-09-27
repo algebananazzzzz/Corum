@@ -173,6 +173,12 @@ func (s *Screen) Init() tea.Cmd {
 }
 
 func (s *Screen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// The terminal already delivers a paste as tea.PasteMsg. The text input
+	// also binds ctrl+v to read the clipboard itself, so a paste in terminals
+	// such as Ghostty arrived twice and doubled the pasted token.
+	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "ctrl+v" {
+		return s, nil
+	}
 	if size, ok := msg.(tea.WindowSizeMsg); ok {
 		s.width = min(size.Width, screenMaxWidth) - s.style.base.GetHorizontalFrameSize()
 		s.height = size.Height

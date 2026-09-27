@@ -10,7 +10,6 @@ import (
 
 	"github.com/algebananazzzzz/Corum/internal/canvas"
 	"github.com/algebananazzzzz/Corum/internal/config"
-	"github.com/algebananazzzzz/Corum/internal/jira"
 	"github.com/algebananazzzzz/Corum/internal/vault"
 )
 
@@ -65,33 +64,48 @@ func RunCanvasAuth(ctx context.Context, deps CanvasAuthDependencies) (err error)
 	if credentialErr != nil && !errors.Is(credentialErr, canvas.ErrNoCredential) {
 		return credentialErr
 	}
-	token := storedToken
-	if !deps.ReuseCredential || token == "" {
-		token, err = withDescription(deps.Prompts, "Paste a token from Canvas Settings → Approved Integrations.").Password("Canvas API token", storedToken)
-		if err != nil {
-			return promptError(err)
-		}
+	token := ""
+	if deps.ReuseCredential {
+		token = storedToken
 	}
-	if token == "" {
-		return ErrCancelled
-	}
-	newToken := token != storedToken
-	client, err := deps.Load(workspace, token)
-	if err != nil {
-		return err
-	}
+	// Setup must not continue without a working token, so a rejected or blank
+	// token asks again, with the reason, until Canvas accepts one or the user
+	// cancels.
+	guidance := "Paste a token from Canvas Settings → Approved Integrations."
+	var client *canvas.Client
 	var courses []canvas.CourseInfo
-	err = runLoadingTask(deps.Loading, ctx, "Loading Canvas courses…", func(ctx context.Context) error {
-		var loadErr error
-		courses, loadErr = deps.Courses(ctx, client)
-		return loadErr
-	})
-	if err != nil {
-		if errors.Is(err, ErrCancelled) {
+	for {
+		if token == "" {
+			token, err = withDescription(deps.Prompts, guidance).Password("Canvas API token", "")
+			if err != nil {
+				return promptError(err)
+			}
+			token = strings.TrimSpace(token)
+			if token == "" {
+				guidance = "A token is required. Paste one from Canvas Settings → Approved Integrations."
+				continue
+			}
+		}
+		client, err = deps.Load(workspace, token)
+		if err != nil {
 			return err
 		}
-		return fmt.Errorf("Canvas rejected the stored token: %w", err)
+		err = runLoadingTask(deps.Loading, ctx, "Loading Canvas courses…", func(ctx context.Context) error {
+			var loadErr error
+			courses, loadErr = deps.Courses(ctx, client)
+			return loadErr
+		})
+		if err == nil {
+			break
+		}
+		var httpErr *canvas.HTTPError
+		if !errors.As(err, &httpErr) || !httpErr.Unauthorized() {
+			return err
+		}
+		guidance = fmt.Sprintf("Canvas rejected that token (HTTP %d). Corum received %s. Paste a new one from Canvas Settings → Approved Integrations.", httpErr.Status, tokenFingerprint(token))
+		token = ""
 	}
+	newToken := token != storedToken
 	current := make([]canvas.CourseInfo, 0, len(courses))
 	for _, course := range courses {
 		if course.Current && course.ID != "" && (course.CourseCode != "" || course.Name != "") {
@@ -170,73 +184,11 @@ func courseChoices(courses []canvas.CourseInfo, tracked map[string]bool) []Choic
 	return choices
 }
 
-// AuthDependencies drives the combined interactive authentication flow.
-type AuthDependencies struct {
-	Prompts Prompter
-	Canvas  CanvasAuthDependencies
-	Jira    JiraAuthDependencies
-	RunJira func(context.Context, string, JiraAuthDependencies) error
-}
-
-func DefaultAuthDependencies(in io.Reader, out io.Writer, root string) AuthDependencies {
-	return AuthDependencies{
-		Prompts: NewHuhPrompter(in, out),
-		Canvas:  DefaultCanvasAuthDependencies(in, out, root),
-		Jira:    DefaultJiraAuthDependencies(in, out, root),
-		RunJira: func(ctx context.Context, root string, deps JiraAuthDependencies) error {
-			return RunJiraAuthFullscreen(ctx, root, deps, in, out)
-		},
+// tokenFingerprint describes a pasted token without revealing it, so a paste
+// that arrived truncated or altered is visible to the user.
+func tokenFingerprint(token string) string {
+	if len(token) <= 12 {
+		return fmt.Sprintf("%d characters", len(token))
 	}
-}
-
-// RunAuth configures Canvas and optional Jira sync, restoring a failed service's previous state.
-func RunAuth(ctx context.Context, root string, deps AuthDependencies) (err error) {
-	if deps.Prompts == nil {
-		return fmt.Errorf("interactive authentication is unavailable")
-	}
-	workspace, err := config.LoadWorkspace(root)
-	if err != nil {
-		return err
-	}
-	if workspace.Canvas != nil {
-		if err := RunCanvasAuth(ctx, deps.Canvas); err != nil {
-			return err
-		}
-	}
-
-	settings := ServiceSettings{Integration: "none"}
-	if workspace.Jira != nil {
-		settings.Integration = "jira"
-	}
-	settings, err = deps.Prompts.ConfigureServices(settings)
-	if err != nil {
-		return promptError(err)
-	}
-	if settings.Integration != "none" && settings.Integration != "jira" {
-		return fmt.Errorf("invalid Jira integration %q", settings.Integration)
-	}
-	runJira := deps.RunJira
-	if runJira == nil {
-		runJira = RunJiraAuth
-	}
-	if settings.Integration == "jira" {
-		if err := runJira(ctx, root, deps.Jira); err != nil {
-			return err
-		}
-	}
-	workspace, err = config.LoadWorkspace(root)
-	if err != nil {
-		return err
-	}
-	if settings.Integration == "none" {
-		if err := jira.RemoveProjectMCP(root); err != nil {
-			return fmt.Errorf("remove Jira MCP clients: %w", err)
-		}
-		workspace.Jira = nil
-	} else if workspace.Jira != nil {
-		if err := jira.ConfigureProjectMCP(root); err != nil {
-			return fmt.Errorf("configure Jira MCP clients: %w", err)
-		}
-	}
-	return vault.WriteWorkspace(root, workspace)
+	return fmt.Sprintf("%d characters, %s…%s", len(token), token[:6], token[len(token)-4:])
 }

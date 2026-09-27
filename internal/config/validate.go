@@ -13,14 +13,13 @@ import (
 
 var (
 	projectRE    = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
-	issueRE      = regexp.MustCompile(`^[A-Z][A-Z0-9_]*-[1-9][0-9]*$`)
 	identifierRE = regexp.MustCompile(`^\S+$`)
 	courseCodeRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 )
 
 func ValidateWorkspace(value Workspace) error {
 	switch value.TaskTracker {
-	case "", "none", "jira", "google_tasks":
+	case "", "none", "jira", "kaneo", "google_tasks":
 	default:
 		return fmt.Errorf("invalid task tracker")
 	}
@@ -42,12 +41,29 @@ func ValidateWorkspace(value Workspace) error {
 		}
 	}
 	if value.Jira != nil {
-		if value.Jira.CloudID == "" || !identifierRE.MatchString(value.Jira.CloudID) {
-			return fmt.Errorf("jira cloud_id must be a non-blank identifier")
+		if err := validateOrigin(value.Jira.Site, "jira site"); err != nil {
+			return err
 		}
-		if !projectRE.MatchString(value.Jira.Project) {
+		if value.Jira.Project != "" && !projectRE.MatchString(value.Jira.Project) {
 			return fmt.Errorf("jira project is invalid")
 		}
+	}
+	if value.Kaneo != nil {
+		if err := validateOrigin(value.Kaneo.URL, "kaneo url"); err != nil {
+			return err
+		}
+		if value.Kaneo.Project != "" && !identifierRE.MatchString(value.Kaneo.Project) {
+			return fmt.Errorf("kaneo project must be a slug without spaces")
+		}
+	}
+	if value.TaskTracker == "jira" && value.Jira == nil {
+		return fmt.Errorf("jira task tracker requires a jira site")
+	}
+	if value.TaskTracker == "kaneo" && value.Kaneo == nil {
+		return fmt.Errorf("kaneo task tracker requires a kaneo url")
+	}
+	if value.Jira != nil && value.TaskTracker != "jira" || value.Kaneo != nil && value.TaskTracker != "kaneo" {
+		return fmt.Errorf("only the selected task tracker may have settings")
 	}
 
 	return nil
@@ -80,12 +96,6 @@ func ValidateCourse(value Course) error {
 			}
 		}
 	}
-	if value.Jira != nil && !issueRE.MatchString(value.Jira.Epic) {
-		return fmt.Errorf("jira epic is invalid")
-	}
-	if value.GoogleTasks != nil && !identifierRE.MatchString(value.GoogleTasks.ListID) {
-		return fmt.Errorf("google_tasks list_id must be a non-blank identifier")
-	}
 	return nil
 }
 
@@ -99,7 +109,7 @@ func rejectNullServiceBlocks(node *yaml.Node) error {
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key, value := node.Content[i], node.Content[i+1]
 		switch key.Value {
-		case "canvas", "jira", "google_tasks":
+		case "canvas", "jira", "kaneo":
 			if value.Tag == "!!null" {
 				return fmt.Errorf("%s service block must be omitted or an object, not null", key.Value)
 			}

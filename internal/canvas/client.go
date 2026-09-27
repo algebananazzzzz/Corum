@@ -162,7 +162,7 @@ func (c *Client) do(ctx context.Context, raw string, query url.Values, destinati
 		}
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
 			response.Body.Close()
-			return nil, fmt.Errorf("Canvas request failed with HTTP %d: %s", response.StatusCode, StripVerifier(u.String()))
+			return nil, &HTTPError{Status: response.StatusCode, URL: StripVerifier(u.String())}
 		}
 		return response, nil
 	}
@@ -308,4 +308,19 @@ func (c *Client) Download(ctx context.Context, raw, target string) error {
 		return err
 	}
 	return os.Rename(name, target)
+}
+
+// HTTPError lets callers tell a rejected token apart from other failures.
+type HTTPError struct {
+	Status int
+	URL    string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("Canvas request failed with HTTP %d: %s", e.Status, e.URL)
+}
+
+// Unauthorized reports whether Canvas refused the token itself.
+func (e *HTTPError) Unauthorized() bool {
+	return e.Status == 401 || e.Status == 403
 }

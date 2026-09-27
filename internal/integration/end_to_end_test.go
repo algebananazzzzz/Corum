@@ -122,14 +122,19 @@ func TestInstalledBinary(t *testing.T) {
 				t.Fatalf("discover sync-course via %s: %v", directory, err)
 			}
 		}
-		for _, name := range []string{"authoring-wiki", "drawio-diagrams", "linting-wiki"} {
+		for _, name := range []string{"authoring-wiki", "drawio-diagrams", "linting-wiki", "scope-course"} {
 			if _, err := os.Stat(filepath.Join(vault, "skills", name)); !os.IsNotExist(err) {
 				t.Fatalf("archived skill installed: %s, %v", name, err)
 			}
 		}
 		syncSkill, err := os.ReadFile(filepath.Join(vault, "skills", "sync-course", "SKILL.md"))
-		if err != nil || !strings.Contains(string(syncSkill), "corum jira sync-epic {{COURSE}}") {
-			t.Fatalf("installed sync-course skill does not reconcile Jira epics: %v", err)
+		if err != nil || !strings.Contains(string(syncSkill), "state/tracker.json") {
+			t.Fatalf("installed sync-course skill does not write tracker.json: %v", err)
+		}
+		for _, tracker := range []string{"jira", "kaneo", "google-tasks"} {
+			if _, err := os.Stat(filepath.Join(vault, "skills", "sync-course", "references", "trackers", tracker+".md")); err != nil {
+				t.Fatalf("tracker reference %s not installed: %v", tracker, err)
+			}
 		}
 
 		result := runBinary(binary, environment, "", "", "doctor", vault)

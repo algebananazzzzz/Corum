@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/algebananazzzzz/Corum/internal/config"
-	"github.com/algebananazzzzz/Corum/internal/jira"
 	"github.com/algebananazzzzz/Corum/internal/vault"
 )
 
@@ -63,120 +64,67 @@ func nonblank(value string) error {
 	return nil
 }
 
-func RunInitFullscreen(root string, assets fs.FS, in io.Reader, out io.Writer) error {
+// RunInitFullscreen runs the whole first-time setup and returns the vault
+// path, which the user may have edited in the form. The vault only appears
+// once setup succeeds, so a rejected token or a cancel leaves nothing behind.
+func RunInitFullscreen(ctx context.Context, root string, assets fs.FS, in io.Reader, out io.Writer) (string, error) {
 	screen, answers := newInitScreen(root)
 	if err := RunScreen("Corum Setup", screen.form, in, out); err != nil {
-		return err
+		return "", err
 	}
 	if !answers.confirmed {
-		return ErrCancelled
+		return "", ErrCancelled
 	}
 	workspace := answers.workspace()
 	if err := config.ValidateWorkspace(workspace); err != nil {
-		return err
+		return "", err
 	}
-	return initializeVault(answers.root, workspace, assets)
-}
-
-// JiraAuthDependencies drives the interactive Jira authentication flow.
-type JiraAuthDependencies struct {
-	Prompts           Prompter
-	OpenJira          func(context.Context) (JiraSession, error)
-	SnapshotAuth      func() (func() error, error)
-	Write             func(string, config.Workspace) error
-	Loading           LoadingRunner
-	AuthorizationURLs <-chan string
-}
-
-func DefaultJiraAuthDependencies(in io.Reader, out io.Writer, root string) JiraAuthDependencies {
-	urls := make(chan string, 1)
-	return JiraAuthDependencies{
-		Prompts: NewHuhPrompter(in, out),
-		OpenJira: func(ctx context.Context) (JiraSession, error) {
-			session, err := jira.Open(ctx, jira.OpenOptions{Interactive: true, ForceReauth: true, CachePath: jiraProjectCachePath(root), Out: io.Discard, AuthorizationURL: func(url string) {
-				select {
-				case urls <- url:
-				default:
-				}
-			}})
-			if err != nil {
-				return nil, err
-			}
-			return rovoSelectionSession{session}, nil
-		},
-		SnapshotAuth: func() (func() error, error) {
-			snapshot, err := jira.SnapshotAuthFor(root)
-			if err != nil {
-				return nil, err
-			}
-			return snapshot.Restore, nil
-		},
-		Write: vault.WriteWorkspace,
-		Loading: func(ctx context.Context, message string, task func(context.Context) error) error {
-			return runLoading(ctx, "Jira Authentication", message, in, out, task)
-		},
-		AuthorizationURLs: urls,
-	}
-}
-
-func jiraProjectCachePath(root string) string {
-	path, _ := jira.AuthCachePathFor(root)
-	return path
-}
-
-// RunJiraAuth starts fresh OAuth and confirms a Jira project before saving configuration.
-// The previous credential cache is restored on failure.
-func RunJiraAuth(ctx context.Context, root string, deps JiraAuthDependencies) (err error) {
-	if deps.Prompts == nil || deps.OpenJira == nil || deps.SnapshotAuth == nil || deps.Write == nil {
-		return fmt.Errorf("interactive Jira authentication is unavailable")
-	}
-	workspace, err := config.LoadWorkspace(root)
-	if err != nil {
-		return err
-	}
-	restore, err := deps.SnapshotAuth()
-	if err != nil {
-		return err
-	}
-	keepAuth := false
-	defer func() {
-		if !keepAuth {
-			restoreErr := restore()
-			if err != nil && restoreErr != nil {
-				err = errors.Join(err, fmt.Errorf("restore previous Jira authentication: %w", restoreErr))
-			} else if err == nil {
-				err = restoreErr
-			}
+	err := stageVault(answers.root, func(staging string) error {
+		if err := initializeVault(staging, workspace, assets); err != nil {
+			return err
 		}
-	}()
-	var session JiraSession
-	err = runLoadingTask(deps.Loading, ctx, "Complete Jira authentication in your browser…", func(ctx context.Context) error {
-		var openErr error
-		session, openErr = deps.OpenJira(ctx)
-		return openErr
+		return RunSetup(ctx, staging, in, out)
 	})
 	if err != nil {
-		return promptError(err)
+		return "", err
 	}
-	defer session.Close()
-	selection, err := selectJiraWithLoading(ctx, session, deps.Prompts, deps.Loading)
+	return answers.root, nil
+}
+
+// stageVault builds a vault in a hidden sibling directory and renames it onto
+// target only when build succeeds; otherwise the staging directory is removed.
+// Vault files use relative paths, so the rename does not invalidate them.
+func stageVault(target string, build func(staging string) error) error {
+	target, err := filepath.Abs(target)
 	if err != nil {
-		return promptError(err)
-	}
-	workspace.Jira = &selection
-	if err := config.ValidateWorkspace(workspace); err != nil {
 		return err
 	}
-	confirmed, err := deps.Prompts.Confirm("Jira project "+selection.Project+" selected.\n\nSave this configuration?", true)
-	if err != nil {
-		return promptError(err)
-	}
-	if !confirmed {
-		return ErrCancelled
-	}
-	if err := deps.Write(root, workspace); err != nil {
+	if entries, err := os.ReadDir(target); err == nil && len(entries) > 0 {
+		return fmt.Errorf("refusing to initialize non-empty target %q", target)
+	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	keepAuth = true
+	parent := filepath.Dir(target)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return err
+	}
+	staging, err := os.MkdirTemp(parent, "."+filepath.Base(target)+".corum-init-*")
+	if err != nil {
+		return err
+	}
+	if err := build(staging); err != nil {
+		return errors.Join(err, os.RemoveAll(staging))
+	}
+	if err := os.Chmod(staging, 0o755); err != nil {
+		return errors.Join(err, os.RemoveAll(staging))
+	}
+	// os.Rename will not replace a directory; os.Remove only deletes the
+	// target if it is still empty.
+	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+		return errors.Join(err, os.RemoveAll(staging))
+	}
+	if err := os.Rename(staging, target); err != nil {
+		return errors.Join(err, os.RemoveAll(staging))
+	}
 	return nil
 }

@@ -13,7 +13,7 @@ import (
 
 func TestConfigureCanvasCoursesReconcilesOnlyVisibleSelection(t *testing.T) {
 	root := initializedVault(t, "test")
-	writeCourseFixture(t, root, "OLD", "code: OLD\ncanvas:\n  id: 1\n  sources: [assignments]\njira:\n  epic: TODO-1\n")
+	writeCourseFixture(t, root, "OLD", "code: OLD\ncanvas:\n  id: 1\n  sources: [assignments]\n")
 	writeCourseFixture(t, root, "ABSENT", "code: ABSENT\ncanvas:\n  id: 3\n  sources: [pages]\n")
 	sentinel := filepath.Join(root, "courses", "OLD", "state", "keep")
 	if err := os.MkdirAll(filepath.Dir(sentinel), 0o755); err != nil {
@@ -36,7 +36,7 @@ func TestConfigureCanvasCoursesReconcilesOnlyVisibleSelection(t *testing.T) {
 	}
 
 	old, err := config.LoadCourse(root, "OLD")
-	if err != nil || old.Canvas != nil || old.Jira == nil {
+	if err != nil || old.Canvas != nil || old.Code != "OLD" {
 		t.Fatalf("OLD = %+v, %v", old, err)
 	}
 	if got, err := os.ReadFile(sentinel); err != nil || string(got) != "preserve" {
@@ -176,7 +176,7 @@ func TestConfigureCanvasCoursesSuffixesConflictingCourseCode(t *testing.T) {
 
 func TestConfigureCanvasCoursesDoesNotGraftOntoNonCanvasCourse(t *testing.T) {
 	root := initializedVault(t, "test")
-	writeCourseFixture(t, root, "CS1010", "code: CS1010\njira:\n  epic: TODO-1\n")
+	writeCourseFixture(t, root, "CS1010", "code: CS1010\n")
 
 	result, err := ConfigureCanvasCourses(root, []CanvasCourseChoice{{ID: "2", Code: "CS1010"}}, []string{"2"})
 	if err != nil {
@@ -186,7 +186,7 @@ func TestConfigureCanvasCoursesDoesNotGraftOntoNonCanvasCourse(t *testing.T) {
 		t.Fatalf("result = %+v", result)
 	}
 	original, err := config.LoadCourse(root, "CS1010")
-	if err != nil || original.Canvas != nil || original.Jira == nil {
+	if err != nil || original.Canvas != nil || original.Code != "CS1010" {
 		t.Fatalf("original = %+v, %v", original, err)
 	}
 }

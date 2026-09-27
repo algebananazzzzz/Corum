@@ -5,12 +5,11 @@ import (
 	"path/filepath"
 )
 
-// Course is courses/<code>/course.yaml.
+// Course is courses/<code>/course.yaml. The code also names the course in the
+// task tracker (epic, label or task list), so trackers need no per-course mapping.
 type Course struct {
-	Code        string             `yaml:"code"`
-	Canvas      *CanvasCourse      `yaml:"canvas,omitempty"`
-	Jira        *JiraCourse        `yaml:"jira,omitempty"`
-	GoogleTasks *GoogleTasksCourse `yaml:"google_tasks,omitempty"`
+	Code   string        `yaml:"code"`
+	Canvas *CanvasCourse `yaml:"canvas,omitempty"`
 }
 
 type CanvasCourse struct {
@@ -18,14 +17,6 @@ type CanvasCourse struct {
 	Name    string            `yaml:"name,omitempty"`
 	Sources []string          `yaml:"sources"`
 	Folders map[string]string `yaml:"folders,omitempty"`
-}
-
-type JiraCourse struct {
-	Epic string `yaml:"epic"`
-}
-
-type GoogleTasksCourse struct {
-	ListID string `yaml:"list_id"`
 }
 
 // LoadCourse reads one course configuration below root without changing the vault.

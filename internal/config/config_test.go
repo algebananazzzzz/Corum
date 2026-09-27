@@ -13,10 +13,18 @@ const validWorkspace = `workspace:
   term: AY2026/27 Semester 1
 canvas:
   url: https://canvas.example.edu
-jira:
-  cloud_id: opaque-cloud
-  project: TODO
+task_tracker: kaneo
+kaneo:
+  url: https://kaneo.example.test
+  project: TOD
 `
+
+const jiraBlock = `jira:
+  site: https://study.atlassian.net
+  project: STUDY
+`
+
+var jiraWorkspace = strings.Replace(strings.Replace(validWorkspace, "task_tracker: kaneo", "task_tracker: jira", 1), "kaneo:\n  url: https://kaneo.example.test\n  project: TOD\n", jiraBlock, 1)
 
 const validCourse = `code: MATH101
 canvas:
@@ -24,8 +32,6 @@ canvas:
   sources: [announcements, assignments]
   folders:
     Course Materials: lectures
-jira:
-  epic: TODO-1
 `
 
 func writeConfig(t *testing.T, root, course, contents string) {
@@ -49,8 +55,18 @@ func TestLoadWorkspaceAcceptsCurrentShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Canvas == nil || got.Jira == nil {
+	if got.Canvas == nil || got.Kaneo == nil || got.TaskTracker != "kaneo" {
 		t.Fatalf("LoadWorkspace() = %+v", got)
+	}
+	writeConfig(t, root, "", jiraWorkspace)
+	got, err = LoadWorkspace(root)
+	if err != nil || got.Jira == nil || got.Jira.Project != "STUDY" || got.Kaneo != nil {
+		t.Fatalf("LoadWorkspace(jira) = %+v, %v", got, err)
+	}
+	writeConfig(t, root, "", strings.Replace(jiraWorkspace, "  project: STUDY\n", "", 1))
+	got, err = LoadWorkspace(root)
+	if err != nil || got.Jira == nil || got.Jira.Project != "" {
+		t.Fatalf("LoadWorkspace(jira before setup) = %+v, %v", got, err)
 	}
 }
 
@@ -83,8 +99,18 @@ func TestLoadWorkspaceValidatesTimezoneOriginIdentifiersAndPaths(t *testing.T) {
 	cases := map[string]string{
 		"timezone":       strings.Replace(validWorkspace, "Asia/Singapore", "Moon/Base", 1),
 		"origin":         strings.Replace(validWorkspace, "https://canvas.example.edu", "https://user:pass@canvas.example.edu/path", 1),
-		"project":        strings.Replace(validWorkspace, "project: TODO", "project: lower", 1),
-		"credential key": strings.Replace(validWorkspace, "project: TODO", "token: never", 1),
+		"credential key": strings.Replace(validWorkspace, "project: TOD", "token: never", 1),
+		"kaneo url":      strings.Replace(validWorkspace, "https://kaneo.example.test", "http://kaneo.example.test", 1),
+		"kaneo slug":     strings.Replace(validWorkspace, "project: TOD\n", "project: T O D\n", 1),
+		"tracker":        strings.Replace(validWorkspace, "task_tracker: kaneo", "task_tracker: trello", 1),
+		"kaneo missing":  strings.Replace(validWorkspace, "kaneo:\n  url: https://kaneo.example.test\n  project: TOD\n", "", 1),
+		"inactive jira":  validWorkspace + jiraBlock,
+		"jira project":   strings.Replace(jiraWorkspace, "project: STUDY", "project: lower", 1),
+		"jira site":      strings.Replace(jiraWorkspace, "https://study.atlassian.net", "study.atlassian.net", 1),
+		"jira no site":   strings.Replace(jiraWorkspace, "  site: https://study.atlassian.net\n", "", 1),
+		"jira missing":   strings.Replace(jiraWorkspace, jiraBlock, "", 1),
+		"cloud id":       strings.Replace(jiraWorkspace, "site: https://study.atlassian.net", "cloud_id: opaque-cloud", 1),
+		"inactive kaneo": strings.Replace(validWorkspace, "task_tracker: kaneo", "task_tracker: google_tasks", 1),
 	}
 	for name, contents := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -97,10 +123,11 @@ func TestLoadWorkspaceValidatesTimezoneOriginIdentifiersAndPaths(t *testing.T) {
 	}
 }
 
-func TestLoadCourseValidatesIssueIdentifierAndPaths(t *testing.T) {
+func TestLoadCourseValidatesPathsAndRejectsTrackerMappings(t *testing.T) {
 	cases := map[string]string{
-		"issue":            strings.Replace(validCourse, "TODO-1", "todo-0", 1),
 		"folder traversal": strings.Replace(validCourse, "lectures", "../lectures", 1),
+		"jira epic":        validCourse + "jira:\n  epic: TODO-1\n",
+		"google list":      validCourse + "google_tasks:\n  list_id: list-1\n",
 	}
 	for name, contents := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -142,9 +169,9 @@ func TestLoadCourseRejectsEscapingAndMismatchedCodes(t *testing.T) {
 func TestLoadRejectsNullServiceBlocksAndMissingCanvasSources(t *testing.T) {
 	for name, contents := range map[string]string{
 		"workspace canvas null": strings.Replace(validWorkspace, "canvas:\n  url: https://canvas.example.edu", "canvas: null", 1),
-		"workspace jira null":   strings.Replace(validWorkspace, "jira:\n  cloud_id: opaque-cloud\n  project: TODO", "jira: null", 1),
+		"workspace jira null":   strings.Replace(jiraWorkspace, "jira:\n  site: https://study.atlassian.net\n  project: STUDY", "jira: null", 1),
+		"workspace kaneo null":  strings.Replace(validWorkspace, "kaneo:\n  url: https://kaneo.example.test\n  project: TOD", "kaneo: null", 1),
 		"course canvas null":    strings.Replace(validCourse, "canvas:\n  id: 1\n  sources: [announcements, assignments]\n  folders:\n    Course Materials: lectures", "canvas: null", 1),
-		"course jira null":      strings.Replace(validCourse, "jira:\n  epic: TODO-1", "jira: null", 1),
 		"course sources absent": strings.Replace(validCourse, "  sources: [announcements, assignments]\n", "", 1),
 		"course sources null":   strings.Replace(validCourse, "sources: [announcements, assignments]", "sources: null", 1),
 	} {

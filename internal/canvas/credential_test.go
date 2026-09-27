@@ -90,7 +90,7 @@ func TestSaveCredentialUsesPrivateModesAndGitignore(t *testing.T) {
 		t.Fatalf("file mode = %v, %v", info.Mode(), err)
 	}
 	guard, err := os.ReadFile(filepath.Join(filepath.Dir(path), ".gitignore"))
-	if err != nil || !strings.Contains(string(guard), "*") {
+	if err != nil || !strings.Contains(string(guard), "/"+filepath.Base(path)+"\n") {
 		t.Fatalf("gitignore guard = %q, %v", guard, err)
 	}
 }

@@ -7,7 +7,7 @@
     "workspace"
   ],
   "properties": {
-    "task_tracker": {"enum": ["none", "jira", "google_tasks"]},
+    "task_tracker": {"enum": ["none", "jira", "kaneo", "google_tasks"]},
     "workspace": {
       "type": "object",
       "additionalProperties": false,
@@ -44,19 +44,107 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "cloud_id",
-        "project"
+        "site"
       ],
       "properties": {
-        "cloud_id": {
+        "site": {
           "type": "string",
-          "pattern": "^\\S+$"
+          "format": "uri",
+          "pattern": "^https://[^/?#@]+/?$"
         },
         "project": {
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]*$"
         }
       }
+    },
+    "kaneo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://[^/?#@]+/?$"
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^\\S+$"
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "task_tracker"
+        ],
+        "properties": {
+          "task_tracker": {
+            "const": "jira"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "jira"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "task_tracker"
+        ],
+        "properties": {
+          "task_tracker": {
+            "const": "kaneo"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "kaneo"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "jira"
+        ]
+      },
+      "then": {
+        "required": [
+          "task_tracker"
+        ],
+        "properties": {
+          "task_tracker": {
+            "const": "jira"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kaneo"
+        ]
+      },
+      "then": {
+        "required": [
+          "task_tracker"
+        ],
+        "properties": {
+          "task_tracker": {
+            "const": "kaneo"
+          }
+        }
+      }
+    }
+  ]
 }

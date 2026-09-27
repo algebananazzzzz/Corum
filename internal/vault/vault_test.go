@@ -19,7 +19,7 @@ func testWorkspace() config.Workspace {
 
 func testAssets(label string) fs.FS {
 	return fstest.MapFS{
-		"agent-kit/AGENTS.base.md":                          &fstest.MapFile{Data: []byte(label + " agents")},
+		"agent-kit/AGENTS.base.md":                          &fstest.MapFile{Data: []byte(label + " agents\n" + UserSectionMarker + "\n")},
 		"agent-kit/skills/example/SKILL.md":                 &fstest.MapFile{Data: []byte(label + " skill")},
 		"agent-kit/assets/calendar/ay2026_27_semester_1.md": &fstest.MapFile{Data: []byte(label + " semester one")},
 		"agent-kit/assets/calendar/ay2026_27_semester_2.md": &fstest.MapFile{Data: []byte(label + " semester two")},
@@ -125,12 +125,12 @@ func TestWriteCourseReplacesExistingCourseConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	course.Jira = &config.JiraCourse{Epic: "STUDY-1"}
+	course.Canvas.Sources = []string{"assignments", "files"}
 	if err := WriteCourse(root, course); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := config.LoadCourse(root, "CS3103")
-	if err != nil || stored.Jira == nil || stored.Jira.Epic != "STUDY-1" {
+	if err != nil || len(stored.Canvas.Sources) != 2 || stored.Canvas.Sources[1] != "files" {
 		t.Fatalf("stored = %+v, err = %v", stored, err)
 	}
 }
@@ -138,11 +138,16 @@ func TestWriteCourseReplacesExistingCourseConfiguration(t *testing.T) {
 func TestRefreshToolkitPreservesUserContentAndRemovesRetiredSkills(t *testing.T) {
 	root := initializedVault(t, "old")
 	for relative, contents := range map[string]string{
-		"skills/custom/SKILL.md":          "user skill",
-		"courses/CS101/wiki/index.md":     "user notes",
-		"skills/authoring-wiki/SKILL.md":  "retired skill",
-		"skills/drawio-diagrams/SKILL.md": "retired skill",
-		"skills/linting-wiki/SKILL.md":    "retired skill",
+		"skills/custom/SKILL.md":                            "user skill",
+		"courses/CS101/wiki/index.md":                       "user notes",
+		"skills/authoring-wiki/SKILL.md":                    "retired skill",
+		"skills/drawio-diagrams/SKILL.md":                   "retired skill",
+		"skills/linting-wiki/SKILL.md":                      "retired skill",
+		"skills/scope-course/SKILL.md":                      "retired skill",
+		"skills/sync-course/references/error-handling.md":   "retired reference",
+		"skills/sync-course/references/tracker-snapshot.md": "retired reference",
+		"skills/sync-course/references/custom.md":           "user reference",
+		"AGENTS.md": "old agents\n" + UserSectionMarker + "\nmy own rule\n",
 	} {
 		path := filepath.Join(root, relative)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -156,19 +161,20 @@ func TestRefreshToolkitPreservesUserContentAndRemovesRetiredSkills(t *testing.T)
 		t.Fatal(err)
 	}
 	for relative, want := range map[string]string{
-		"AGENTS.md":                   "new agents",
-		"skills/example/SKILL.md":     "new skill",
-		"skills/custom/SKILL.md":      "user skill",
-		"courses/CS101/wiki/index.md": "user notes",
+		"AGENTS.md":                               "new agents\n" + UserSectionMarker + "\nmy own rule\n",
+		"skills/example/SKILL.md":                 "new skill",
+		"skills/custom/SKILL.md":                  "user skill",
+		"courses/CS101/wiki/index.md":             "user notes",
+		"skills/sync-course/references/custom.md": "user reference",
 	} {
 		got, err := os.ReadFile(filepath.Join(root, relative))
 		if err != nil || string(got) != want {
 			t.Fatalf("%s = %q, %v", relative, got, err)
 		}
 	}
-	for _, name := range []string{"authoring-wiki", "drawio-diagrams", "linting-wiki"} {
-		if _, err := os.Stat(filepath.Join(root, "skills", name)); !os.IsNotExist(err) {
-			t.Fatalf("retired skill %s still installed: %v", name, err)
+	for _, retired := range []string{"skills/authoring-wiki", "skills/drawio-diagrams", "skills/linting-wiki", "skills/scope-course", "skills/sync-course/references/error-handling.md", "skills/sync-course/references/tracker-snapshot.md"} {
+		if _, err := os.Stat(filepath.Join(root, retired)); !os.IsNotExist(err) {
+			t.Fatalf("retired %s still installed: %v", retired, err)
 		}
 	}
 }
@@ -188,5 +194,15 @@ func TestRefreshToolkitRejectsEscapingSkillPath(t *testing.T) {
 	entries, err := os.ReadDir(outside)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("outside files = %v, %v", entries, err)
+	}
+}
+
+func TestMergeAgentsRequiresMarkerAndStartsFromBase(t *testing.T) {
+	base := []byte("managed\n" + UserSectionMarker + "\n## Starter\n")
+	if got, err := mergeAgents(base, nil); err != nil || string(got) != string(base) {
+		t.Fatalf("fresh install = %q, %v", got, err)
+	}
+	if _, err := mergeAgents([]byte("managed only\n"), nil); err == nil {
+		t.Fatal("accepted a base without the user section marker")
 	}
 }

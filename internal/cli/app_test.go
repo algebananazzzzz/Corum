@@ -13,7 +13,6 @@ import (
 
 	"github.com/algebananazzzzz/Corum/internal/canvas"
 	"github.com/algebananazzzzz/Corum/internal/config"
-	googletasks "github.com/algebananazzzzz/Corum/internal/google"
 )
 
 func TestRunVersionPrintsBuildVersion(t *testing.T) {
@@ -30,31 +29,6 @@ func TestRunRejectsUnknownCommand(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := Run(context.Background(), []string{"unknown"}, nil, &out, &errOut); code != 2 {
 		t.Fatalf("Run code = %d", code)
-	}
-}
-
-func TestRunGoogleTasksSyncUsesConfiguredCourseList(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	root := filepath.Join(t.TempDir(), "vault")
-	if code := Run(context.Background(), []string{"init", "--defaults", root}, nil, io.Discard, io.Discard); code != 0 {
-		t.Fatalf("init code = %d", code)
-	}
-	writeCourse(t, root, "CS3103", "code: CS3103\ngoogle_tasks:\n  list_id: list-1\n")
-	t.Chdir(root)
-	oldSync := syncGoogleTasks
-	t.Cleanup(func() { syncGoogleTasks = oldSync })
-	syncGoogleTasks = func(_ context.Context, gotRoot, course, listID string, _ googletasks.SyncOptions) (googletasks.SyncResult, error) {
-		if gotRoot != root || course != "CS3103" || listID != "list-1" {
-			t.Fatalf("sync args = %q, %q, %q", gotRoot, course, listID)
-		}
-		return googletasks.SyncResult{Course: course, ListID: listID, TaskCount: 2, CachePath: "state/google-tasks.json"}, nil
-	}
-	var out, errOut bytes.Buffer
-	if code := Run(context.Background(), []string{"google", "sync-tasks", "CS3103"}, nil, &out, &errOut); code != 0 {
-		t.Fatalf("sync code = %d, stderr = %q", code, errOut.String())
-	}
-	if !strings.Contains(out.String(), `"task_count": 2`) {
-		t.Fatalf("output = %q", out.String())
 	}
 }
 
@@ -107,10 +81,10 @@ func TestRunDoctorOptionalPathDefaultsToWorkingDirectory(t *testing.T) {
 	}
 }
 
-func TestRunConfigureJiraRejectsInvalidVaultBeforeTTY(t *testing.T) {
+func TestRunConfigureTrackerRejectsInvalidVaultBeforeTTY(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := Run(context.Background(), []string{"configure", "jira", "/nonexistent/corum-vault"}, nil, &out, &errOut); code != 1 {
-		t.Fatalf("configure jira code = %d, stderr = %q", code, errOut.String())
+	if code := Run(context.Background(), []string{"configure", "tracker", "/nonexistent/corum-vault"}, nil, &out, &errOut); code != 1 {
+		t.Fatalf("configure tracker code = %d, stderr = %q", code, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "vault validation failed") {
 		t.Fatalf("stderr = %q", errOut.String())

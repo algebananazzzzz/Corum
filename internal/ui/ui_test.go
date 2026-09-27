@@ -12,7 +12,6 @@ import (
 
 	"github.com/algebananazzzzz/Corum/internal/canvas"
 	"github.com/algebananazzzzz/Corum/internal/config"
-	"github.com/algebananazzzzz/Corum/internal/jira"
 	"github.com/algebananazzzzz/Corum/internal/vault"
 )
 
@@ -87,122 +86,13 @@ func TestCourseChoicesAreReadableAndPreselectTrackedCourses(t *testing.T) {
 	}
 }
 
-type fakeJira struct {
-	resources []Resource
-	projects  map[string][]Project
-	err       error
-}
-
-func (j fakeJira) Resources(context.Context) ([]Resource, error) { return j.resources, j.err }
-func (j fakeJira) Projects(_ context.Context, cloudID string) ([]Project, error) {
-	return j.projects[cloudID], j.err
-}
-func (j fakeJira) Close() error { return nil }
-
 func uiAssets() fs.FS {
 	return fstest.MapFS{
-		"agent-kit/AGENTS.base.md":                          &fstest.MapFile{Data: []byte("agents")},
+		"agent-kit/AGENTS.base.md":                          &fstest.MapFile{Data: []byte("agents\n" + vault.UserSectionMarker + "\n")},
 		"agent-kit/skills/example/SKILL.md":                 &fstest.MapFile{Data: []byte("skill")},
 		"agent-kit/templates/template.md":                   &fstest.MapFile{Data: []byte("template")},
 		"agent-kit/assets/calendar/ay2026_27_semester_1.md": &fstest.MapFile{Data: []byte("semester one")},
 		"agent-kit/assets/calendar/ay2026_27_semester_2.md": &fstest.MapFile{Data: []byte("semester two")},
-	}
-}
-
-func TestJiraAuthWritesProjectSelection(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	root := filepath.Join(t.TempDir(), "vault")
-	workspace := config.Workspace{Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "Term"}, Canvas: &config.CanvasWorkspace{URL: "https://canvas.example.edu"}}
-	if err := vault.Initialize(root, workspace, uiAssets()); err != nil {
-		t.Fatal(err)
-	}
-	prompts := &scriptedPrompts{answers: []any{0, 0, true}}
-	var loadingMessages []string
-	deps := JiraAuthDependencies{
-		Prompts: prompts,
-		OpenJira: func(context.Context) (JiraSession, error) {
-			return fakeJira{resources: []Resource{{CloudID: "cloud", Name: "Site"}}, projects: map[string][]Project{"cloud": []Project{{Key: "TODO", Name: "Todo"}}}}, nil
-		},
-		SnapshotAuth: func() (func() error, error) { return func() error { return nil }, nil },
-		Write:        vault.WriteWorkspace,
-		Loading: func(ctx context.Context, message string, task func(context.Context) error) error {
-			loadingMessages = append(loadingMessages, message)
-			return task(ctx)
-		},
-	}
-	if err := RunJiraAuth(context.Background(), root, deps); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := strings.Join(loadingMessages, ","), "Complete Jira authentication in your browser…,Loading Jira sites…,Loading Jira projects…"; got != want {
-		t.Fatalf("loading messages = %q, want %q", got, want)
-	}
-	updated, err := config.LoadWorkspace(root)
-	if err != nil || updated.Jira == nil || updated.Jira.Project != "TODO" || updated.Jira.CloudID != "cloud" {
-		t.Fatalf("workspace = %+v, %v", updated, err)
-	}
-}
-
-func TestJiraAuthCancellationRestoresPriorState(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	root := filepath.Join(t.TempDir(), "vault")
-	workspace := config.Workspace{Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "Term"}, Canvas: &config.CanvasWorkspace{URL: "https://canvas.example.edu"}}
-	if err := vault.Initialize(root, workspace, uiAssets()); err != nil {
-		t.Fatal(err)
-	}
-	before, err := os.ReadFile(config.WorkspacePath(root))
-	if err != nil {
-		t.Fatal(err)
-	}
-	restored := false
-	writeCalled := false
-	prompts := &scriptedPrompts{answers: []any{0, 0, false}}
-	err = RunJiraAuth(context.Background(), root, JiraAuthDependencies{
-		Prompts: prompts,
-		OpenJira: func(context.Context) (JiraSession, error) {
-			return fakeJira{resources: []Resource{{CloudID: "cloud", Name: "Site"}}, projects: map[string][]Project{"cloud": []Project{{Key: "TODO", Name: "Todo"}}}}, nil
-		},
-		SnapshotAuth: func() (func() error, error) { return func() error { restored = true; return nil }, nil },
-		Write:        func(string, config.Workspace) error { writeCalled = true; return nil },
-	})
-	if !errors.Is(err, ErrCancelled) || !restored || writeCalled {
-		t.Fatalf("RunJiraAuth() = %v, restored = %v, write = %v", err, restored, writeCalled)
-	}
-	after, err := os.ReadFile(config.WorkspacePath(root))
-	if err != nil || string(after) != string(before) {
-		t.Fatalf("corum.yaml changed: %q, %v", after, err)
-	}
-}
-
-func TestJiraAuthJoinsRollbackError(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	root := filepath.Join(t.TempDir(), "vault")
-	workspace := config.Workspace{Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "Term"}, Canvas: &config.CanvasWorkspace{URL: "https://canvas.example.edu"}}
-	if err := vault.Initialize(root, workspace, uiAssets()); err != nil {
-		t.Fatal(err)
-	}
-	restored := false
-	restoreErr := errors.New("injected restore failure")
-	err := RunJiraAuth(context.Background(), root, JiraAuthDependencies{
-		Prompts: &scriptedPrompts{},
-		OpenJira: func(context.Context) (JiraSession, error) {
-			return nil, errors.New("injected open failure")
-		},
-		SnapshotAuth: func() (func() error, error) {
-			return func() error {
-				restored = true
-				return restoreErr
-			}, nil
-		},
-		Write: func(string, config.Workspace) error { return nil },
-	})
-	if err == nil {
-		t.Fatal("RunJiraAuth() succeeded")
-	}
-	if !restored {
-		t.Fatal("restore was not attempted")
-	}
-	if !strings.Contains(err.Error(), "injected open failure") || !strings.Contains(err.Error(), "injected restore failure") {
-		t.Fatalf("error = %v, want both open and restore errors", err)
 	}
 }
 
@@ -265,25 +155,58 @@ func TestCanvasAuthSavesTokenAndTracksSelectedCourses(t *testing.T) {
 	}
 }
 
-func TestCanvasAuthRefusesInvalidToken(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	root := filepath.Join(t.TempDir(), "vault")
-	workspace := config.Workspace{Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "Term"}, Canvas: &config.CanvasWorkspace{URL: "https://canvas.example.edu"}}
-	if err := vault.Initialize(root, workspace, uiAssets()); err != nil {
-		t.Fatal(err)
-	}
-	deps := CanvasAuthDependencies{
-		Prompts: &scriptedPrompts{answers: []any{"bad-token"}},
-		Root:    root,
-		Load:    func(config.Workspace, string) (*canvas.Client, error) { return &canvas.Client{}, nil },
-		Save:    func(token string) error { return canvas.SaveCredential(root, token) },
-		Clear:   func() error { _, err := canvas.ClearCredential(root); return err },
-		Courses: func(context.Context, *canvas.Client) ([]canvas.CourseInfo, error) {
-			return nil, errors.New("401 Unauthorized")
-		},
-	}
-	if err := RunCanvasAuth(context.Background(), deps); err == nil || !strings.Contains(err.Error(), "401 Unauthorized") {
-		t.Fatalf("RunCanvasAuth() = %v, want the token rejection", err)
+func TestCanvasAuthAsksAgainUntilCanvasAcceptsToken(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		answers  []any
+		courses  error
+		wantErr  string
+		wantSave string
+	}{
+		{"retry succeeds", []any{"bad-token", " ", "good-token", []int{0}}, nil, "", "good-token"},
+		{"cancel after rejection", []any{"bad-token", ErrCancelled}, nil, ErrCancelled.Error(), ""},
+		{"network failure stops", []any{"good-token"}, errors.New("dial tcp: no route to host"), "no route to host", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			root := filepath.Join(t.TempDir(), "vault")
+			workspace := config.Workspace{Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "Term"}, Canvas: &config.CanvasWorkspace{URL: "https://canvas.example.edu"}}
+			if err := vault.Initialize(root, workspace, uiAssets()); err != nil {
+				t.Fatal(err)
+			}
+			prompts := &scriptedPrompts{answers: tc.answers}
+			tried := ""
+			deps := CanvasAuthDependencies{
+				Prompts: prompts,
+				Root:    root,
+				Load: func(_ config.Workspace, token string) (*canvas.Client, error) {
+					tried = token
+					return &canvas.Client{}, nil
+				},
+				Save:  func(token string) error { return canvas.SaveCredential(root, token) },
+				Clear: func() error { _, err := canvas.ClearCredential(root); return err },
+				Courses: func(context.Context, *canvas.Client) ([]canvas.CourseInfo, error) {
+					if tc.courses != nil {
+						return nil, tc.courses
+					}
+					if tried != "good-token" {
+						return nil, &canvas.HTTPError{Status: 401, URL: "https://canvas.example.edu/api/v1/courses"}
+					}
+					return []canvas.CourseInfo{{ID: "7", CourseCode: "CS3103", Name: "Networks", Current: true}}, nil
+				},
+			}
+			err := RunCanvasAuth(context.Background(), deps)
+			if tc.wantErr == "" && err != nil || tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("RunCanvasAuth() = %v, want %q", err, tc.wantErr)
+			}
+			if prompts.index != len(tc.answers) {
+				t.Fatalf("used %d of %d answers", prompts.index, len(tc.answers))
+			}
+			saved, _ := canvas.LoadCredential(root)
+			if saved != tc.wantSave {
+				t.Fatalf("saved token = %q, want %q", saved, tc.wantSave)
+			}
+		})
 	}
 }
 
@@ -376,131 +299,19 @@ func TestCanvasAuthLeavesTrackingUntouchedWhenNoCurrentCoursesExist(t *testing.T
 	}
 }
 
-func TestRunAuthConfiguresDisabledServices(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	root := filepath.Join(t.TempDir(), "vault")
-	workspace := config.Workspace{Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "Term"}, Canvas: &config.CanvasWorkspace{URL: "https://canvas.example.edu"}}
-	if err := vault.Initialize(root, workspace, uiAssets()); err != nil {
-		t.Fatal(err)
-	}
-	deps := AuthDependencies{
-		Prompts: &scriptedPrompts{answers: []any{false, true}},
-		Canvas: CanvasAuthDependencies{
-			Prompts: &scriptedPrompts{answers: []any{"tok", []int{0}}},
-			Root:    root,
-			Load:    func(config.Workspace, string) (*canvas.Client, error) { return &canvas.Client{}, nil },
-			Save:    func(token string) error { return canvas.SaveCredential(root, token) },
-			Clear:   func() error { _, err := canvas.ClearCredential(root); return err },
-			Courses: func(context.Context, *canvas.Client) ([]canvas.CourseInfo, error) {
-				return []canvas.CourseInfo{{ID: "1", CourseCode: "CS101", Name: "Intro", Current: true}}, nil
-			},
-		},
-	}
-	if err := RunAuth(context.Background(), root, deps); err != nil {
-		t.Fatal(err)
-	}
-	updated, err := config.LoadWorkspace(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.Jira != nil {
-		t.Fatalf("workspace = %+v", updated)
-	}
-}
-
-func TestRunAuthInstallsMCPConfigWhenJiraIsEnabled(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "vault")
-	workspace := config.Workspace{
-		Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "Term"},
-		Jira:      &config.JiraWorkspace{CloudID: "cloud-1", Project: "TODO"},
-	}
-	if err := vault.Initialize(root, workspace, uiAssets()); err != nil {
-		t.Fatal(err)
-	}
-	deps := AuthDependencies{
-		Prompts: &scriptedPrompts{answers: []any{true, false}},
-		RunJira: func(context.Context, string, JiraAuthDependencies) error { return nil },
-	}
-	if err := RunAuth(context.Background(), root, deps); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{filepath.Join(root, ".codex", "config.toml"), filepath.Join(root, ".mcp.json")} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("combined configure did not install %s: %v", path, err)
-		}
-	}
-}
-
 func TestNonTTYGuidanceIsDeterministic(t *testing.T) {
 	if got := NonTTYGuidance("init"); got != "interactive init requires a terminal; use corum init --defaults PATH" {
 		t.Fatalf("NonTTYGuidance() = %q", got)
 	}
 }
 
-func TestRunAuthNoneDisablesExistingJira(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "vault")
-	workspace := config.Workspace{Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "Term"}, Jira: &config.JiraWorkspace{CloudID: "cloud", Project: "TODO"}}
-	if err := vault.Initialize(root, workspace, uiAssets()); err != nil {
-		t.Fatal(err)
+func TestTokenFingerprintHidesTheSecret(t *testing.T) {
+	token := "21450~abcdefghijklmnopqrstuvwxyz0123456789"
+	got := tokenFingerprint(token)
+	if got != "42 characters, 21450~…6789" || strings.Contains(got, "abcdefghij") {
+		t.Fatalf("fingerprint = %q", got)
 	}
-	if err := jira.ConfigureProjectMCP(root); err != nil {
-		t.Fatal(err)
-	}
-	deps := AuthDependencies{Prompts: &scriptedPrompts{answers: []any{false, false}}, RunJira: func(context.Context, string, JiraAuthDependencies) error {
-		return errors.New("Jira must not authenticate for None")
-	}}
-	if err := RunAuth(context.Background(), root, deps); err != nil {
-		t.Fatal(err)
-	}
-	updated, err := config.LoadWorkspace(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.Jira != nil {
-		t.Fatal("None left Jira enabled")
-	}
-	for _, path := range []string{filepath.Join(root, ".codex", "config.toml"), filepath.Join(root, ".mcp.json")} {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(data), "atlassian-jira") {
-			t.Fatalf("None left Jira MCP configured in %s", path)
-		}
-	}
-}
-
-func (p *scriptedPrompts) ConfigureServices(current ServiceSettings) (ServiceSettings, error) {
-	jiraEnabled, err := p.Confirm("Jira Integration", current.Integration == "jira")
-	if err != nil {
-		return ServiceSettings{}, err
-	}
-	integration := "none"
-	if jiraEnabled {
-		integration = "jira"
-	}
-	return ServiceSettings{Integration: integration}, nil
-}
-
-func TestRunAuthCancellationKeepsServiceSettings(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "vault")
-	workspace := config.Workspace{Workspace: config.WorkspaceDetails{Timezone: "Asia/Singapore", Term: "Term"}, Jira: &config.JiraWorkspace{CloudID: "cloud", Project: "TODO"}}
-	if err := vault.Initialize(root, workspace, uiAssets()); err != nil {
-		t.Fatal(err)
-	}
-	before, err := os.ReadFile(config.WorkspacePath(root))
-	if err != nil {
-		t.Fatal(err)
-	}
-	deps := AuthDependencies{Prompts: &scriptedPrompts{answers: []any{ErrCancelled}}}
-	if err := RunAuth(context.Background(), root, deps); !errors.Is(err, ErrCancelled) {
-		t.Fatalf("cancellation: %v", err)
-	}
-	after, err := os.ReadFile(config.WorkspacePath(root))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(before) != string(after) {
-		t.Fatal("cancelled form changed workspace")
+	if got := tokenFingerprint("short"); got != "5 characters" {
+		t.Fatalf("short fingerprint = %q", got)
 	}
 }

@@ -145,3 +145,21 @@ func TestLoadingScreenUsesTheFullscreenFrame(t *testing.T) {
 		t.Fatalf("loading screen is not fullscreen:\n%s", view.Content)
 	}
 }
+
+func TestScreenTakesPasteOnceAndIgnoresClipboardShortcut(t *testing.T) {
+	value := ""
+	var model tea.Model = NewScreen("Corum", huh.NewForm(huh.NewGroup(huh.NewInput().Title("Canvas API token").Value(&value))))
+	model.Init()
+	ctrlV := tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl}
+	if ctrlV.String() != "ctrl+v" {
+		t.Fatalf("ctrl+v key = %q", ctrlV.String())
+	}
+	model, cmd := model.Update(ctrlV)
+	if cmd != nil {
+		t.Fatal("ctrl+v issued a clipboard read that would repeat the terminal's paste")
+	}
+	model, _ = model.Update(tea.PasteMsg{Content: "21450~token"})
+	if value != "21450~token" {
+		t.Fatalf("value = %q, want the paste exactly once", value)
+	}
+}
