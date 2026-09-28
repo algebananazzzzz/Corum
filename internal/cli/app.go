@@ -84,10 +84,10 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				_ = ui.ShowNotice("Corum Setup", "Setup cancelled. No vault was created.", in, out)
 				return 1
 			}
-			_ = ui.ShowError("Corum Setup", "Could not create the vault. Nothing was left behind; run corum init again.", err, in, out)
+			_ = ui.ShowError("Corum Setup", "An unexpected error occurred. Vault creation cancelled; run corum init again.", err, in, out)
 			return 1
 		}
-		_ = ui.ShowNotice("Corum Setup", "Vault ready at "+created+". Open your agent there and ask it to sync all your courses.", in, out)
+		_ = ui.ShowNotice("Corum Setup", "Vault ready at "+created+". Run `cd "+created+"`, start Claude Code or Codex, and send: sync all courses", in, out)
 		return 0
 	}
 	if code, handled := runConfigure(ctx, args, in, out, errOut); handled {

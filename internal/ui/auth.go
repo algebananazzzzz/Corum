@@ -71,18 +71,18 @@ func RunCanvasAuth(ctx context.Context, deps CanvasAuthDependencies) (err error)
 	// Setup must not continue without a working token, so a rejected or blank
 	// token asks again, with the reason, until Canvas accepts one or the user
 	// cancels.
-	guidance := "Paste a token from Canvas Settings → Approved Integrations."
+	guidance := canvasTokenGuidance(workspace.Canvas.URL)
 	var client *canvas.Client
 	var courses []canvas.CourseInfo
 	for {
 		if token == "" {
-			token, err = withDescription(deps.Prompts, guidance).Password("Canvas API token", "")
+			token, err = withDescription(deps.Prompts, guidance).Password("Connect Canvas", "")
 			if err != nil {
 				return promptError(err)
 			}
 			token = strings.TrimSpace(token)
 			if token == "" {
-				guidance = "A token is required. Paste one from Canvas Settings → Approved Integrations."
+				guidance = "A token is required.\n" + canvasTokenGuidance(workspace.Canvas.URL)
 				continue
 			}
 		}
@@ -102,7 +102,7 @@ func RunCanvasAuth(ctx context.Context, deps CanvasAuthDependencies) (err error)
 		if !errors.As(err, &httpErr) || !httpErr.Unauthorized() {
 			return err
 		}
-		guidance = fmt.Sprintf("Canvas rejected that token (HTTP %d). Corum received %s. Paste a new one from Canvas Settings → Approved Integrations.", httpErr.Status, tokenFingerprint(token))
+		guidance = "Canvas rejected that token. Please retry with a new valid token generated from Canvas Settings → Approved Integrations."
 		token = ""
 	}
 	newToken := token != storedToken
@@ -126,7 +126,7 @@ func RunCanvasAuth(ctx context.Context, deps CanvasAuthDependencies) (err error)
 		return err
 	}
 	choices := courseChoices(current, tracked)
-	selected, err := withDescription(deps.Prompts, "Choose the courses to sync into this vault.").MultiSelect("Select current Canvas courses to track", choices)
+	selected, err := withDescription(deps.Prompts, "Choose courses to keep track in this vault").MultiSelect("Select current Canvas courses", choices)
 	if err != nil {
 		return promptError(err)
 	}
@@ -184,11 +184,10 @@ func courseChoices(courses []canvas.CourseInfo, tracked map[string]bool) []Choic
 	return choices
 }
 
-// tokenFingerprint describes a pasted token without revealing it, so a paste
-// that arrived truncated or altered is visible to the user.
-func tokenFingerprint(token string) string {
-	if len(token) <= 12 {
-		return fmt.Sprintf("%d characters", len(token))
-	}
-	return fmt.Sprintf("%d characters, %s…%s", len(token), token[:6], token[len(token)-4:])
+// canvasTokenGuidance is the one place that tells users how to get a token.
+func canvasTokenGuidance(canvasURL string) string {
+	return "To connect your Canvas account:\n" +
+		"1. Open " + canvasURL + "/profile/settings\n" +
+		"2. Under Approved Integrations, choose New Access Token\n" +
+		"3. Create the token and paste it below"
 }

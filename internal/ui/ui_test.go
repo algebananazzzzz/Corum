@@ -304,14 +304,3 @@ func TestNonTTYGuidanceIsDeterministic(t *testing.T) {
 		t.Fatalf("NonTTYGuidance() = %q", got)
 	}
 }
-
-func TestTokenFingerprintHidesTheSecret(t *testing.T) {
-	token := "21450~abcdefghijklmnopqrstuvwxyz0123456789"
-	got := tokenFingerprint(token)
-	if got != "42 characters, 21450~…6789" || strings.Contains(got, "abcdefghij") {
-		t.Fatalf("fingerprint = %q", got)
-	}
-	if got := tokenFingerprint("short"); got != "5 characters" {
-		t.Fatalf("short fingerprint = %q", got)
-	}
-}

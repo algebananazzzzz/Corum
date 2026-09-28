@@ -47,9 +47,6 @@ func RunSetup(ctx context.Context, root string, in io.Reader, out io.Writer) err
 		return err
 	}
 	if ws.Canvas != nil {
-		if err := ShowNotice("Connect Canvas", "Open "+ws.Canvas.URL+"/profile/settings → Approved Integrations → New Access Token. Create a token and paste it on the next screen. Corum will verify it and load your courses.", in, out); err != nil {
-			return err
-		}
 		if err := RunCanvasAuth(ctx, DefaultCanvasAuthDependencies(in, out, root)); err != nil {
 			return err
 		}
@@ -117,8 +114,7 @@ func (u configureUI) canvasConnection(ctx context.Context) error {
 		if ws.Canvas == nil {
 			return fmt.Errorf("Canvas is not configured")
 		}
-		_ = ShowNotice("Canvas connection", "Open "+ws.Canvas.URL+"/profile/settings and create an access token under Approved Integrations. Paste it into the next field.", u.in, u.out)
-		token, err := withDescription(u.prompts, "Paste a token from Canvas Settings → Approved Integrations.").Password("Canvas API token", "")
+		token, err := withDescription(u.prompts, canvasTokenGuidance(ws.Canvas.URL)).Password("Connect Canvas", "")
 		if err != nil {
 			return err
 		}
@@ -171,13 +167,13 @@ func configureTracker(root string, prompts Prompter) (string, error) {
 	}
 	providers := []string{"kaneo", "jira", "google_tasks", "none"}
 	choices := []Choice{
-		{Label: "Kaneo: one board, courses separated by label"},
-		{Label: "Jira: one epic per course"},
-		{Label: "Google Tasks: one list per course, visible on Calendar"},
+		{Label: "Kaneo"},
+		{Label: "Jira"},
+		{Label: "Google Tasks"},
 		{Label: "None / set up later"},
 		{Label: "Back"},
 	}
-	index, err := withDescription(prompts, "Current: "+trackerNames[activeTracker(ws)]).Select("Where would you like to track course tasks?", choices)
+	index, err := withDescription(prompts, "Current: "+trackerNames[activeTracker(ws)]).Select("Which task tracker would you like to use?", choices)
 	if err != nil {
 		return "", err
 	}
@@ -195,29 +191,33 @@ func configureTracker(root string, prompts Prompter) (string, error) {
 		if ws.Jira != nil {
 			current = ws.Jira.Site
 		}
-		site, err := trackerURL(prompts, "Jira site URL", "For example https://your-team.atlassian.net. Your agent picks the project with you on its first sync.", current)
+		site, err := trackerURL(prompts, "Jira site URL", "The URL to your Jira site", current)
 		if err != nil {
 			return "", err
 		}
 		if ws.Jira == nil || ws.Jira.Site != site {
 			ws.Jira = &config.JiraWorkspace{Site: site}
 		}
-		notice = "Jira selected. Open your agent in this vault, approve the atlassian-jira MCP server and sign in. On the first sync it proposes a project and an epic per course code for you to approve."
+		notice = mcpSetupNotice("Jira", "atlassian-jira")
 	case "kaneo":
 		current := ""
 		if ws.Kaneo != nil {
 			current = ws.Kaneo.URL
 		}
-		url, err := trackerURL(prompts, "Kaneo URL", "The address of your Kaneo instance. Your agent picks the project with you on its first sync.", current)
+		url, err := trackerURL(prompts, "Kaneo URL", "The URL to your Kaneo site", current)
 		if err != nil {
 			return "", err
 		}
 		if ws.Kaneo == nil || ws.Kaneo.URL != url {
 			ws.Kaneo = &config.KaneoWorkspace{URL: url}
 		}
-		notice = "Kaneo selected. Open your agent in this vault, approve the kaneo MCP server and sign in. On the first sync it proposes a project and a label per course code for you to approve."
+		notice = mcpSetupNotice("Kaneo", "kaneo")
 	case "google_tasks":
-		notice = "Google Tasks selected. Agents use the Google Workspace CLI; run `gws auth login -s tasks` once before syncing. On the first sync your agent proposes a task list per course code for you to approve."
+		notice = "To connect Google Tasks:\n" +
+			"1. Install the Google Workspace CLI: npm install -g @googleworkspace/cli\n" +
+			"2. Create the Google Cloud project and OAuth client (needs the gcloud CLI): gws auth setup\n" +
+			"3. Sign in and approve Tasks access in your browser: gws auth login -s tasks\n" +
+			"4. Confirm the connection: gws auth status"
 	}
 	ws.TaskTracker = provider
 	if provider != "jira" {
@@ -250,4 +250,11 @@ func trackerURL(prompts Prompter, label, description, current string) (string, e
 		return "", err
 	}
 	return strings.TrimSuffix(strings.TrimSpace(url), "/"), nil
+}
+
+func mcpSetupNotice(name, server string) string {
+	return "To connect " + name + ":\n" +
+		"1. Start Claude Code or Codex in this vault\n" +
+		"2. Approve the " + server + " MCP server when prompted\n" +
+		"3. Sign in: run /mcp in Claude Code, or codex mcp login " + server + " in Codex"
 }
